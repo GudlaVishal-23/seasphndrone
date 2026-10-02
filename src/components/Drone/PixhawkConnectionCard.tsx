@@ -840,9 +840,9 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
                 <div className="mt-2.5 pt-2 border-t border-amber-500/30 text-xs text-amber-300 flex items-start space-x-2">
                   <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                   <div>
-                    <strong className="text-amber-200">ESP32 connector offline.</strong>
+                    <strong className="text-amber-200">Awaiting ESP32 Cloud Connection...</strong>
                     <div className="text-[11px] text-slate-300 mt-0.5">
-                      Cloud relay is online, but the local connector agent is not connected. Run <code>npm run connector:start</code> on the machine connected to the ESP32 Wi-Fi.
+                      Cloud relay is online and listening. Power on your ESP32-S3 with your Phone Hotspot enabled — it will dial directly into this cloud relay with no laptop required.
                     </div>
                   </div>
                 </div>

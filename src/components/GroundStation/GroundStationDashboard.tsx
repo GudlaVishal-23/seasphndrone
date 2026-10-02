@@ -17,6 +17,7 @@ import { missionEngine } from '../../services/missionEngine';
 import { AutonomousMissionStatusBar } from '../Mission/AutonomousMissionStatusBar';
 import { AutonomousMissionConfigModal } from '../Mission/AutonomousMissionConfigModal';
 import { LoiterTestMissionCard } from '../Mission/LoiterTestMissionCard';
+import { CircleTestMissionCard } from '../Mission/CircleTestMissionCard';
 import {
   Play,
   ShieldAlert,
@@ -301,6 +302,15 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
           {/* 5M LOITER TEST MISSION CONFIGURATION (Controlled Test)       */}
           {/* ============================================================ */}
           <LoiterTestMissionCard
+            telemetry={telemetry}
+            homePoint={homePoint}
+            pixhawkState={pixhawkState}
+          />
+
+          {/* ============================================================ */}
+          {/* AUTONOMOUS CIRCLE TEST MISSION (Configurable Diameter & Alt) */}
+          {/* ============================================================ */}
+          <CircleTestMissionCard
             telemetry={telemetry}
             homePoint={homePoint}
             pixhawkState={pixhawkState}

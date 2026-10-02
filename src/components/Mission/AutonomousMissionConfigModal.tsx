@@ -34,11 +34,15 @@ import {
   Info,
   Check,
   AlertOctagon,
-  Clock
+  Clock,
+  RotateCw
 } from 'lucide-react';
 import { loiterTestService } from '../../services/loiterTestService';
 import { LoiterTestState, LoiterTestValidation } from '../../types/loiterTest';
 import { LoiterTestPanel } from './LoiterTestPanel';
+import { circleTestService } from '../../services/circleTestService';
+import { CircleTestState, CircleTestValidation } from '../../types/circleTest';
+import { CircleTestPanel } from './CircleTestPanel';
 
 interface AutonomousMissionConfigModalProps {
   isOpen: boolean;
@@ -72,8 +76,8 @@ export const AutonomousMissionConfigModal: React.FC<AutonomousMissionConfigModal
   const [validation, setValidation] = useState<AutonomousMissionValidation>(missionEngine.validateMission());
   const [forceBypassChecks, setForceBypassChecks] = useState<boolean>(() => missionEngine.getForceBypassChecks());
 
-  // Mission Selection Tab: Standard Autonomous Search vs 5M_LOITER_TEST
-  const [activeMissionTab, setActiveMissionTab] = useState<'AUTONOMOUS_SEARCH' | '5M_LOITER_TEST'>('AUTONOMOUS_SEARCH');
+  // Mission Selection Tab: Standard Autonomous Search vs 5M_LOITER_TEST vs AUTONOMOUS_CIRCLE_TEST
+  const [activeMissionTab, setActiveMissionTab] = useState<'AUTONOMOUS_SEARCH' | '5M_LOITER_TEST' | 'AUTONOMOUS_CIRCLE_TEST'>('AUTONOMOUS_SEARCH');
   const [loiterState, setLoiterState] = useState<LoiterTestState>(loiterTestService.getState());
   const [loiterOperatorConfirmed, setLoiterOperatorConfirmed] = useState<boolean>(false);
   const [loiterExecutionError, setLoiterExecutionError] = useState<string | null>(null);
@@ -81,16 +85,63 @@ export const AutonomousMissionConfigModal: React.FC<AutonomousMissionConfigModal
     loiterTestService.getConfig().loiterDurationSeconds
   );
 
+  const [circleState, setCircleState] = useState<CircleTestState>(circleTestService.getState());
+  const [circleOperatorConfirmed, setCircleOperatorConfirmed] = useState<boolean>(false);
+  const [circleExecutionError, setCircleExecutionError] = useState<string | null>(null);
+  const [selectedCircleDiameter, setSelectedCircleDiameter] = useState<number>(
+    circleTestService.getConfig().circleDiameterMeters
+  );
+  const [selectedCircleAltitude, setSelectedCircleAltitude] = useState<number>(
+    circleTestService.getConfig().targetAltitudeMeters
+  );
+  const [selectedCircleLaps, setSelectedCircleLaps] = useState<number>(
+    circleTestService.getConfig().laps
+  );
+  const [selectedCircleDirection, setSelectedCircleDirection] = useState<'CW' | 'CCW'>(
+    circleTestService.getConfig().direction
+  );
+
   const handleLoiterDurationSelect = (sec: number) => {
     setSelectedLoiterDuration(sec);
     loiterTestService.setLoiterDuration(sec);
   };
 
+  const handleCircleDiameterSelect = (d: number) => {
+    setSelectedCircleDiameter(d);
+    circleTestService.setDiameter(d);
+  };
+
+  const handleCircleAltitudeSelect = (alt: number) => {
+    setSelectedCircleAltitude(alt);
+    circleTestService.setAltitude(alt);
+  };
+
+  const handleCircleLapsSelect = (laps: number) => {
+    setSelectedCircleLaps(laps);
+    circleTestService.setLaps(laps);
+  };
+
+  const handleCircleDirectionSelect = (dir: 'CW' | 'CCW') => {
+    setSelectedCircleDirection(dir);
+    circleTestService.setDirection(dir);
+  };
+
   useEffect(() => {
-    return loiterTestService.subscribeState(setLoiterState);
+    const unsubLoiter = loiterTestService.subscribeState(setLoiterState);
+    const unsubCircle = circleTestService.subscribeState(setCircleState);
+    return () => {
+      unsubLoiter();
+      unsubCircle();
+    };
   }, []);
 
   const loiterValidation: LoiterTestValidation = loiterTestService.validatePrerequisites(
+    telemetry,
+    pixhawkState,
+    homePoint
+  );
+
+  const circleValidation: CircleTestValidation = circleTestService.validatePrerequisites(
     telemetry,
     pixhawkState,
     homePoint
@@ -198,6 +249,27 @@ export const AutonomousMissionConfigModal: React.FC<AutonomousMissionConfigModal
     setLoiterExecutionError(null);
   };
 
+  const handleExecuteCircleTest = async () => {
+    setCircleExecutionError(null);
+    if (!circleOperatorConfirmed) {
+      setCircleOperatorConfirmed(true);
+    }
+    const res = await circleTestService.executeMission(telemetry, pixhawkState, homePoint, true);
+    if (!res.success) {
+      setCircleExecutionError(res.error || 'Failed to start Autonomous Circle Test.');
+    }
+  };
+
+  const handleAbortCircleTest = () => {
+    circleTestService.abort('Operator Aborted via Modal');
+  };
+
+  const handleResetCircleTest = () => {
+    circleTestService.resetState();
+    setCircleOperatorConfirmed(false);
+    setCircleExecutionError(null);
+  };
+
   const algorithms: Array<{ id: SearchAlgorithmType; name: string; tag: string; desc: string }> = [
     {
       id: 'GRID',
@@ -259,39 +331,56 @@ export const AutonomousMissionConfigModal: React.FC<AutonomousMissionConfigModal
 
         {/* Mission Type Selection Tabs */}
         <div className="bg-slate-950 px-4 py-2.5 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
             <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mr-1">
               MISSION:
             </span>
             <button
               type="button"
-              disabled={loiterState.isExecuting}
+              disabled={loiterState.isExecuting || circleState.isExecuting}
               onClick={() => setActiveMissionTab('AUTONOMOUS_SEARCH')}
               className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition cursor-pointer ${
                 activeMissionTab === 'AUTONOMOUS_SEARCH'
                   ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30'
                   : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
-              } ${loiterState.isExecuting ? 'opacity-50 cursor-not-allowed' : ''}`}
+              } ${loiterState.isExecuting || circleState.isExecuting ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               Autonomous Search & Rescue
             </button>
             <button
               type="button"
-              disabled={isMissionActive}
+              disabled={isMissionActive || circleState.isExecuting}
               onClick={() => setActiveMissionTab('5M_LOITER_TEST')}
               className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center space-x-1.5 ${
                 activeMissionTab === '5M_LOITER_TEST'
                   ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
                   : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
-              } ${isMissionActive ? 'opacity-50 cursor-not-allowed' : ''}`}
+              } ${isMissionActive || circleState.isExecuting ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               <Compass className="w-3.5 h-3.5 text-sky-400" />
-              <span>5M_LOITER_TEST (Controlled Test)</span>
+              <span>5M_LOITER_TEST</span>
+            </button>
+            <button
+              type="button"
+              disabled={isMissionActive || loiterState.isExecuting}
+              onClick={() => setActiveMissionTab('AUTONOMOUS_CIRCLE_TEST')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center space-x-1.5 ${
+                activeMissionTab === 'AUTONOMOUS_CIRCLE_TEST'
+                  ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
+                  : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
+              } ${isMissionActive || loiterState.isExecuting ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <RotateCw className="w-3.5 h-3.5 text-sky-400" />
+              <span>AUTONOMOUS_CIRCLE_TEST ({selectedCircleDiameter}m Ø)</span>
             </button>
           </div>
 
           <span className="text-[10px] px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400 font-bold uppercase">
-            {activeMissionTab === '5M_LOITER_TEST' ? 'Selected: 5M_LOITER_TEST' : 'Selected: Autonomous Search'}
+            {activeMissionTab === '5M_LOITER_TEST'
+              ? 'Selected: 5M_LOITER_TEST'
+              : activeMissionTab === 'AUTONOMOUS_CIRCLE_TEST'
+              ? `Selected: Circle (${selectedCircleDiameter}m Ø, ${selectedCircleAltitude}m Alt)`
+              : 'Selected: Autonomous Search'}
           </span>
         </div>
 
@@ -301,14 +390,18 @@ export const AutonomousMissionConfigModal: React.FC<AutonomousMissionConfigModal
             <div className="flex items-center space-x-1.5">
               <span className="text-slate-400">Target Altitude:</span>
               <span className="text-amber-400 font-extrabold text-sm">
-                {activeMissionTab === '5M_LOITER_TEST' ? '5.0' : config.searchAltitude} m
+                {activeMissionTab === '5M_LOITER_TEST'
+                  ? '5.0'
+                  : activeMissionTab === 'AUTONOMOUS_CIRCLE_TEST'
+                  ? selectedCircleAltitude.toFixed(1)
+                  : config.searchAltitude} m
               </span>
             </div>
             <div className="text-slate-600">•</div>
             <div className="flex items-center space-x-1.5">
               <span className="text-slate-400">Current Altitude:</span>
               <span className={`font-extrabold text-sm ${
-                Math.abs(telemetry.altitude - (activeMissionTab === '5M_LOITER_TEST' ? 5.0 : config.searchAltitude)) <= 0.5
+                Math.abs(telemetry.altitude - (activeMissionTab === '5M_LOITER_TEST' ? 5.0 : activeMissionTab === 'AUTONOMOUS_CIRCLE_TEST' ? selectedCircleAltitude : config.searchAltitude)) <= 0.5
                   ? 'text-emerald-400'
                   : 'text-sky-400'
               }`}>
@@ -340,6 +433,24 @@ export const AutonomousMissionConfigModal: React.FC<AutonomousMissionConfigModal
                   <>
                     <AlertTriangle className="w-3 h-3 text-rose-400" />
                     <span>PRE-FLIGHT: {loiterValidation.prerequisites.filter((p) => p.passed).length}/{loiterValidation.prerequisites.length} READY</span>
+                  </>
+                )}
+              </span>
+            ) : activeMissionTab === 'AUTONOMOUS_CIRCLE_TEST' ? (
+              <span className={`px-2.5 py-0.5 rounded text-[10px] font-black border flex items-center space-x-1 ${
+                circleValidation.allPassed
+                  ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300'
+                  : 'bg-rose-950/80 border-rose-500/50 text-rose-300'
+              }`}>
+                {circleValidation.allPassed ? (
+                  <>
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    <span>PRE-FLIGHT: ALL PREREQUISITES MET</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="w-3 h-3 text-rose-400" />
+                    <span>PRE-FLIGHT: {circleValidation.prerequisites.filter((p) => p.passed).length}/{circleValidation.prerequisites.length} READY</span>
                   </>
                 )}
               </span>
@@ -378,6 +489,24 @@ export const AutonomousMissionConfigModal: React.FC<AutonomousMissionConfigModal
               onDurationSelect={handleLoiterDurationSelect}
               onReset={handleResetLoiterTest}
               executionError={loiterExecutionError}
+            />
+          ) : activeMissionTab === 'AUTONOMOUS_CIRCLE_TEST' ? (
+            <CircleTestPanel
+              telemetry={telemetry}
+              homePoint={homePoint}
+              pixhawkState={pixhawkState}
+              operatorConfirmed={circleOperatorConfirmed}
+              onOperatorConfirmedChange={setCircleOperatorConfirmed}
+              selectedDiameter={selectedCircleDiameter}
+              onDiameterSelect={handleCircleDiameterSelect}
+              selectedAltitude={selectedCircleAltitude}
+              onAltitudeSelect={handleCircleAltitudeSelect}
+              selectedLaps={selectedCircleLaps}
+              onLapsSelect={handleCircleLapsSelect}
+              selectedDirection={selectedCircleDirection}
+              onDirectionSelect={handleCircleDirectionSelect}
+              onReset={handleResetCircleTest}
+              executionError={circleExecutionError}
             />
           ) : (
             <>
@@ -854,6 +983,63 @@ export const AutonomousMissionConfigModal: React.FC<AutonomousMissionConfigModal
                   >
                     <Play className="w-4 h-4 fill-current" />
                     <span>EXECUTE 5M LOITER TEST</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : activeMissionTab === 'AUTONOMOUS_CIRCLE_TEST' ? (
+            <div className="flex flex-wrap items-center space-x-3 ml-auto gap-2">
+              {(circleState.step === 'COMPLETED' || circleState.step === 'ABORTED') && (
+                <button
+                  type="button"
+                  onClick={handleResetCircleTest}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-black uppercase tracking-wider transition cursor-pointer"
+                >
+                  RESET TEST
+                </button>
+              )}
+
+              {circleState.isExecuting ? (
+                <button
+                  type="button"
+                  onClick={handleAbortCircleTest}
+                  className="px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-black text-xs uppercase tracking-wider flex items-center space-x-2 transition shadow-lg shadow-rose-600/40 cursor-pointer animate-pulse"
+                >
+                  <AlertOctagon className="w-4 h-4" />
+                  <span>ABORT CIRCLE MISSION</span>
+                </button>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className={`flex items-center space-x-2 text-xs font-semibold select-none cursor-pointer px-3 py-2 rounded-xl transition border ${
+                    circleOperatorConfirmed
+                      ? 'bg-amber-950/80 border-amber-500/80 text-amber-200'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      id="modal-circle-operator-confirm-footer"
+                      checked={circleOperatorConfirmed}
+                      onChange={(e) => setCircleOperatorConfirmed(e.target.checked)}
+                      className="w-4 h-4 rounded text-amber-500 accent-amber-500 focus:ring-0 cursor-pointer"
+                    />
+                    <span>
+                      <span className="font-bold text-amber-300">Authorize Flight Area Clear</span>
+                    </span>
+                  </label>
+
+                  <button
+                    type="button"
+                    disabled={isMissionActive}
+                    onClick={handleExecuteCircleTest}
+                    className={`px-6 py-2.5 rounded-xl font-black text-xs sm:text-sm uppercase tracking-wider flex items-center space-x-2 transition shadow-lg ${
+                      !isMissionActive
+                        ? 'bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white shadow-sky-600/30 cursor-pointer animate-pulse'
+                        : 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
+                    }`}
+                    title="Execute Autonomous Circle Test"
+                  >
+                    <Play className="w-4 h-4 fill-current" />
+                    <span>EXECUTE CIRCLE TEST ({selectedCircleDiameter}m Ø, {selectedCircleAltitude}m ALT)</span>
                   </button>
                 </div>
               )}

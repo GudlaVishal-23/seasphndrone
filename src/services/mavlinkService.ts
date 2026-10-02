@@ -1509,7 +1509,7 @@ class MAVLinkService {
     }
   }
 
-  public async setFlightMode(modeName: 'GUIDED' | 'AUTO' | 'STABILIZE' | 'ALT_HOLD' | 'POSHOLD' | 'LOITER' | 'RTL' | 'LAND'): Promise<boolean> {
+  public async setFlightMode(modeName: 'GUIDED' | 'AUTO' | 'STABILIZE' | 'ALT_HOLD' | 'POSHOLD' | 'LOITER' | 'RTL' | 'LAND' | 'CIRCLE'): Promise<boolean> {
     const isConnected = this.connectionState.isConnected || this.connectionState.isUsbConnected;
     if (!isConnected && !this.simInterval) {
       this.logDiagnostic('ERROR', `Cannot set mode ${modeName}: MAVLink not connected`, 'error');
@@ -1523,6 +1523,7 @@ class MAVLinkService {
       GUIDED: 4,
       LOITER: 5,
       RTL: 6,
+      CIRCLE: 7, // ArduPilot CIRCLE mode
       LAND: 9,
       POSHOLD: 16
     };
@@ -1563,6 +1564,72 @@ class MAVLinkService {
       this.telemetry.flightMode = 'AUTO';
       this.telemetry.targetAltitude = targetAltMeters;
       this.notifyTelemetry();
+      return true;
+    }
+  }
+
+  /**
+   * Autonomous Circular Orbit Navigation:
+   * Commands vehicle to orbit a center reference (takeoff/home) at a specified radius and altitude
+   * via MAVLink MAV_CMD_DO_ORBIT (425) in GUIDED mode.
+   *
+   * @param radiusMeters Circle radius (meters). Positive = Clockwise, Negative = Counter-Clockwise.
+   * @param velocityMps Tangential speed (m/s, default 2.0).
+   * @param centerLat Center latitude (defaults to Home/takeoff lat).
+   * @param centerLon Center longitude (defaults to Home/takeoff lon).
+   * @param altitudeMeters Cruise altitude for the orbit.
+   */
+  public async commandOrbit(
+    radiusMeters: number,
+    velocityMps: number = 2.0,
+    centerLat?: number,
+    centerLon?: number,
+    altitudeMeters?: number
+  ): Promise<boolean> {
+    const isConnected = this.connectionState.isConnected || this.connectionState.isUsbConnected;
+    if (!isConnected && !this.simInterval) {
+      this.logDiagnostic('ERROR', 'Cannot command orbit: MAVLink not connected', 'error');
+      return false;
+    }
+    const lat = (centerLat !== undefined && centerLat !== 0) ? centerLat : (this.homePoint.latitude || this.telemetry.latitude);
+    const lon = (centerLon !== undefined && centerLon !== 0) ? centerLon : (this.homePoint.longitude || this.telemetry.longitude);
+    const alt = altitudeMeters || this.telemetry.altitude || 5.0;
+
+    this.addStatusMessage('NOTICE', 5, `Commanding Autonomous Orbit (Radius: ${radiusMeters}m, Alt: ${alt}m, Speed: ${velocityMps}m/s)...`);
+    this.logDiagnostic('MAVLINK', `[CMD 425] MAV_CMD_DO_ORBIT: R=${radiusMeters}m, V=${velocityMps}m/s, Center=${lat.toFixed(6)}, ${lon.toFixed(6)}`, 'info');
+
+    if (this.connectionState.isRealHardware || isConnected) {
+      // 1. Ensure GUIDED mode
+      await this.setFlightMode('GUIDED');
+      // 2. MAV_CMD_DO_ORBIT (425):
+      // param1: radius (m, +CW, -CCW)
+      // param2: velocity (m/s)
+      // param3: yaw behavior (1 = face forward along path)
+      // param4: 0
+      // param5: lat
+      // param6: lon
+      // param7: alt
+      return await this.sendMavlinkCommandLong(425 /* MAV_CMD_DO_ORBIT */, radiusMeters, velocityMps, 1.0, 0, lat, lon, alt);
+    } else {
+      this.telemetry.flightMode = 'GUIDED';
+      this.notifyTelemetry();
+      return true;
+    }
+  }
+
+  /**
+   * Fly straight to coordinate waypoint in GUIDED mode via MAV_CMD_DO_REPOSITION (192)
+   */
+  public async flyToPosition(lat: number, lon: number, alt: number, groundSpeedMps: number = 2.0): Promise<boolean> {
+    const isConnected = this.connectionState.isConnected || this.connectionState.isUsbConnected;
+    if (!isConnected && !this.simInterval) {
+      return false;
+    }
+    if (this.connectionState.isRealHardware || isConnected) {
+      await this.setFlightMode('GUIDED');
+      // MAV_CMD_DO_REPOSITION (192): param1 = ground speed, param2 = flags, param5 = lat, param6 = lon, param7 = alt
+      return await this.sendMavlinkCommandLong(192 /* MAV_CMD_DO_REPOSITION */, groundSpeedMps, 0, 0, 0, lat, lon, alt);
+    } else {
       return true;
     }
   }

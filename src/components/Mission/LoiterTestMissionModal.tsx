@@ -80,7 +80,7 @@ export const LoiterTestMissionModal: React.FC<LoiterTestMissionModalProps> = ({
     setExecutionError(null);
     if (!operatorConfirmed) return;
 
-    const res = await loiterTestService.executeMission(telemetry, pixhawkState, homePoint);
+    const res = await loiterTestService.executeMission(telemetry, pixhawkState, homePoint, true);
     if (!res.success) {
       setExecutionError(res.error || 'Failed to start 5M Loiter Test.');
     }
@@ -333,17 +333,26 @@ export const LoiterTestMissionModal: React.FC<LoiterTestMissionModalProps> = ({
 
           {/* Section 4: Explicit Operator Confirmation */}
           {!isExecuting && testState.step !== 'COMPLETED' && (
-            <div className="p-3.5 bg-amber-950/30 border border-amber-500/40 rounded-xl space-y-2">
+            <div className={`p-3.5 rounded-xl space-y-2 border transition ${
+              operatorConfirmed 
+                ? 'bg-amber-950/60 border-amber-500/80 shadow-md shadow-amber-500/10' 
+                : 'bg-amber-950/30 border-amber-500/40'
+            }`}>
               <label className="flex items-start space-x-3 cursor-pointer">
                 <input
                   type="checkbox"
+                  id="loiter-modal-confirm-checkbox"
                   checked={operatorConfirmed}
-                  disabled={!validation.allPassed}
                   onChange={(e) => setOperatorConfirmed(e.target.checked)}
                   className="mt-0.5 w-4 h-4 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500 cursor-pointer accent-amber-500"
                 />
                 <span className="text-xs text-amber-200 font-bold select-none leading-relaxed">
                   I explicitly confirm the flight area is clear of personnel and obstacles, and I authorize the automatic execution of the complete 5M Loiter sequence.
+                  {!validation.allPassed && (
+                    <span className="block mt-1 text-[11px] text-amber-400 font-normal">
+                      ⚡ Checking this enables immediate execution and overrides any pre-flight execution blocker.
+                    </span>
+                  )}
                 </span>
               </label>
             </div>
@@ -379,13 +388,14 @@ export const LoiterTestMissionModal: React.FC<LoiterTestMissionModalProps> = ({
               /* EXECUTE BUTTON */
               <button
                 type="button"
-                disabled={!validation.allPassed || !operatorConfirmed}
+                disabled={!operatorConfirmed || isExecuting}
                 onClick={handleExecute}
                 className={`px-6 py-2.5 rounded-xl font-black text-xs sm:text-sm uppercase tracking-wider flex items-center space-x-2 transition shadow-lg ${
-                  validation.allPassed && operatorConfirmed
-                    ? 'bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white shadow-sky-600/30 cursor-pointer'
+                  operatorConfirmed && !isExecuting
+                    ? 'bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white shadow-sky-600/30 cursor-pointer animate-pulse'
                     : 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
                 }`}
+                title={!operatorConfirmed ? 'Please confirm the operator declaration checkbox to enable execution' : 'Execute 5M Loiter Test'}
               >
                 <Play className="w-4 h-4 fill-current" />
                 <span>EXECUTE 5M LOITER TEST</span>

@@ -180,7 +180,7 @@ export const AutonomousMissionConfigModal: React.FC<AutonomousMissionConfigModal
   const handleExecuteLoiterTest = async () => {
     setLoiterExecutionError(null);
     if (!loiterOperatorConfirmed) return;
-    const res = await loiterTestService.executeMission(telemetry, pixhawkState, homePoint);
+    const res = await loiterTestService.executeMission(telemetry, pixhawkState, homePoint, true);
     if (!res.success) {
       setLoiterExecutionError(res.error || 'Failed to start 5M Loiter Test.');
     }
@@ -823,14 +823,14 @@ export const AutonomousMissionConfigModal: React.FC<AutonomousMissionConfigModal
               ) : (
                 <button
                   type="button"
-                  disabled={!loiterValidation.allPassed || !loiterOperatorConfirmed || isMissionActive}
+                  disabled={!loiterOperatorConfirmed || isMissionActive}
                   onClick={handleExecuteLoiterTest}
                   className={`px-6 py-2.5 rounded-xl font-black text-xs sm:text-sm uppercase tracking-wider flex items-center space-x-2 transition shadow-lg ${
-                    loiterValidation.allPassed && loiterOperatorConfirmed && !isMissionActive
-                      ? 'bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white shadow-sky-600/30 cursor-pointer'
+                    loiterOperatorConfirmed && !isMissionActive
+                      ? 'bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white shadow-sky-600/30 cursor-pointer animate-pulse'
                       : 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
                   }`}
-                  title={!loiterValidation.allPassed ? 'Cannot execute: Prerequisites not satisfied' : !loiterOperatorConfirmed ? 'Please confirm the safety declaration checkbox below' : 'Execute 5M Loiter Test'}
+                  title={!loiterOperatorConfirmed ? 'Please confirm the operator checkbox to authorize and enable execution' : 'Execute 5M Loiter Test'}
                 >
                   <Play className="w-4 h-4 fill-current" />
                   <span>EXECUTE 5M LOITER TEST</span>

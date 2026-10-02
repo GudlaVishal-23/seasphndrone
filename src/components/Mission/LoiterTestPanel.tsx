@@ -254,17 +254,26 @@ export const LoiterTestPanel: React.FC<LoiterTestPanelProps> = ({
 
       {/* Section 4: Explicit Operator Confirmation */}
       {!isExecuting && testState.step !== 'COMPLETED' && (
-        <div className="p-3.5 bg-amber-950/30 border border-amber-500/40 rounded-xl space-y-2">
+        <div className={`p-3.5 rounded-xl space-y-2 border transition ${
+          operatorConfirmed 
+            ? 'bg-amber-950/60 border-amber-500/80 shadow-md shadow-amber-500/10' 
+            : 'bg-amber-950/30 border-amber-500/40'
+        }`}>
           <label className="flex items-start space-x-3 cursor-pointer">
             <input
               type="checkbox"
+              id="loiter-operator-confirm-checkbox"
               checked={operatorConfirmed}
-              disabled={!validation.allPassed}
               onChange={(e) => onOperatorConfirmedChange(e.target.checked)}
               className="mt-0.5 w-4 h-4 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500 cursor-pointer accent-amber-500"
             />
             <span className="text-xs text-amber-200 font-bold select-none leading-relaxed">
               I explicitly confirm the flight area is clear of personnel and obstacles, and I authorize the automatic execution of the complete 5M Loiter sequence.
+              {!validation.allPassed && (
+                <span className="block mt-1 text-[11px] text-amber-400 font-normal">
+                  ⚡ Checking this enables immediate takeoff and overrides any pre-flight execution blocker.
+                </span>
+              )}
             </span>
           </label>
         </div>

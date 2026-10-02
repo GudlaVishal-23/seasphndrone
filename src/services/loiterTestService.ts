@@ -173,14 +173,15 @@ class LoiterTestService {
   public async executeMission(
     telemetry: DroneTelemetry,
     pixhawkState: PixhawkConnectionState,
-    homePoint: HomePoint
+    homePoint: HomePoint,
+    forceOverride: boolean = false
   ): Promise<{ success: boolean; error?: string }> {
     if (this.state.isExecuting) {
       return { success: false, error: '5M Loiter Test is already running.' };
     }
 
     const val = this.validatePrerequisites(telemetry, pixhawkState, homePoint);
-    if (!val.allPassed) {
+    if (!val.allPassed && !forceOverride) {
       audioService.playBeep(300, 300, 'sawtooth');
       return { success: false, error: val.blockingReason || 'Prerequisites check failed.' };
     }
@@ -201,9 +202,19 @@ class LoiterTestService {
 
     audioService.playBeep(784, 150);
 
-    // Step 1: Arm Pixhawk
+    // If drone is already armed, skip arm command and immediately climb to 5m
+    if (telemetry.isArmed) {
+      this.state.step = 'TAKEOFF_CLIMB';
+      this.state.stepMessage = `[2/6] Motors Armed ✓. Vertical takeoff commanded to 5 m AGL.`;
+      this.notifyState();
+      mavlinkService.commandTakeoff(5);
+      this.bindTelemetryWatch();
+      return { success: true };
+    }
+
+    // Step 1: Arm Pixhawk (pass forceOverride to bypass ArduPilot pre-arm checks)
     try {
-      await mavlinkService.sendArmCommand();
+      await mavlinkService.sendArmCommand(forceOverride);
     } catch (e: any) {
       this.abort(`Arming failed: ${e?.message || e}`);
       return { success: false, error: `Arming command failed: ${e?.message || e}` };

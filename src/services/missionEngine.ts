@@ -806,8 +806,8 @@ class MissionEngine {
     return { isReady: val.isValid, checklist };
   }
 
-  public async setHomePoint(): Promise<boolean> {
-    const home = await mavlinkService.setHomePoint();
+  public async setHomePoint(customLat?: number, customLon?: number, customAlt?: number): Promise<boolean> {
+    const home = await mavlinkService.setHomePoint(customLat, customLon, customAlt);
     if (home.isSet) {
       this.transitionTo('HOME_SET', `Home point locked: ${home.latitude.toFixed(6)}, ${home.longitude.toFixed(6)}`);
       audioService.playBeep(1000, 100);

@@ -15,6 +15,7 @@ import { LoiterTestMissionCard } from '../Mission/LoiterTestMissionCard';
 import { CircleTestMissionCard } from '../Mission/CircleTestMissionCard';
 import { DisarmSafetyConfirmModal } from '../common/DisarmSafetyConfirmModal';
 import { BatteryMonitorCard } from '../common/BatteryMonitorCard';
+import { GoogleMapGroundStation } from '../GroundStation/GoogleMapGroundStation';
 import {
   Play,
   RotateCcw,
@@ -23,6 +24,8 @@ import {
   ShieldCheck,
   Zap,
   Cpu,
+  Camera,
+  Map,
   Navigation,
   Battery,
   Wifi,
@@ -92,6 +95,8 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
   const [isRtlConfirmOpen, setIsRtlConfirmOpen] = useState<boolean>(false);
   // Disarm Safety Warning Modal State (mid-air protection)
   const [isDisarmSafetyModalOpen, setIsDisarmSafetyModalOpen] = useState<boolean>(false);
+  // Primary View toggle: Camera Vision vs Tactical Google Map
+  const [primaryView, setPrimaryView] = useState<'CAMERA' | 'MAP'>('CAMERA');
 
   // Manual Backup Mode & Authority
   const [commandAuthority, setCommandAuthority] = useState<FlightCommandAuthority>(missionEngine.getCommandAuthority());
@@ -648,18 +653,64 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
         </div>
       </div>
 
-      {/* 4. Main Grid: Full-Screen Live Camera Preview & Subsystems */}
+      {/* 4. Main Grid: Full-Screen Live Camera Preview OR Tactical Google Map & Subsystems */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left: Live Full-Screen Responsive Optical QR Scanner */}
-        <div className="lg:col-span-7 space-y-4">
+        {/* Left: Responsive Optical QR Scanner OR Tactical Google Map */}
+        <div className="lg:col-span-7 space-y-2">
+          {/* View Segmented Switcher */}
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center space-x-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setPrimaryView('CAMERA')}
+                className={`px-3 py-1 rounded-lg text-xs font-mono font-bold flex items-center space-x-1.5 transition cursor-pointer ${
+                  primaryView === 'CAMERA'
+                    ? 'bg-sky-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>CAMERA / QR SCANNER</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrimaryView('MAP')}
+                className={`px-3 py-1 rounded-lg text-xs font-mono font-bold flex items-center space-x-1.5 transition cursor-pointer ${
+                  primaryView === 'MAP'
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
+              >
+                <Map className="w-3.5 h-3.5" />
+                <span>TACTICAL GOOGLE MAP</span>
+              </button>
+            </div>
+            <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
+              {primaryView === 'MAP' ? 'Google Hybrid / Geofence Workspace' : 'Live Camera HUD Active'}
+            </span>
+          </div>
+
           <div className="rounded-xl overflow-hidden border border-slate-800 shadow-2xl h-[420px] sm:h-[480px]">
-            <CameraVisionHUD
-              onQRDetected={onQRDetected}
-              isScanning={isScanning}
-              decodedQR={decodedQR}
-              telemetry={telemetry}
-              className="w-full h-full"
-            />
+            {primaryView === 'CAMERA' ? (
+              <CameraVisionHUD
+                onQRDetected={onQRDetected}
+                isScanning={isScanning}
+                decodedQR={decodedQR}
+                telemetry={telemetry}
+                className="w-full h-full"
+              />
+            ) : (
+              <GoogleMapGroundStation
+                telemetry={telemetry}
+                homePoint={homePoint}
+                pixhawkState={pixhawkState}
+                missionState={missionState}
+                onSetHomePoint={(coords) => coords ? missionEngine.setHomePoint(coords.lat, coords.lng) : missionEngine.setHomePoint()}
+                onStartMission={() => missionEngine.startMission()}
+                onEmergencyRTL={onEmergencyRTL}
+                className="h-full w-full"
+              />
+            )}
           </div>
         </div>
 

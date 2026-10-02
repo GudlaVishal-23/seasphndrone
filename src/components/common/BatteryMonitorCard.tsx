@@ -164,11 +164,51 @@ export const BatteryMonitorCard: React.FC<BatteryMonitorCardProps> = ({
           </div>
         </div>
       ) : (
-        <div className="p-2.5 bg-amber-950/40 border border-amber-600/40 rounded-xl flex items-start space-x-2 text-[11px] text-amber-200">
-          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-          <div className="leading-snug">
-            <span className="font-bold text-amber-300">No Battery Signal Detected: </span>
-            Ensure your Pixhawk Power Module is connected to the 6-pin POWER port and configured in Mission Planner.
+        <div className="p-3 bg-amber-950/40 border border-amber-600/40 rounded-xl space-y-2.5 text-[11px] text-amber-200">
+          <div className="flex items-start space-x-2">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div className="leading-snug">
+              <span className="font-bold text-amber-300">
+                {mavlinkService.getConnectionState().isConnected
+                  ? 'Pixhawk Connected — No Battery Stream Received: '
+                  : 'Pixhawk Disconnected (No Telemetry): '}
+              </span>
+              {mavlinkService.getConnectionState().isConnected
+                ? 'ArduPilot requires BATT_MONITOR=4 and SR1_EXT_STAT=4 configured in Mission Planner.'
+                : 'Connect your ESP32 Wi-Fi bridge or USB cable, or launch Simulator mode to test 3S battery UI.'}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 pt-1 border-t border-amber-900/40">
+            {mavlinkService.getConnectionState().isConnected ? (
+              <button
+                type="button"
+                onClick={handleRequestStream}
+                disabled={isRefreshing}
+                className="px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] flex items-center space-x-1 cursor-pointer transition shadow"
+              >
+                <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <span>PROBE FC BATTERY STREAM</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => mavlinkService.switchToSimulationMode()}
+                className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] flex items-center space-x-1 cursor-pointer transition shadow"
+              >
+                <Zap className="w-3 h-3" />
+                <span>START SIMULATOR (3S 12.6V DEMO)</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowHelp(!showHelp)}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[10px] flex items-center space-x-1 cursor-pointer transition"
+            >
+              <HelpCircle className="w-3 h-3 text-sky-400" />
+              <span>SETUP GUIDE</span>
+            </button>
           </div>
         </div>
       )}

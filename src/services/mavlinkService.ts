@@ -1424,14 +1424,27 @@ class MAVLinkService {
   private lastStreamRequestTime = 0;
   public async requestMavlinkDataStreams() {
     const now = Date.now();
-    if (now - this.lastStreamRequestTime < 4000) return; // Throttled: at most once every 4s
+    if (now - this.lastStreamRequestTime < 2500) return; // Throttled: at most once every 2.5s
     this.lastStreamRequestTime = now;
 
-    // 0: ALL, 2: EXTENDED_STATUS (SYS_STATUS & Battery), 6: POSITION, 11: EXTRA2 (VFR_HUD)
+    // 1. Legacy MAVLink 1 stream requests (0: ALL, 2: EXTENDED_STATUS, 6: POSITION, 11: EXTRA2)
     await this.sendRequestDataStream(0 /* ALL */, 4 /* 4 Hz */);
-    await this.sendRequestDataStream(2 /* EXTENDED_STATUS */, 4 /* 4 Hz */);
-    await this.sendRequestDataStream(6 /* POSITION */, 4 /* 4 Hz */);
-    await this.sendRequestDataStream(11 /* EXTRA2 / VFR_HUD */, 4 /* 4 Hz */);
+    await this.sendRequestDataStream(2 /* EXTENDED_STATUS: SYS_STATUS & BATTERY_STATUS */, 4 /* 4 Hz */);
+    await this.sendRequestDataStream(6 /* POSITION */, 5 /* 5 Hz */);
+    await this.sendRequestDataStream(11 /* EXTRA2: VFR_HUD */, 4 /* 4 Hz */);
+
+    // 2. Modern MAVLink 2 command: MAV_CMD_SET_MESSAGE_INTERVAL (cmd 511)
+    // Param 1 = message ID, Param 2 = interval in microseconds
+    try {
+      await this.sendMavlinkCommandLong(511, 1 /* SYS_STATUS: battery voltage/current/percentage */, 250000 /* 4 Hz */);
+      await this.sendMavlinkCommandLong(511, 147 /* BATTERY_STATUS: multi-cell voltages */, 500000 /* 2 Hz */);
+      await this.sendMavlinkCommandLong(511, 74 /* VFR_HUD: altitude, airspeed, heading */, 250000 /* 4 Hz */);
+      await this.sendMavlinkCommandLong(511, 33 /* GLOBAL_POSITION_INT */, 200000 /* 5 Hz */);
+      await this.sendMavlinkCommandLong(511, 30 /* ATTITUDE */, 100000 /* 10 Hz */);
+      await this.sendMavlinkCommandLong(511, 24 /* GPS_RAW_INT */, 200000 /* 5 Hz */);
+    } catch (e) {
+      console.warn('Failed to send MAV_CMD_SET_MESSAGE_INTERVAL', e);
+    }
   }
   public async sendArmCommand(force: boolean = false): Promise<boolean> {
     console.log('[ARM] BUTTON CLICKED');

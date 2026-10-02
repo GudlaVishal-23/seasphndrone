@@ -971,6 +971,7 @@ class MAVLinkService {
 
         if (wasNotConnected) {
           this.startGcsHeartbeat();
+          this.requestMavlinkDataStreams();
           this.logDiagnostic('MAVLINK', `[MAVLINK] HEARTBEAT received ✓! SysID: ${sysId}, CompID: ${compId}, Autopilot: ${this.connectionState.autopilotType}, Type: ${this.connectionState.diagnostics.vehicleType}`, 'success');
           this.addStatusMessage('INFO', 6, `Pixhawk Connected: Heartbeat Received from SysID ${sysId} (${this.connectionState.autopilotType})`);
         }
@@ -983,18 +984,48 @@ class MAVLinkService {
 
       // SYS_STATUS (msgId = 1)
       case 1: {
-        if (payload.length >= 31) {
+        // MAVLink wire format: uint16_t voltage_battery is at offset 14 (in mV)
+        // MAVLink 2 zero-truncation means payload can be 16 to 31 bytes
+        if (payload.length >= 16) {
           const voltageMv = view.getUint16(14, true);
-          const currentA = view.getInt16(16, true) / 100;
-          const batteryRemaining = view.getInt8(18);
+          const currentA = payload.length >= 18 ? view.getInt16(16, true) / 100 : 0;
+          const batteryRemaining = payload.length >= 19 ? view.getInt8(18) : -1;
 
-          const voltageV = +(voltageMv / 1000).toFixed(2);
-          this.telemetry.batteryVoltage = voltageV;
-          this.telemetry.batteryCurrent = +Math.max(0, currentA).toFixed(2);
-          if (batteryRemaining >= 0 && batteryRemaining <= 100) {
-            this.telemetry.batteryPercent = batteryRemaining;
-          } else if (voltageV > 0) {
-            this.telemetry.batteryPercent = this.calculateLiPoPercentage(voltageV);
+          // 65535 indicates voltage is unmonitored or invalid
+          if (voltageMv > 0 && voltageMv < 65000) {
+            const voltageV = +(voltageMv / 1000).toFixed(2);
+            this.telemetry.batteryVoltage = voltageV;
+            this.telemetry.batteryCurrent = +Math.max(0, currentA).toFixed(2);
+            if (batteryRemaining >= 0 && batteryRemaining <= 100) {
+              this.telemetry.batteryPercent = batteryRemaining;
+            } else if (voltageV > 0) {
+              this.telemetry.batteryPercent = this.calculateLiPoPercentage(voltageV);
+            }
+          }
+          this.notifyTelemetry();
+        }
+        break;
+      }
+
+      // VFR_HUD (msgId = 74) - Primary flight instruments stream (Altitude, Speed, Throttle)
+      case 74: {
+        if (payload.length >= 12) {
+          const groundspeed = view.getFloat32(4, true);
+          const alt = view.getFloat32(8, true);
+          const climb = payload.length >= 16 ? view.getFloat32(12, true) : 0;
+          const heading = payload.length >= 18 ? view.getInt16(16, true) : 0;
+
+          if (Number.isFinite(groundspeed) && groundspeed >= 0) {
+            this.telemetry.groundSpeed = +groundspeed.toFixed(2);
+          }
+          if (Number.isFinite(climb)) {
+            this.telemetry.verticalSpeed = +climb.toFixed(2);
+          }
+          if (Number.isFinite(heading) && heading >= 0) {
+            this.telemetry.heading = heading;
+          }
+          if (Number.isFinite(alt) && alt >= 0) {
+            this.telemetry.altitude = +alt.toFixed(2);
           }
           this.notifyTelemetry();
         }
@@ -1003,27 +1034,38 @@ class MAVLinkService {
 
       // BATTERY_STATUS (msgId = 147)
       case 147: {
-        if (payload.length >= 36) {
-          const currentA = view.getInt16(18, true) / 100;
-          const batteryRemaining = view.getInt8(20);
-          const cell1Mv = view.getUint16(0, true);
-          const cell2Mv = view.getUint16(2, true);
-          const cell3Mv = view.getUint16(4, true);
-          const cell4Mv = view.getUint16(6, true);
-
+        // Wire order: 0..3 current_consumed, 4..7 energy_consumed, 8..9 temperature,
+        // 10..29 voltages[10] (uint16 mV), 30..31 current_battery (int16 10*mA), 35 battery_remaining
+        if (payload.length >= 12) {
           let totalVolts = 0;
-          if (cell1Mv > 0 && cell1Mv < 5000) {
-            totalVolts = (cell1Mv + (cell2Mv || 0) + (cell3Mv || 0) + (cell4Mv || 0)) / 1000;
+          for (let c = 0; c < 10; c++) {
+            const cellOffset = 10 + c * 2;
+            if (cellOffset + 2 <= payload.length) {
+              const cellMv = view.getUint16(cellOffset, true);
+              if (cellMv > 0 && cellMv < 65000) {
+                totalVolts += cellMv / 1000;
+              }
+            }
           }
 
           if (totalVolts > 0) {
             this.telemetry.batteryVoltage = +totalVolts.toFixed(2);
           }
-          if (currentA > 0) {
-            this.telemetry.batteryCurrent = +currentA.toFixed(2);
+
+          if (payload.length >= 32) {
+            const currentRaw = view.getInt16(30, true);
+            if (currentRaw >= 0) {
+              this.telemetry.batteryCurrent = +(currentRaw / 100).toFixed(2);
+            }
           }
-          if (batteryRemaining >= 0 && batteryRemaining <= 100) {
-            this.telemetry.batteryPercent = batteryRemaining;
+
+          if (payload.length >= 36) {
+            const batteryRemaining = view.getInt8(35);
+            if (batteryRemaining >= 0 && batteryRemaining <= 100) {
+              this.telemetry.batteryPercent = batteryRemaining;
+            } else if (this.telemetry.batteryVoltage > 0) {
+              this.telemetry.batteryPercent = this.calculateLiPoPercentage(this.telemetry.batteryVoltage);
+            }
           } else if (this.telemetry.batteryVoltage > 0) {
             this.telemetry.batteryPercent = this.calculateLiPoPercentage(this.telemetry.batteryVoltage);
           }
@@ -1334,11 +1376,14 @@ class MAVLinkService {
   private lastStreamRequestTime = 0;
   public async requestMavlinkDataStreams() {
     const now = Date.now();
-    if (now - this.lastStreamRequestTime < 20000) return; // Throttled: at most once every 20s
+    if (now - this.lastStreamRequestTime < 4000) return; // Throttled: at most once every 4s
     this.lastStreamRequestTime = now;
 
-    // Single MAVLink 1 REQUEST_DATA_STREAM for all streams at 2 Hz (standard ArduPilot rate)
-    await this.sendRequestDataStream(0 /* ALL */, 2 /* 2 Hz */);
+    // 0: ALL, 2: EXTENDED_STATUS (SYS_STATUS & Battery), 6: POSITION, 11: EXTRA2 (VFR_HUD)
+    await this.sendRequestDataStream(0 /* ALL */, 4 /* 4 Hz */);
+    await this.sendRequestDataStream(2 /* EXTENDED_STATUS */, 4 /* 4 Hz */);
+    await this.sendRequestDataStream(6 /* POSITION */, 4 /* 4 Hz */);
+    await this.sendRequestDataStream(11 /* EXTRA2 / VFR_HUD */, 4 /* 4 Hz */);
   }
   public async sendArmCommand(force: boolean = false): Promise<boolean> {
     console.log('[ARM] BUTTON CLICKED');
@@ -1418,8 +1463,8 @@ class MAVLinkService {
     }
   }
 
-  public async sendDisarmCommand(force: boolean = true): Promise<boolean> {
-    console.log('[DISARM] BUTTON CLICKED');
+  public async sendDisarmCommand(force: boolean = false): Promise<boolean> {
+    console.log(`[DISARM] BUTTON CLICKED (force=${force})`);
 
     const isWsOpen = this.connectionState.isUsbConnected || this.connectionState.isConnected;
     console.log(`[DISARM] WS STATE = ${isWsOpen ? 'OPEN' : 'CLOSED'}`);
@@ -1433,7 +1478,8 @@ class MAVLinkService {
 
     const targetSys = this.connectionState.systemId || 1;
     const targetComp = this.connectionState.componentId || 1;
-    // param2 = 21196.0 forces disarm on ArduPilot without requiring zero-throttle deadband
+    // param2 = 21196.0 forces disarm on ArduPilot even in mid-air (CRASH RISK)
+    // param2 = 0.0 safe standard disarm: ArduPilot safely checks if landed before shutting motors
     const param2 = force ? 21196.0 : 0.0;
 
     console.log(`[DISARM] SYSID = ${targetSys}`);
@@ -1472,7 +1518,7 @@ class MAVLinkService {
     return this.sendArmCommand(force);
   }
 
-  public async disarmDrone(force: boolean = true): Promise<boolean> {
+  public async disarmDrone(force: boolean = false): Promise<boolean> {
     return this.sendDisarmCommand(force);
   }
 

@@ -17,6 +17,7 @@ import {
 import { DroneTelemetry } from '../../types/mission';
 import { PixhawkConnectionState } from '../../types/mavlink';
 import { mavlinkService } from '../../services/mavlinkService';
+import { DisarmSafetyConfirmModal } from './DisarmSafetyConfirmModal';
 
 interface ControlModePanelProps {
   telemetry: DroneTelemetry;
@@ -36,8 +37,23 @@ export const ControlModePanel: React.FC<ControlModePanelProps> = ({
   isDisarmingInProgress = false
 }) => {
   const [activeDirection, setActiveDirection] = useState<string | null>(null);
+  const [isSafetyModalOpen, setIsSafetyModalOpen] = useState<boolean>(false);
+  const [isCutoffRequested, setIsCutoffRequested] = useState<boolean>(false);
 
   const isArmed = telemetry.isArmed;
+
+  const handleSafeDisarmTrigger = (forceCutoff: boolean = false) => {
+    // If airborne, prompt with critical warning popup stating exact altitude
+    if (telemetry.isArmed && telemetry.altitude > 0.4) {
+      setIsCutoffRequested(forceCutoff);
+      setIsSafetyModalOpen(true);
+      return;
+    }
+    if (forceCutoff) {
+      mavlinkService.sendDisarmCommand(true);
+    }
+    onDisarmClick();
+  };
 
   const handleDirectionPress = (dir: 'FORWARD' | 'BACKWARD' | 'LEFT' | 'RIGHT' | 'HOLD') => {
     setActiveDirection(dir);
@@ -108,7 +124,7 @@ export const ControlModePanel: React.FC<ControlModePanelProps> = ({
               {/* PRIMARY UNIFIED TOGGLE BUTTON: ARM when disarmed, DISARM when armed */}
               <button
                 type="button"
-                onClick={isArmed ? onDisarmClick : onArmClick}
+                onClick={isArmed ? () => handleSafeDisarmTrigger(false) : onArmClick}
                 disabled={isArmingInProgress || isDisarmingInProgress || (!connectionState.isConnected && !connectionState.isUsbConnected)}
                 className={`sm:col-span-3 py-4 px-4 rounded-xl font-black text-sm sm:text-base uppercase tracking-wider flex items-center justify-center space-x-2.5 border transition-all duration-150 shadow-lg cursor-pointer ${
                   !connectionState.isConnected && !connectionState.isUsbConnected
@@ -138,10 +154,7 @@ export const ControlModePanel: React.FC<ControlModePanelProps> = ({
               {/* EMERGENCY FORCE DISARM / CUTOFF BUTTON */}
               <button
                 type="button"
-                onClick={() => {
-                  mavlinkService.sendDisarmCommand(true);
-                  onDisarmClick();
-                }}
+                onClick={() => handleSafeDisarmTrigger(true)}
                 disabled={!connectionState.isConnected && !connectionState.isUsbConnected}
                 title="Instant hardware emergency motor cutoff (MAVLink param2=21196 force disarm)"
                 className="sm:col-span-1 py-4 px-3 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 border border-rose-800/80 bg-rose-950/70 hover:bg-rose-900 text-rose-300 hover:text-white transition active:scale-[0.98] cursor-pointer"
@@ -400,6 +413,27 @@ export const ControlModePanel: React.FC<ControlModePanelProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Airborne Disarm Safety Warning Modal */}
+        <DisarmSafetyConfirmModal
+          isOpen={isSafetyModalOpen}
+          currentAltitude={telemetry.altitude}
+          verticalSpeed={telemetry.verticalSpeed}
+          flightMode={telemetry.flightMode}
+          isForceCutoff={isCutoffRequested}
+          onConfirmDisarm={() => {
+            setIsSafetyModalOpen(false);
+            if (isCutoffRequested) {
+              mavlinkService.sendDisarmCommand(true);
+            }
+            onDisarmClick();
+          }}
+          onCommandLand={() => {
+            setIsSafetyModalOpen(false);
+            mavlinkService.commandLand();
+          }}
+          onCancel={() => setIsSafetyModalOpen(false)}
+        />
       </div>
     );
   };

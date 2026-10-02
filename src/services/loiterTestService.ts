@@ -300,11 +300,21 @@ class LoiterTestService {
         }
       }
 
-      // 3. Landing touchdown detection -> Disarm
+      // 3. Landing touchdown detection -> Disarm only when safely on ground
       if (this.state.step === 'LANDING') {
-        if (telem.altitude <= 0.35 || !telem.isArmed) {
+        if (!telem.isArmed) {
+          // ArduPilot natively detected landing touchdown and auto-disarmed
           if (this.descentWatchdog) clearTimeout(this.descentWatchdog);
           this.disarmAndComplete();
+        } else if (telem.altitude <= 0.20 && Math.abs(telem.verticalSpeed) <= 0.15) {
+          // Sustained stationary contact on ground
+          if (this.descentWatchdog) clearTimeout(this.descentWatchdog);
+          setTimeout(() => {
+            const cur = mavlinkService.getTelemetry();
+            if (!cur.isArmed || cur.altitude <= 0.20) {
+              this.disarmAndComplete();
+            }
+          }, 1500);
         }
       }
     });
@@ -344,12 +354,12 @@ class LoiterTestService {
     if (this.holdInterval) clearInterval(this.holdInterval);
 
     this.state.step = 'DESCENDING';
-    this.state.stepMessage = `[4/6] Loiter duration complete. Commanding vertical descent & landing at home position.`;
+    this.state.stepMessage = `[4/6] Loiter duration complete. Commanding LAND mode (ArduPilot auto-descent).`;
     this.notifyState();
 
     audioService.playBeep(659, 150);
 
-    // Command Land at Home
+    // Command Land at Home (ArduPilot handles descent & auto-disarm upon touchdown)
     mavlinkService.commandLand();
 
     setTimeout(() => {
@@ -360,29 +370,31 @@ class LoiterTestService {
       }
     }, 1500);
 
-    // Descent watchdog (30s)
+    // Descent watchdog (45s) - allow ample time for gentle descent and auto-disarm
     this.descentWatchdog = setTimeout(() => {
       if (this.state.step === 'DESCENDING' || this.state.step === 'LANDING') {
         const telem = mavlinkService.getTelemetry();
-        if (telem.altitude <= 0.4 || !telem.isArmed) {
+        if (!telem.isArmed || telem.altitude <= 0.25) {
           this.disarmAndComplete();
         } else {
-          this.abort('Descent timeout: Drone did not touchdown within 30 seconds.');
+          this.abort('Descent timeout: Drone did not touchdown within 45 seconds.');
         }
       }
-    }, 30000);
+    }, 45000);
   }
 
   private async disarmAndComplete(): Promise<void> {
     this.clearAllTimers();
 
     this.state.step = 'DISARMING';
-    this.state.stepMessage = `[6/6] Touchdown confirmed. Sending disarm command...`;
+    this.state.stepMessage = `[6/6] Touchdown confirmed. Motors disarmed.`;
     this.notifyState();
 
-    try {
-      await mavlinkService.sendDisarmCommand();
-    } catch (e) {}
+    if (mavlinkService.getTelemetry().isArmed) {
+      try {
+        await mavlinkService.sendDisarmCommand(false); // SAFE NON-FORCED DISARM
+      } catch (e) {}
+    }
 
     setTimeout(() => {
       this.state.step = 'COMPLETED';

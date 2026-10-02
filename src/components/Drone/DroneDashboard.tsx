@@ -12,6 +12,9 @@ import { MissionTimer } from '../common/MissionTimer';
 import { AutonomousMissionStatusBar } from '../Mission/AutonomousMissionStatusBar';
 import { AutonomousMissionConfigModal } from '../Mission/AutonomousMissionConfigModal';
 import { LoiterTestMissionCard } from '../Mission/LoiterTestMissionCard';
+import { CircleTestMissionCard } from '../Mission/CircleTestMissionCard';
+import { DisarmSafetyConfirmModal } from '../common/DisarmSafetyConfirmModal';
+import { BatteryMonitorCard } from '../common/BatteryMonitorCard';
 import {
   Play,
   RotateCcw,
@@ -87,6 +90,8 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
 
   // RTL Confirmation Modal State
   const [isRtlConfirmOpen, setIsRtlConfirmOpen] = useState<boolean>(false);
+  // Disarm Safety Warning Modal State (mid-air protection)
+  const [isDisarmSafetyModalOpen, setIsDisarmSafetyModalOpen] = useState<boolean>(false);
 
   // Manual Backup Mode & Authority
   const [commandAuthority, setCommandAuthority] = useState<FlightCommandAuthority>(missionEngine.getCommandAuthority());
@@ -204,12 +209,12 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
     }
   };
 
-  // Handler: Explicit Real DISARM Command
-  const handleDisarmClick = async () => {
+  // Handler: Explicit Real DISARM Command with airborne height check
+  const executeDisarm = async (force: boolean = false) => {
     setArmError(null);
     setIsDisarmingInProgress(true);
     try {
-      await mavlinkService.sendDisarmCommand();
+      await mavlinkService.sendDisarmCommand(force);
       setTimeout(() => {
         if (mavlinkService.getTelemetry().isArmed) {
           setIsDisarmingInProgress(false);
@@ -220,6 +225,15 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
       setIsDisarmingInProgress(false);
       setArmError(`Disarm failed: ${e?.message || e}`);
     }
+  };
+
+  const handleDisarmClick = () => {
+    // If airborne (>0.4m), block direct disarm and show warning modal with current altitude
+    if (telemetry.isArmed && telemetry.altitude > 0.4) {
+      setIsDisarmSafetyModalOpen(true);
+      return;
+    }
+    executeDisarm(false);
   };
 
   // Handler: Explicit Real START MISSION Command
@@ -269,7 +283,7 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
     <div className="space-y-4 font-mono select-none">
       {/* 0. RESPONSIVE STATUS HUD HEADER (Requirement #13) */}
       <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-2xl">
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-2 text-xs">
           {/* DRONE */}
           <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
             <span className="text-[10px] text-slate-400 font-bold uppercase">DRONE</span>
@@ -333,6 +347,21 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
             <span className="text-[10px] text-slate-400 font-bold uppercase">QR</span>
             <span className={`text-[10px] font-extrabold ${decodedQR ? 'text-emerald-400' : isScanning ? 'text-amber-400 animate-pulse' : 'text-slate-400'}`}>
               {decodedQR ? `[${decodedQR.code}] ✓` : isScanning ? 'SCANNING' : 'STANDBY'}
+            </span>
+          </div>
+
+          {/* BATTERY */}
+          <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
+            <span className="text-[10px] text-slate-400 font-bold uppercase flex items-center space-x-1">
+              <Battery className="w-3.5 h-3.5 text-amber-400" />
+              <span>BATTERY</span>
+            </span>
+            <span className={`text-[10px] font-black ${
+              telemetry.batteryVoltage > 0
+                ? (telemetry.batteryPercent < 20 ? 'text-rose-400 animate-pulse' : 'text-emerald-400')
+                : 'text-slate-500'
+            }`}>
+              {telemetry.batteryVoltage > 0 ? `${telemetry.batteryVoltage.toFixed(1)}V (${telemetry.batteryPercent}%)` : 'NO SIGNAL'}
             </span>
           </div>
         </div>
@@ -492,8 +521,8 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
             </label>
           </div>
 
-          {/* Action Buttons: START MISSION vs RTL — RETURN TO LAUNCH */}
-          <div className="grid grid-cols-2 gap-2.5">
+          {/* Action Buttons: START MISSION, RTL, ARM/DISARM, and LAND */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {/* START MISSION BUTTON */}
             <button
               type="button"
@@ -505,7 +534,7 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
                 (!missionValidation.isValid && !forceBypassChecks) ||
                 commandAuthority === 'MANUAL'
               }
-              className={`py-3.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 transition shadow-lg ${
+              className={`py-3.5 px-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 transition shadow-lg ${
                 missionState === 'STARTING'
                   ? 'bg-amber-600 text-white animate-pulse'
                   : isMissionRunning
@@ -534,7 +563,7 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
               ) : isMissionRunning ? (
                 <>
                   <Activity className="w-4 h-4 shrink-0 animate-spin" />
-                  <span>MISSION RUNNING</span>
+                  <span>RUNNING</span>
                 </>
               ) : isMissionCompleted ? (
                 <>
@@ -544,7 +573,7 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
               ) : isMissionAborted ? (
                 <>
                   <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
-                  <span>MISSION FAILED</span>
+                  <span>FAILED</span>
                 </>
               ) : (
                 <>
@@ -558,11 +587,45 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
             <button
               type="button"
               onClick={() => setIsRtlConfirmOpen(true)}
-              className="py-3.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-600/30 transition cursor-pointer"
+              className="py-3.5 px-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-600/30 transition cursor-pointer"
               title="Return to Launch: Operator triggers automatic return to Home Reference"
             >
               <RotateCcw className="w-4 h-4 shrink-0" />
-              <span>RTL — RETURN TO LAUNCH</span>
+              <span>RTL</span>
+            </button>
+
+            {/* LIVE ARM / DISARM TOGGLE BUTTON WITH SAFETY MODAL TRIGGER */}
+            <button
+              type="button"
+              onClick={isArmed ? handleDisarmClick : handleArmClick}
+              disabled={isArmingInProgress || isDisarmingInProgress || (!pixhawkState.isConnected && !pixhawkState.isUsbConnected)}
+              className={`py-3.5 px-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 transition shadow-lg cursor-pointer ${
+                !pixhawkState.isConnected && !pixhawkState.isUsbConnected
+                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                  : isArmingInProgress
+                  ? 'bg-amber-600 text-white animate-pulse'
+                  : isDisarmingInProgress
+                  ? 'bg-amber-700 text-white animate-pulse'
+                  : isArmed
+                  ? 'bg-rose-700 hover:bg-rose-600 text-white ring-2 ring-rose-500/50'
+                  : 'bg-emerald-700 hover:bg-emerald-600 text-white ring-2 ring-emerald-500/50'
+              }`}
+              title={isArmed ? 'Disarm Motors (Prompts safety warning if airborne)' : 'Arm Motors (Spin props)'}
+            >
+              <Power className="w-4 h-4 shrink-0" />
+              <span>{isArmed ? (isDisarmingInProgress ? 'DISARMING...' : 'DISARM') : (isArmingInProgress ? 'ARMING...' : 'ARM MOTORS')}</span>
+            </button>
+
+            {/* DIRECT SAFE LAND COMMAND BUTTON */}
+            <button
+              type="button"
+              onClick={() => mavlinkService.commandLand()}
+              disabled={!pixhawkState.isConnected && !pixhawkState.isUsbConnected}
+              className="py-3.5 px-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 shadow-lg shadow-amber-600/30 transition cursor-pointer"
+              title="Command LAND Mode: Controlled vertical descent with auto-disarm upon touchdown"
+            >
+              <PlaneTakeoff className="w-4 h-4 shrink-0 rotate-180" />
+              <span>LAND NOW</span>
             </button>
           </div>
 
@@ -602,8 +665,22 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
 
         {/* Right: Target Confirmation, Telemetry Deck, & Pre-Arm Panel */}
         <div className="lg:col-span-5 space-y-4">
+          {/* Live Battery Health & Telemetry Deck */}
+          <BatteryMonitorCard
+            batteryPercent={telemetry.batteryPercent}
+            batteryVoltage={telemetry.batteryVoltage}
+            batteryCurrent={telemetry.batteryCurrent}
+          />
+
           {/* Predefined 5M Loiter Test Mission Card */}
           <LoiterTestMissionCard
+            telemetry={telemetry}
+            homePoint={homePoint}
+            pixhawkState={pixhawkState}
+          />
+
+          {/* Autonomous Circle Orbit Test Mission Card */}
+          <CircleTestMissionCard
             telemetry={telemetry}
             homePoint={homePoint}
             pixhawkState={pixhawkState}
@@ -765,6 +842,23 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
         pixhawkState={pixhawkState}
         missionState={missionState}
         onStartMission={handleStartMissionClick}
+      />
+
+      {/* Mid-Air Disarm Safety Warning Modal */}
+      <DisarmSafetyConfirmModal
+        isOpen={isDisarmSafetyModalOpen}
+        currentAltitude={telemetry.altitude}
+        verticalSpeed={telemetry.verticalSpeed}
+        flightMode={telemetry.flightMode}
+        onConfirmDisarm={() => {
+          setIsDisarmSafetyModalOpen(false);
+          executeDisarm(true);
+        }}
+        onCommandLand={() => {
+          setIsDisarmSafetyModalOpen(false);
+          mavlinkService.commandLand();
+        }}
+        onCancel={() => setIsDisarmSafetyModalOpen(false)}
       />
     </div>
   );

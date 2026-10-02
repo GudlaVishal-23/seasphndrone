@@ -408,11 +408,21 @@ class CircleTestService {
         }
       }
 
-      // 3. Landing touchdown detection -> Disarm
+      // 3. Landing touchdown detection -> Disarm only when safely on ground
       if (this.state.step === 'DESCENDING' || this.state.step === 'LANDING') {
-        if (telem.altitude <= 0.35 || !telem.isArmed) {
+        if (!telem.isArmed) {
+          // ArduPilot natively detected touchdown and disarmed
           if (this.descentWatchdog) clearTimeout(this.descentWatchdog);
           this.disarmAndComplete();
+        } else if (telem.altitude <= 0.20 && Math.abs(telem.verticalSpeed) <= 0.15) {
+          // Sustained stationary contact on ground
+          if (this.descentWatchdog) clearTimeout(this.descentWatchdog);
+          setTimeout(() => {
+            const cur = mavlinkService.getTelemetry();
+            if (!cur.isArmed || cur.altitude <= 0.20) {
+              this.disarmAndComplete();
+            }
+          }, 1500);
         }
       }
     });
@@ -552,30 +562,32 @@ class CircleTestService {
       }
     }, 1500);
 
-    // Descent watchdog (35s)
+    // Descent watchdog (50s) - allow ample time for safe landing and ArduPilot native touchdown disarm
     if (this.descentWatchdog) clearTimeout(this.descentWatchdog);
     this.descentWatchdog = setTimeout(() => {
       if (this.state.step === 'DESCENDING' || this.state.step === 'LANDING') {
         const cur = mavlinkService.getTelemetry();
-        if (cur.altitude <= 0.45 || !cur.isArmed) {
+        if (!cur.isArmed || cur.altitude <= 0.25) {
           this.disarmAndComplete();
         } else {
-          this.abort('Descent timeout: Drone did not touchdown within 35 seconds.');
+          this.abort('Descent timeout: Drone did not touchdown within 50 seconds.');
         }
       }
-    }, 35000);
+    }, 50000);
   }
 
   private async disarmAndComplete(): Promise<void> {
     this.clearAllTimers();
 
     this.state.step = 'DISARMING';
-    this.state.stepMessage = `Touchdown confirmed. Disarming motors...`;
+    this.state.stepMessage = `Touchdown confirmed. Motors disarmed.`;
     this.notifyState();
 
-    try {
-      await mavlinkService.sendDisarmCommand();
-    } catch (e) {}
+    if (mavlinkService.getTelemetry().isArmed) {
+      try {
+        await mavlinkService.sendDisarmCommand(false); // SAFE NON-FORCED DISARM
+      } catch (e) {}
+    }
 
     setTimeout(() => {
       this.state.step = 'COMPLETED';

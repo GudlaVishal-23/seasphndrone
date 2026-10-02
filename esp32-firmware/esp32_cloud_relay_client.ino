@@ -297,7 +297,13 @@ void connectToCloudRelay() {
 void setup() {
   // Initialize USB Serial for Monitor
   Serial.begin(115200);
-  delay(1000); // 1-second delay for USB/UART to stabilize
+  
+  // Give ESP32-S3 Native USB CDC time to attach to PC (prevents missed logs)
+  unsigned long startWait = millis();
+  while (!Serial && millis() - startWait < 3000) {
+    delay(50);
+  }
+  delay(500);
 
   Serial.println();
   Serial.println("=========================================================");

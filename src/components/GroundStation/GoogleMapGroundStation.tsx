@@ -432,7 +432,7 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
     `, { className: 'tactical-popup' });
 
     // Allow dragging Home Point before mission start
-    marker.on('dragend', (e) => {
+    marker.on('dragend', (e: any) => {
       const target = e.target as L.Marker;
       const pos = target.getLatLng();
       onSetHomePoint({ lat: pos.lat, lng: pos.lng });
@@ -720,7 +720,7 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
       `, { className: 'tactical-popup' });
 
       // If user drags individual waypoint in Waypoint mode: update coordinate
-      wpMarker.on('dragend', (e) => {
+      wpMarker.on('dragend', (e: any) => {
         const target = e.target as L.Marker;
         const newPos = target.getLatLng();
         setDrawnPoints((prev) => {

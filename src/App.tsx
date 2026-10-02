@@ -90,8 +90,12 @@ export const App: React.FC = () => {
   }, []);
 
   // Action Handlers
-  const handleSetHomePoint = async () => {
-    await missionEngine.setHomePoint();
+  const handleSetHomePoint = async (coords?: { lat: number; lng: number }) => {
+    if (coords) {
+      await missionEngine.setHomePoint(coords.lat, coords.lng);
+    } else {
+      await missionEngine.setHomePoint();
+    }
     setHomePoint(mavlinkService.getHomePoint());
     setPreFlight(missionEngine.checkPreFlight());
   };

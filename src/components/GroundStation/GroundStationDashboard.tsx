@@ -10,6 +10,7 @@ import { HomePointSetter } from './HomePointSetter';
 import { PreArmChecksPanel } from '../common/PreArmChecksPanel';
 import { ControlModePanel } from '../common/ControlModePanel';
 import { TacticalMap } from './TacticalMap';
+import { GoogleMapGroundStation } from './GoogleMapGroundStation';
 import { LiveVideoFeed } from './LiveVideoFeed';
 import { ConnectionStatusDeck } from '../common/ConnectionStatusDeck';
 import { PixhawkConnectionCard } from '../Drone/PixhawkConnectionCard';
@@ -30,7 +31,11 @@ import {
   ChevronUp,
   Clock,
   Settings,
-  MapPin
+  MapPin,
+  Map as MapIcon,
+  Columns,
+  Video as VideoIcon,
+  X
 } from 'lucide-react';
 
 interface GroundStationDashboardProps {
@@ -43,7 +48,7 @@ interface GroundStationDashboardProps {
   isReadyForMission: boolean;
   pixhawkState: PixhawkConnectionState;
   runnerLink: RunnerLinkState;
-  onSetHomePoint: () => void;
+  onSetHomePoint: (coords?: { lat: number; lng: number }) => void;
   onStartMission: () => void;
   onEmergencyRTL: () => void;
   onSwitchToManual?: () => void;
@@ -70,6 +75,8 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
   const [showHardware, setShowHardware] = useState(false);
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [forceBypassChecks, setForceBypassChecks] = useState<boolean>(() => missionEngine.getForceBypassChecks());
+  const [workspaceView, setWorkspaceView] = useState<'MAP' | 'SPLIT' | 'VIDEO'>('MAP');
+  const [isPipVideoVisible, setIsPipVideoVisible] = useState<boolean>(true);
 
   const missionValidation = missionEngine.validateMission();
   const missionConfig = missionEngine.getMissionConfig();
@@ -182,15 +189,130 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
       />
 
       {/* ============================================================ */}
-      {/* 3. LIVE VIDEO + MAP (2-column desktop, stacked mobile)       */}
+      {/* 3. PRIMARY GOOGLE MAPS GROUND STATION WORKSPACE             */}
       {/* ============================================================ */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <LiveVideoFeed className="h-[260px] sm:h-[340px] lg:h-[400px]" />
-        <TacticalMap
-          telemetry={telemetry}
-          homePoint={homePoint}
-          className="h-[260px] sm:h-[340px] lg:h-[400px]"
-        />
+      <div className="space-y-2.5">
+        {/* Workspace Mode Switcher (Google Map Focused, Split, Video Stream) */}
+        <div className="flex items-center justify-between flex-wrap gap-2 px-1">
+          <div className="flex items-center space-x-1.5 bg-slate-900/90 p-1 rounded-xl border border-slate-800 text-[11px] font-bold">
+            <button
+              type="button"
+              onClick={() => setWorkspaceView('MAP')}
+              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition cursor-pointer ${
+                workspaceView === 'MAP'
+                  ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <MapIcon className="w-3.5 h-3.5" />
+              <span>GOOGLE MAP WORKSPACE (PRIMARY)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setWorkspaceView('SPLIT')}
+              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition cursor-pointer ${
+                workspaceView === 'SPLIT'
+                  ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Columns className="w-3.5 h-3.5" />
+              <span>SPLIT VIEW</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setWorkspaceView('VIDEO')}
+              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition cursor-pointer ${
+                workspaceView === 'VIDEO'
+                  ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <VideoIcon className="w-3.5 h-3.5" />
+              <span>VIDEO STREAM</span>
+            </button>
+          </div>
+
+          <div className="hidden sm:flex items-center space-x-2 text-[11px] text-slate-400 font-bold">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>Map Workspace Active • Google Maps Engine</span>
+          </div>
+        </div>
+
+        {/* View Layouts */}
+        {workspaceView === 'MAP' && (
+          <div className="relative">
+            <GoogleMapGroundStation
+              telemetry={telemetry}
+              homePoint={homePoint}
+              pixhawkState={pixhawkState}
+              missionState={missionState}
+              onSetHomePoint={onSetHomePoint}
+              onStartMission={onStartMission}
+              onEmergencyRTL={onEmergencyRTL}
+              isPipVideoVisible={isPipVideoVisible}
+              onTogglePipVideo={() => setIsPipVideoVisible(!isPipVideoVisible)}
+            />
+
+            {/* Floating Picture-in-Picture Live Video Feed Overlay */}
+            {isPipVideoVisible && (
+              <div className="absolute bottom-6 left-16 z-[450] w-64 sm:w-80 shadow-2xl rounded-2xl overflow-hidden border border-sky-500/60 bg-slate-950/95 backdrop-blur-md animate-in fade-in zoom-in-95">
+                <div className="flex items-center justify-between px-3 py-1.5 bg-slate-900 border-b border-slate-800 text-[10px] font-black uppercase text-sky-300">
+                  <div className="flex items-center space-x-1.5">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                    <span>LIVE DRONE OPTICAL FEED (PIP)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsPipVideoVisible(false)}
+                    className="p-1 text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <LiveVideoFeed className="h-[180px] sm:h-[220px]" />
+              </div>
+            )}
+          </div>
+        )}
+
+        {workspaceView === 'SPLIT' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <LiveVideoFeed className="h-[450px] sm:h-[550px] lg:h-[650px]" />
+            <GoogleMapGroundStation
+              telemetry={telemetry}
+              homePoint={homePoint}
+              pixhawkState={pixhawkState}
+              missionState={missionState}
+              onSetHomePoint={onSetHomePoint}
+              onStartMission={onStartMission}
+              onEmergencyRTL={onEmergencyRTL}
+              className="h-[450px] sm:h-[550px] lg:h-[650px]"
+            />
+          </div>
+        )}
+
+        {workspaceView === 'VIDEO' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            <div className="lg:col-span-8">
+              <LiveVideoFeed className="h-[500px] sm:h-[600px]" />
+            </div>
+            <div className="lg:col-span-4">
+              <GoogleMapGroundStation
+                telemetry={telemetry}
+                homePoint={homePoint}
+                pixhawkState={pixhawkState}
+                missionState={missionState}
+                onSetHomePoint={onSetHomePoint}
+                onStartMission={onStartMission}
+                onEmergencyRTL={onEmergencyRTL}
+                className="h-[500px] sm:h-[600px]"
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ============================================================ */}

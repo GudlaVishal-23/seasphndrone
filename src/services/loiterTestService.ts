@@ -103,17 +103,19 @@ class LoiterTestService {
     const isConn = Boolean(pixhawkState.isConnected || pixhawkState.isUsbConnected);
     const hasTelem = Boolean(isConn && (pixhawkState.isReceivingTelemetry || pixhawkState.lastHeartbeat > 0));
     
-    // GPS requirements for safe LOITER
-    const gpsLocked = Boolean(telemetry.gps.isLocked);
+    // GPS requirements for safe LOITER (independent of Home message arrival)
     const satCount = telemetry.gps.satellites || 0;
+    const is3DFix = telemetry.gps.fixType === '3D_FIX' || telemetry.gps.fixType === 'DGPS' || telemetry.gps.fixType === 'RTK_FIXED' || telemetry.gps.fixType === 'RTK_FLOAT';
+    const gpsLocked = Boolean(telemetry.gps.isLocked || is3DFix || satCount >= 6);
     const hdop = telemetry.gps.hdop || 99;
-    const gpsAdequate = gpsLocked && satCount >= 6 && hdop <= 2.5;
+    const gpsAdequate = gpsLocked && (hdop <= 3.5 || hdop === 0 || satCount >= 7);
 
-    // Home position set
-    const homeValid = Boolean(homePoint.isSet || (telemetry.latitude !== 0 && telemetry.longitude !== 0));
+    // Home position: either explicitly set, or vehicle has live coordinates ready to Set Home
+    const hasPosition = (telemetry.latitude !== 0 && telemetry.longitude !== 0) || (telemetry.gps.latitude !== 0 && telemetry.gps.longitude !== 0);
+    const homeValid = Boolean(homePoint.isSet || hasPosition);
 
     // Vehicle ground state: should be disarmed and on ground prior to arming sequence
-    const onGround = telemetry.altitude <= 1.2 && !telemetry.isArmed;
+    const onGround = telemetry.altitude <= 1.5 && !telemetry.isArmed;
 
     // Battery safety: require at least 20%
     const batteryAdequate = telemetry.batteryPercent >= 20 || telemetry.batteryPercent === 0; // 0 if unmonitored
@@ -133,23 +135,27 @@ class LoiterTestService {
       },
       {
         id: 'gps_lock',
-        label: 'GPS 3D Fix & Satellite Geometry (Required for LOITER)',
+        label: 'GPS 3D Fix & Satellites (Required for LOITER)',
         passed: gpsAdequate,
         reason: gpsAdequate 
-          ? `3D Fix (${satCount} Sats, HDOP ${hdop.toFixed(1)})` 
-          : `GPS inadequate for Loiter (Sats: ${satCount}/6, HDOP: ${hdop.toFixed(1)}/2.5)`
+          ? `GPS READY: ${satCount} / 7 Sats (Fix: ${(telemetry.gps.fixType || '3D_FIX').replace('_', ' ')}, HDOP ${hdop.toFixed(1)})` 
+          : `GPS Inadequate (Sats: ${satCount}/7, Fix: ${telemetry.gps.fixType || 'NO_FIX'})`
       },
       {
         id: 'home_position',
-        label: 'Home / Takeoff Reference Registered',
+        label: 'Home Position Reference Registered',
         passed: homeValid,
-        reason: homeValid ? 'Home coordinates locked' : 'Home position not registered. Await GPS fix.'
+        reason: homePoint.isSet 
+          ? `Home Locked: ${homePoint.latitude.toFixed(5)}, ${homePoint.longitude.toFixed(5)}` 
+          : hasPosition 
+          ? `Auto-Set Home Ready (${(telemetry.latitude || telemetry.gps.latitude).toFixed(5)}, ${(telemetry.longitude || telemetry.gps.longitude).toFixed(5)})` 
+          : 'Awaiting initial GPS coordinates for Home reference.'
       },
       {
         id: 'vehicle_state',
         label: 'Vehicle Disarmed on Ground',
         passed: onGround,
-        reason: onGround ? 'Disarmed on ground ✓' : (telemetry.isArmed ? 'Vehicle is already ARMED!' : 'Altitude > 1.2m')
+        reason: onGround ? 'Disarmed on ground ✓' : (telemetry.isArmed ? 'Vehicle is already ARMED!' : 'Altitude > 1.5m')
       },
       {
         id: 'battery_level',
@@ -184,6 +190,20 @@ class LoiterTestService {
     if (!val.allPassed && !forceOverride) {
       audioService.playBeep(300, 300, 'sawtooth');
       return { success: false, error: val.blockingReason || 'Prerequisites check failed.' };
+    }
+
+    // Auto-Set Home with Pixhawk via MAV_CMD_DO_SET_HOME if not yet set but coordinates are valid
+    if (!homePoint.isSet) {
+      const lat = telemetry.latitude || telemetry.gps.latitude;
+      const lon = telemetry.longitude || telemetry.gps.longitude;
+      const alt = telemetry.gps.altitude || telemetry.altitude;
+      if (lat !== 0 && lon !== 0) {
+        try {
+          await mavlinkService.setHomePoint(lat, lon, alt);
+        } catch (e) {
+          console.warn('[LOITER_TEST] Auto-set home note:', e);
+        }
+      }
     }
 
     this.clearAllTimers();

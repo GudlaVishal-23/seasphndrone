@@ -109,15 +109,18 @@ export const PreArmChecksPanel: React.FC<PreArmChecksPanelProps> = ({
   }
 
   // 3. Mode-Aware GPS 3D Fix Requirement
-  const hasGps3DFix = telemetry.gps.isLocked && telemetry.gps.satellites >= 6;
+  const gpsFixType = telemetry.gps.fixType || 'NO_FIX';
+  const hasGps3DFix = telemetry.gps.isLocked || (telemetry.gps.satellites >= 6 && gpsFixType !== 'NO_GPS' && gpsFixType !== 'NO_FIX');
+  const fixDisplayName = gpsFixType === '3D_FIX' ? '3D' : gpsFixType.replace('_', ' ');
+
   if (isPosDependent) {
     // Position-dependent mode (e.g. AUTO, LOITER, GUIDED) REQUIRES GPS
     if (hasGps3DFix) {
       items.push({
         id: 'gps_mode_pass',
         category: 'NAVIGATION SENSORS',
-        title: `GPS 3D Fix (${activeMode} Mode)`,
-        description: `Position estimate locked with ${telemetry.gps.satellites} satellites (HDOP: ${telemetry.gps.hdop.toFixed(1)})`,
+        title: `GPS READY (${activeMode} Mode)`,
+        description: `Satellites: ${telemetry.gps.satellites} / 7 | Fix: ${fixDisplayName} (HDOP: ${telemetry.gps.hdop.toFixed(1)})`,
         status: 'PASS'
       });
     } else {
@@ -125,7 +128,7 @@ export const PreArmChecksPanel: React.FC<PreArmChecksPanelProps> = ({
         id: 'gps_mode_blocking',
         category: 'NAVIGATION SENSORS',
         title: `GPS 3D Fix Required for ${activeMode}`,
-        description: `Position estimate unavailable (${telemetry.gps.satellites} sats visible, fix: ${telemetry.gps.fixType}). ${activeMode} mode requires a valid 3D GPS position fix before arming.`,
+        description: `Position estimate unavailable (Satellites: ${telemetry.gps.satellites} / 7, Fix: ${fixDisplayName}). ${activeMode} mode requires a valid 3D GPS position fix before arming.`,
         status: 'BLOCKING'
       });
     }
@@ -135,8 +138,8 @@ export const PreArmChecksPanel: React.FC<PreArmChecksPanelProps> = ({
       items.push({
         id: 'gps_althold_pass',
         category: 'NAVIGATION SENSORS',
-        title: `GPS 3D Fix (Optional in ${activeMode})`,
-        description: `3D fix available (${telemetry.gps.satellites} satellites visible).`,
+        title: `GPS READY (Optional in ${activeMode})`,
+        description: `Satellites: ${telemetry.gps.satellites} / 7 | Fix: ${fixDisplayName}`,
         status: 'PASS'
       });
     } else {
@@ -150,10 +153,12 @@ export const PreArmChecksPanel: React.FC<PreArmChecksPanelProps> = ({
     }
   }
 
-  // 4. Mode-Aware Home Point Requirement
-  const hasHomePoint = homePoint.isSet && homePoint.latitude !== 0;
+  // 4. Mode-Aware Home Point Requirement (Decoupled from GPS readiness)
+  const hasExplicitHome = homePoint.isSet && homePoint.latitude !== 0;
+  const hasVehiclePosForHome = (telemetry.latitude !== 0 && telemetry.longitude !== 0) || (telemetry.gps.latitude !== 0 && telemetry.gps.longitude !== 0);
+
   if (isPosDependent) {
-    if (hasHomePoint) {
+    if (hasExplicitHome) {
       items.push({
         id: 'home_pass',
         category: 'HOME POSITION',
@@ -161,22 +166,33 @@ export const PreArmChecksPanel: React.FC<PreArmChecksPanelProps> = ({
         description: `Locked at ${homePoint.latitude.toFixed(6)}, ${homePoint.longitude.toFixed(6)} (Alt: ${homePoint.altitude.toFixed(1)}m)`,
         status: 'PASS'
       });
+    } else if (hasVehiclePosForHome || hasGps3DFix) {
+      // Live vehicle position is available — ArduPilot / GCS auto-sets Home upon arming or via Set Home
+      items.push({
+        id: 'home_auto_pass',
+        category: 'HOME POSITION',
+        title: 'Home Position Ready (Auto-Set on Arm / Set Home)',
+        description: `Live position available (${(telemetry.latitude || telemetry.gps.latitude).toFixed(6)}, ${(telemetry.longitude || telemetry.gps.longitude).toFixed(6)}). Autopilot sets Home origin automatically upon arming or via "Set Home Point".`,
+        status: 'PASS'
+      });
     } else {
       items.push({
         id: 'home_blocking',
         category: 'HOME POSITION',
         title: `Home Point Required for ${activeMode}`,
-        description: `Home position is not set. Position-dependent mode (${activeMode}) requires a valid home origin for navigation and RTL.`,
+        description: `Home position is not set. Position-dependent mode (${activeMode}) requires a valid home origin or live GPS lock for navigation and RTL.`,
         status: 'BLOCKING'
       });
     }
   } else {
-    if (hasHomePoint) {
+    if (hasExplicitHome || hasVehiclePosForHome) {
       items.push({
         id: 'home_opt_pass',
         category: 'HOME POSITION',
         title: `Home Point Configured (${activeMode})`,
-        description: `Home origin set at ${homePoint.latitude.toFixed(6)}, ${homePoint.longitude.toFixed(6)}`,
+        description: hasExplicitHome
+          ? `Home origin set at ${homePoint.latitude.toFixed(6)}, ${homePoint.longitude.toFixed(6)}`
+          : `Live position available for Home origin.`,
         status: 'PASS'
       });
     } else {

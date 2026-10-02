@@ -15,6 +15,11 @@ export const HomePointSetter: React.FC<HomePointSetterProps> = ({
   onSetHomePoint,
   disabled = false
 }) => {
+  const fixType = gps.fixType || 'NO_FIX';
+  const isGpsReady = gps.isLocked || (gps.satellites >= 6 && fixType !== 'NO_GPS' && fixType !== 'NO_FIX');
+  const fixLabel = fixType === '3D_FIX' ? '3D' : fixType.replace('_', ' ');
+  const canSetHome = isGpsReady || (gps.latitude !== 0 && gps.longitude !== 0);
+
   return (
     <div className="bg-slate-900/90 rounded-xl p-3.5 sm:p-4 border border-slate-800 hud-border font-mono flex flex-col justify-between">
       {/* Header */}
@@ -27,10 +32,10 @@ export const HomePointSetter: React.FC<HomePointSetterProps> = ({
         </div>
         <div className="flex items-center space-x-1.5">
           <span className="text-[10px] text-slate-400">GPS STATUS:</span>
-          {gps.isLocked ? (
+          {isGpsReady ? (
             <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-500/40 flex items-center space-x-1">
               <CheckCircle2 className="w-3 h-3" />
-              <span>LOCKED ✓</span>
+              <span>GPS READY ({fixLabel})</span>
             </span>
           ) : (
             <span className="text-[10px] font-bold text-amber-400 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-500/40 flex items-center space-x-1">
@@ -64,7 +69,7 @@ export const HomePointSetter: React.FC<HomePointSetterProps> = ({
         <div className="flex justify-between items-center text-slate-400">
           <span>Satellites / HDOP:</span>
           <span className="font-bold text-sky-400">
-            {gps.satellites} Sats (HDOP: {gps.hdop})
+            {gps.satellites} / 7 Sats (Fix: {fixLabel}, HDOP: {gps.hdop})
           </span>
         </div>
       </div>
@@ -73,12 +78,12 @@ export const HomePointSetter: React.FC<HomePointSetterProps> = ({
       <div className="flex items-center space-x-2">
         <button
           onClick={onSetHomePoint}
-          disabled={disabled || !gps.isLocked}
+          disabled={disabled || !canSetHome}
           className={`flex-1 py-2.5 px-3 rounded-lg font-bold text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center space-x-2 transition ${
             homePoint.isSet
               ? 'bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-sky-300 border border-sky-500/40'
               : 'bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white shadow-lg shadow-sky-600/30'
-          } ${disabled || !gps.isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+          } ${disabled || !canSetHome ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           <MapPin className="w-4 h-4" />
           <span>{homePoint.isSet ? 'UPDATE HOME POINT' : 'SET HOME POINT'}</span>

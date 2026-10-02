@@ -37,8 +37,8 @@
 // 1. WI-FI CONFIGURATION (Phone Hotspot or Field Wi-Fi)
 // =====================================================================================
 // Change to your Phone's Personal Hotspot or home Wi-Fi credentials:
-const char* WIFI_SSID     = "DRONE_WIFI_2.4G";      // <-- Enter your hotspot/Wi-Fi name
-const char* WIFI_PASSWORD = "your_wifi_password";   // <-- Enter your Wi-Fi password
+const char* WIFI_SSID     = "drone123";      // <-- Enter your hotspot/Wi-Fi name
+const char* WIFI_PASSWORD = "drone@123";   // <-- Enter your Wi-Fi password
 
 // Optional Fallback Wi-Fi
 const char* FALLBACK_SSID = "";

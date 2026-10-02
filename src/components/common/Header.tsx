@@ -145,14 +145,21 @@ export const Header: React.FC<HeaderProps> = ({
         )}
 
         {/* GPS */}
-        <div className={`flex items-center space-x-1.5 px-2 py-1 rounded border ${
-          telemetry.gps.isLocked 
-            ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400' 
-            : 'bg-amber-950/40 border-amber-500/30 text-amber-400'
-        }`}>
-          <Satellite className="w-3 h-3" />
-          <span>GPS: {telemetry.gps.satellites} Sats ({telemetry.gps.fixType})</span>
-        </div>
+        {(() => {
+          const fixType = telemetry.gps.fixType || 'NO_FIX';
+          const isGpsReady = telemetry.gps.isLocked || (telemetry.gps.satellites >= 6 && fixType !== 'NO_GPS' && fixType !== 'NO_FIX');
+          const fixLabel = fixType === '3D_FIX' ? '3D' : fixType.replace('_', ' ');
+          return (
+            <div className={`flex items-center space-x-1.5 px-2 py-1 rounded border ${
+              isGpsReady 
+                ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400' 
+                : 'bg-amber-950/40 border-amber-500/30 text-amber-400'
+            }`}>
+              <Satellite className="w-3 h-3" />
+              <span>{isGpsReady ? 'GPS READY' : 'GPS NO LOCK'} | Satellites: {telemetry.gps.satellites} / 7 | Fix: {fixLabel}</span>
+            </div>
+          );
+        })()}
 
         {/* Battery */}
         <div className={`flex items-center space-x-1.5 px-2 py-1 rounded border ${

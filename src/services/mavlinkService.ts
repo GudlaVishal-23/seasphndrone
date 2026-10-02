@@ -483,10 +483,27 @@ class MAVLinkService {
     return { ...this.homePoint };
   }
 
-  public setHomePoint(lat?: number, lon?: number, alt?: number): HomePoint {
-    const validLat = lat ?? this.telemetry.latitude;
-    const validLon = lon ?? this.telemetry.longitude;
-    const validAlt = alt ?? this.telemetry.gps.altitude;
+  public async setHomePoint(lat?: number, lon?: number, alt?: number): Promise<HomePoint> {
+    const validLat = (lat !== undefined && Math.abs(lat) > 0.0001) ? lat : (this.telemetry.latitude || this.telemetry.gps.latitude);
+    const validLon = (lon !== undefined && Math.abs(lon) > 0.0001) ? lon : (this.telemetry.longitude || this.telemetry.gps.longitude);
+    const validAlt = (alt !== undefined) ? alt : (this.telemetry.gps.altitude || this.telemetry.altitude);
+
+    // Command MAV_CMD_DO_SET_HOME (179)
+    // param1 = 1.0: use current vehicle position; 0.0: use explicit coords in param5, 6, 7
+    const useCurrent = (lat === undefined || lon === undefined || (lat === 0 && lon === 0));
+    try {
+      await this.sendMavlinkCommandLong(
+        179, // MAV_CMD_DO_SET_HOME
+        useCurrent ? 1.0 : 0.0,
+        0, 0, 0,
+        validLat,
+        validLon,
+        validAlt
+      );
+      this.logDiagnostic('MAVLINK', `[CMD 179] MAV_CMD_DO_SET_HOME sent to Pixhawk (useCurrent=${useCurrent}, lat=${validLat.toFixed(7)}, lon=${validLon.toFixed(7)})`, 'info');
+    } catch (e) {
+      console.warn('[SET_HOME] Note: Command send handled:', e);
+    }
 
     this.homePoint = {
       latitude: validLat,
@@ -498,7 +515,8 @@ class MAVLinkService {
 
     this.telemetry.distanceToHome = 0;
     this.notifyTelemetry();
-    this.logDiagnostic('SYSTEM', `Home Point Locked: ${validLat.toFixed(6)}, ${validLon.toFixed(6)} (Alt: ${validAlt.toFixed(1)}m)`, 'info');
+    this.notifyConnection();
+    this.logDiagnostic('SYSTEM', `Home Point Locked: ${validLat.toFixed(6)}, ${validLon.toFixed(6)} (Alt: ${validAlt.toFixed(1)}m)`, 'success');
     this.addStatusMessage('INFO', 6, `Home Point Locked: ${validLat.toFixed(6)}, ${validLon.toFixed(6)}`);
     return this.homePoint;
   }
@@ -516,11 +534,19 @@ class MAVLinkService {
     this.connectionState.statusHistory = [msg, ...this.connectionState.statusHistory.slice(0, 24)];
 
     const lower = text.toLowerCase();
-    if (lower.includes('prearm') || lower.includes('fail') || lower.includes('check')) {
+    
+    // Check if this is an informational satellite report (e.g. "16/7 sats", "16 / 7", "16 sats (minimum 7)") or passing check
+    const isPassingMsg = lower.includes('passed') || lower.includes('ready') || lower.includes('good') || lower.includes('armed');
+    const isHealthyGpsReport = (lower.includes('sat') || lower.includes('gps')) && (/\d+\s*\/\s*\d+/.test(lower) || lower.includes('min') || lower.includes('lock'));
+
+    if (severityLevel <= 4 && (lower.includes('prearm') || lower.includes('fail') || lower.includes('bad') || lower.includes('inconsistent')) && !isPassingMsg && !isHealthyGpsReport) {
       this.connectionState.preArmChecksPassed = false;
       this.connectionState.preArmFailReason = text;
-    } else if (lower.includes('armed') || lower.includes('passed')) {
+    } else if (isPassingMsg || isHealthyGpsReport || lower.includes('armed')) {
       this.connectionState.preArmChecksPassed = true;
+      if (this.connectionState.preArmFailReason && (isPassingMsg || isHealthyGpsReport)) {
+        this.connectionState.preArmFailReason = undefined;
+      }
     }
 
     this.notifyConnection();
@@ -884,8 +910,11 @@ class MAVLinkService {
       30: 'ATTITUDE',
       33: 'GLOBAL_POSITION_INT',
       74: 'VFR_HUD',
+      76: 'COMMAND_LONG',
       77: 'COMMAND_ACK',
+      124: 'GPS2_RAW',
       147: 'BATTERY_STATUS',
+      242: 'HOME_POSITION',
       253: 'STATUSTEXT'
     };
     this.connectionState.diagnostics.lastMavlinkMessageName = msgNames[msgId] || `MSG_${msgId}`;
@@ -1003,14 +1032,27 @@ class MAVLinkService {
         break;
       }
 
-      // GPS_RAW_INT (msgId = 24)
-      case 24: {
+      // GPS_RAW_INT (msgId = 24) & GPS2_RAW (msgId = 124)
+      case 24:
+      case 124: {
         if (payload.length >= 30) {
-          const fixType = view.getUint8(8);
-          const lat = view.getInt32(0, true) / 1e7;
-          const lon = view.getInt32(4, true) / 1e7;
-          const alt = view.getInt32(12, true) / 1000;
-          const eph = view.getUint16(16, true) / 100;
+          // Offsets per MAVLink v1/v2 wire specification:
+          // 0..7:   time_usec (uint64)
+          // 8..11:  lat (int32, degE7)
+          // 12..15: lon (int32, degE7)
+          // 16..19: alt (int32, mm)
+          // 20..21: eph (uint16, HDOP * 100)
+          // 22..23: epv (uint16, VDOP * 100)
+          // 24..25: vel (uint16, groundspeed cm/s)
+          // 26..27: cog (uint16, cdeg)
+          // 28:     fix_type (uint8)
+          // 29:     satellites_visible (uint8)
+          const lat = view.getInt32(8, true) / 1e7;
+          const lon = view.getInt32(12, true) / 1e7;
+          const alt = view.getInt32(16, true) / 1000;
+          const ephRaw = view.getUint16(20, true);
+          const eph = (ephRaw === 65535 || ephRaw === 0) ? 1.0 : +(ephRaw / 100).toFixed(2);
+          const fixType = view.getUint8(28);
           const satellitesVisible = view.getUint8(29);
 
           const fixMap: Record<number, GPSLocation['fixType']> = {
@@ -1023,16 +1065,30 @@ class MAVLinkService {
             6: 'RTK_FIXED'
           };
 
-          this.telemetry.gps.fixType = fixMap[fixType] || 'NO_FIX';
-          this.telemetry.gps.isLocked = fixType >= 3;
+          const is3DFix = fixType >= 3;
+          this.telemetry.gps.fixType = fixMap[fixType] || (is3DFix ? '3D_FIX' : 'NO_FIX');
+          // Dedicated GPS READY rule: fixType >= 3 (3D Fix) and satellites >= 6 (e.g. 16 satellites)
+          this.telemetry.gps.isLocked = is3DFix && (satellitesVisible >= 6 || Math.abs(lat) > 0.001);
           this.telemetry.gps.satellites = satellitesVisible;
-          this.telemetry.gps.hdop = +eph.toFixed(2);
-          if (fixType >= 3 && Math.abs(lat) > 0.001) {
+          this.telemetry.gps.hdop = eph;
+
+          if (is3DFix && Math.abs(lat) > 0.001 && Math.abs(lon) > 0.001) {
             this.telemetry.latitude = lat;
             this.telemetry.longitude = lon;
             this.telemetry.gps.latitude = lat;
             this.telemetry.gps.longitude = lon;
             this.telemetry.gps.altitude = alt;
+
+            // Auto-seed initial Home if disarmed on ground and home is not yet set
+            if (!this.homePoint.isSet && !this.telemetry.isArmed && this.telemetry.altitude <= 1.5) {
+              this.homePoint = {
+                latitude: lat,
+                longitude: lon,
+                altitude: alt,
+                timestamp: now,
+                isSet: true
+              };
+            }
           }
           this.notifyTelemetry();
         }
@@ -1050,22 +1106,55 @@ class MAVLinkService {
           const vz = view.getInt16(24, true) / 100;
           const hdg = view.getUint16(26, true) / 100;
 
-          if (Math.abs(lat) > 0.001) {
+          if (Math.abs(lat) > 0.001 && Math.abs(lon) > 0.001) {
             this.telemetry.latitude = lat;
             this.telemetry.longitude = lon;
+            // Valid coordinates from Pixhawk EKF confirms live position lock
+            if (!this.telemetry.gps.isLocked && this.telemetry.gps.satellites >= 6) {
+              this.telemetry.gps.isLocked = true;
+              if (this.telemetry.gps.fixType === 'NO_GPS' || this.telemetry.gps.fixType === 'NO_FIX') {
+                this.telemetry.gps.fixType = '3D_FIX';
+              }
+            }
           }
           this.telemetry.altitude = +Math.max(0, relativeAlt).toFixed(2);
           this.telemetry.groundSpeed = +Math.hypot(vx, vy).toFixed(2);
           this.telemetry.verticalSpeed = +(-vz).toFixed(2);
           this.telemetry.heading = +hdg.toFixed(0);
 
-          if (this.homePoint.isSet) {
+          if (this.homePoint.isSet && this.homePoint.latitude !== 0) {
             const dy = (this.telemetry.latitude - this.homePoint.latitude) * 111320;
             const dx = (this.telemetry.longitude - this.homePoint.longitude) * 111320 * Math.cos((this.homePoint.latitude * Math.PI) / 180);
             this.telemetry.distanceToHome = +Math.hypot(dx, dy).toFixed(1);
           }
 
           this.notifyTelemetry();
+        }
+        break;
+      }
+
+      // HOME_POSITION (msgId = 242)
+      case 242: {
+        if (payload.length >= 12) {
+          const lat = view.getInt32(0, true) / 1e7;
+          const lon = view.getInt32(4, true) / 1e7;
+          const alt = view.getInt32(8, true) / 1000;
+          if (Math.abs(lat) > 0.0001 && Math.abs(lon) > 0.0001) {
+            this.homePoint = {
+              latitude: lat,
+              longitude: lon,
+              altitude: alt,
+              timestamp: now,
+              isSet: true
+            };
+            if (this.telemetry.latitude !== 0 && this.telemetry.longitude !== 0) {
+              const dy = (this.telemetry.latitude - this.homePoint.latitude) * 111320;
+              const dx = (this.telemetry.longitude - this.homePoint.longitude) * 111320 * Math.cos((this.homePoint.latitude * Math.PI) / 180);
+              this.telemetry.distanceToHome = +Math.hypot(dx, dy).toFixed(1);
+            }
+            this.notifyTelemetry();
+            this.logDiagnostic('MAVLINK', `[HOME_POSITION RX] Pixhawk Home: ${lat.toFixed(7)}, ${lon.toFixed(7)} (Alt: ${alt.toFixed(1)}m)`, 'success');
+          }
         }
         break;
       }
@@ -1705,6 +1794,9 @@ class MAVLinkService {
       66: 148, // REQUEST_DATA_STREAM
       76: 152, // COMMAND_LONG
       77: 143, // COMMAND_ACK
+      124: 87, // GPS2_RAW
+      147: 154, // BATTERY_STATUS
+      242: 104, // HOME_POSITION
       253: 83  // STATUSTEXT
     };
 

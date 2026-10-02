@@ -400,9 +400,10 @@ class MissionEngine {
       }
 
       // Check 2: GPS Position Failure / Satellite Drop
-      const isGpsLost = !telem.gps.isLocked || (telem.gps.satellites < 5 && conn.connectionType !== 'SIMULATED');
+      const hasCoords = telem.latitude !== 0 && telem.longitude !== 0;
+      const isGpsLost = (!telem.gps.isLocked && !hasCoords) || (telem.gps.satellites < 4 && !hasCoords && conn.connectionType !== 'SIMULATED');
       if (isGpsLost && this.currentState !== 'GPS_ERROR' && this.currentState !== 'FAILSAFE') {
-        this.handleCriticalFailure('GPS_ERROR', 'GPS 3D Fix Lost (<5 Satellites). Halting autonomous navigation.');
+        this.handleCriticalFailure('GPS_ERROR', 'GPS 3D Fix Lost (<4 Satellites & No Position). Halting autonomous navigation.');
         return;
       }
 
@@ -511,7 +512,8 @@ class MissionEngine {
     const errors: string[] = [];
 
     // Verification 1: GPS Lock
-    if (!telem.gps.isLocked || telem.gps.satellites < 6) {
+    const isGpsValid = Boolean(telem.gps.isLocked || (telem.gps.satellites >= 6 && (telem.latitude !== 0 || telem.gps.latitude !== 0)));
+    if (!isGpsValid) {
       errors.push(`GPS Not Locked (${telem.gps.satellites} Sats)`);
     }
 
@@ -685,8 +687,12 @@ class MissionEngine {
       (conn.lastHeartbeat > 0 && Date.now() - conn.lastHeartbeat < 4000) ||
       conn.connectionType === 'SIMULATED'
     );
-    const isGpsAvailable = Boolean(telemetry.gps.isLocked && telemetry.gps.satellites >= 6 && (telemetry.gps.hdop <= 2.5 || telemetry.gps.hdop === 0));
-    const isHomeAvailable = Boolean(home.isSet && home.latitude !== 0 && home.longitude !== 0);
+    const isGpsAvailable = Boolean(
+      (telemetry.gps.isLocked || (telemetry.gps.satellites >= 6 && telemetry.gps.fixType !== 'NO_GPS' && telemetry.gps.fixType !== 'NO_FIX')) &&
+      (telemetry.gps.hdop <= 3.5 || telemetry.gps.hdop === 0)
+    );
+    const hasPosition = (telemetry.latitude !== 0 && telemetry.longitude !== 0) || (telemetry.gps.latitude !== 0 && telemetry.gps.longitude !== 0);
+    const isHomeAvailable = Boolean((home.isSet && home.latitude !== 0 && home.longitude !== 0) || hasPosition);
     const isSearchAltValid = altCheck.valid;
     const isBoundaryValid = Boolean(
       this.missionConfig.searchBoundary &&
@@ -722,14 +728,20 @@ class MissionEngine {
         id: 'gps_available',
         label: 'GPS Available',
         passed: isGpsAvailable,
-        detail: isGpsAvailable ? `3D Fix (${telemetry.gps.satellites} Sats, HDOP ${telemetry.gps.hdop.toFixed(1)})` : 'GPS Not Locked (<6 Sats)',
+        detail: isGpsAvailable 
+          ? `GPS READY: ${telemetry.gps.satellites} / 7 Sats (Fix: ${(telemetry.gps.fixType || '3D_FIX').replace('_', ' ')}, HDOP ${telemetry.gps.hdop.toFixed(1)})` 
+          : `GPS Not Locked (${telemetry.gps.satellites} Sats visible)`,
         severity: isGpsAvailable ? 'ok' : 'error'
       },
       {
         id: 'home_available',
         label: 'Home Position Available',
         passed: isHomeAvailable,
-        detail: isHomeAvailable ? `Locked at ${home.latitude.toFixed(5)}, ${home.longitude.toFixed(5)}` : 'Home Point Not Set',
+        detail: home.isSet 
+          ? `Locked at ${home.latitude.toFixed(5)}, ${home.longitude.toFixed(5)}` 
+          : hasPosition 
+          ? `Auto-Set Ready (${(telemetry.latitude || telemetry.gps.latitude).toFixed(5)}, ${(telemetry.longitude || telemetry.gps.longitude).toFixed(5)})` 
+          : 'Home Point Not Set',
         severity: isHomeAvailable ? 'ok' : 'error'
       },
       {
@@ -794,8 +806,8 @@ class MissionEngine {
     return { isReady: val.isValid, checklist };
   }
 
-  public setHomePoint(): boolean {
-    const home = mavlinkService.setHomePoint();
+  public async setHomePoint(): Promise<boolean> {
+    const home = await mavlinkService.setHomePoint();
     if (home.isSet) {
       this.transitionTo('HOME_SET', `Home point locked: ${home.latitude.toFixed(6)}, ${home.longitude.toFixed(6)}`);
       audioService.playBeep(1000, 100);

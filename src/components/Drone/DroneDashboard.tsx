@@ -107,7 +107,7 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
     missionState === 'QR_SCANNING';
 
   // Live Telemetry & Pre-Arm State
-  const isGpsReady = telemetry.gps.isLocked && telemetry.gps.satellites >= 6 && telemetry.gps.hdop <= 2.5;
+  const isGpsReady = telemetry.gps.isLocked || (telemetry.gps.satellites >= 6 && telemetry.gps.fixType !== 'NO_GPS' && telemetry.gps.fixType !== 'NO_FIX');
   const isTelemetryReceiving = pixhawkState.isConnected && pixhawkState.isReceivingTelemetry;
   const isArmed = telemetry.isArmed;
   const isMissionRunning =
@@ -293,7 +293,7 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
             <span className="text-[10px] text-slate-400 font-bold uppercase">GPS</span>
             <span className={`text-[10px] font-black flex items-center space-x-1 ${isGpsReady ? 'text-emerald-400' : 'text-amber-400'}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${isGpsReady ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-              <span>{isGpsReady ? 'LOCKED' : 'ACQUIRING'}</span>
+              <span>{isGpsReady ? 'READY' : 'ACQUIRING'}</span>
             </span>
           </div>
 

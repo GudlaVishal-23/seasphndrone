@@ -125,6 +125,9 @@ const unsigned long PING_INTERVAL_MS = 15000;
 unsigned long lastReconnectAttempt = 0;
 const unsigned long RECONNECT_INTERVAL_MS = 3000;
 
+unsigned long lastWiFiReconnectAttempt = 0;
+const unsigned long WIFI_RECONNECT_INTERVAL_MS = 6000;
+
 // Periodic 3-second live diagnostic print timer
 unsigned long lastDiagnosticPrint = 0;
 const unsigned long DIAGNOSTIC_INTERVAL_MS = 3000;
@@ -204,9 +207,11 @@ void connectToWiFi() {
   Serial.printf("📡 [WIFI] Connecting to SSID: '%s' ...\n", WIFI_SSID);
   Serial.println("---------------------------------------------------------");
   
+  // Clean disconnect to prevent 'wifi:sta is connecting, cannot set config' errors in ESP-IDF
+  WiFi.disconnect(true);
+  delay(150);
   WiFi.mode(WIFI_STA);
-  // Configure Google Public DNS (8.8.8.8) to guarantee .onrender.com resolves on all mobile hotspots
-  WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, IPAddress(8, 8, 8, 8), IPAddress(1, 1, 1, 1));
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   unsigned long startAttempt = millis();
@@ -222,6 +227,8 @@ void connectToWiFi() {
   // Fallback Wi-Fi check
   if (WiFi.status() != WL_CONNECTED && strlen(FALLBACK_SSID) > 0) {
     Serial.printf("\n📡 [WIFI] Trying fallback SSID: '%s' ...\n", FALLBACK_SSID);
+    WiFi.disconnect(true);
+    delay(150);
     WiFi.begin(FALLBACK_SSID, FALLBACK_PASS);
     startAttempt = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 10000) {
@@ -242,7 +249,11 @@ void connectToWiFi() {
     configTime(0, 0, "pool.ntp.org", "time.google.com");
     Serial.println("---------------------------------------------------------");
   } else {
-    Serial.println("❌ [WIFI FAILED] Could not connect to Wi-Fi. Check SSID and password.");
+    Serial.println("❌ [WIFI FAILED] Could not connect to Wi-Fi.");
+    Serial.println("   👉 1. Make sure your Phone Personal Hotspot is turned ON.");
+    Serial.println("   👉 2. If on iPhone/Android, ensure 'Maximize Compatibility' (2.4 GHz) is enabled.");
+    Serial.printf("   👉 3. Verify SSID '%s' and password match lines 40-41 in this code.\n", WIFI_SSID);
+    Serial.println("---------------------------------------------------------");
   }
 }
 
@@ -327,8 +338,11 @@ void loop() {
   // 1. Maintain Wi-Fi Connection
   if (WiFi.status() != WL_CONNECTED) {
     updateLED(1);
-    connectToWiFi();
-    delay(500);
+    if (millis() - lastWiFiReconnectAttempt > WIFI_RECONNECT_INTERVAL_MS) {
+      lastWiFiReconnectAttempt = millis();
+      connectToWiFi();
+    }
+    delay(100);
     return;
   }
 

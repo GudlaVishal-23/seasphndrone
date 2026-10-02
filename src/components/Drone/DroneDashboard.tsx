@@ -670,6 +670,7 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
             batteryPercent={telemetry.batteryPercent}
             batteryVoltage={telemetry.batteryVoltage}
             batteryCurrent={telemetry.batteryCurrent}
+            batteryCellCount={telemetry.batteryCellCount}
           />
 
           {/* Predefined 5M Loiter Test Mission Card */}

@@ -126,8 +126,8 @@ class MAVLinkService {
   };
 
   private telemetry: DroneTelemetry = {
-    latitude: 12.9715987,
-    longitude: 77.5945627,
+    latitude: 0.0,
+    longitude: 0.0,
     altitude: 0.0,
     targetAltitude: 0.0,
     groundSpeed: 0.0,
@@ -136,9 +136,10 @@ class MAVLinkService {
     batteryPercent: 0,
     batteryVoltage: 0.0,
     batteryCurrent: 0.0,
+    batteryCellCount: 3,
     gps: {
-      latitude: 12.9715987,
-      longitude: 77.5945627,
+      latitude: 0.0,
+      longitude: 0.0,
       altitude: 0.0,
       satellites: 0,
       hdop: 99.0,
@@ -155,12 +156,14 @@ class MAVLinkService {
   };
 
   private homePoint: HomePoint = {
-    latitude: 12.9715987,
-    longitude: 77.5945627,
+    latitude: 0.0,
+    longitude: 0.0,
     altitude: 0.0,
     timestamp: 0,
     isSet: false
   };
+
+  private pendingMissionItems: Array<{ lat: number; lon: number; alt: number; command?: number }> = [];
 
   // MAVLink Parser Buffers
   private rxBuffer: Uint8Array = new Uint8Array(4096);
@@ -996,10 +999,20 @@ class MAVLinkService {
             const voltageV = +(voltageMv / 1000).toFixed(2);
             this.telemetry.batteryVoltage = voltageV;
             this.telemetry.batteryCurrent = +Math.max(0, currentA).toFixed(2);
+
+            // Dynamically detect or refine cell count (default 3S for this drone)
+            if (voltageV > 20.0) {
+              this.telemetry.batteryCellCount = 6;
+            } else if (voltageV > 13.2) {
+              this.telemetry.batteryCellCount = 4;
+            } else {
+              this.telemetry.batteryCellCount = 3;
+            }
+
             if (batteryRemaining >= 0 && batteryRemaining <= 100) {
               this.telemetry.batteryPercent = batteryRemaining;
             } else if (voltageV > 0) {
-              this.telemetry.batteryPercent = this.calculateLiPoPercentage(voltageV);
+              this.telemetry.batteryPercent = this.calculateLiPoPercentage(voltageV, this.telemetry.batteryCellCount);
             }
           }
           this.notifyTelemetry();
@@ -1038,14 +1051,22 @@ class MAVLinkService {
         // 10..29 voltages[10] (uint16 mV), 30..31 current_battery (int16 10*mA), 35 battery_remaining
         if (payload.length >= 12) {
           let totalVolts = 0;
+          let activeCells = 0;
           for (let c = 0; c < 10; c++) {
             const cellOffset = 10 + c * 2;
             if (cellOffset + 2 <= payload.length) {
               const cellMv = view.getUint16(cellOffset, true);
               if (cellMv > 0 && cellMv < 65000) {
                 totalVolts += cellMv / 1000;
+                activeCells++;
               }
             }
+          }
+
+          if (activeCells > 0) {
+            this.telemetry.batteryCellCount = activeCells;
+          } else if (totalVolts > 0) {
+            this.telemetry.batteryCellCount = totalVolts > 20.0 ? 6 : totalVolts > 13.2 ? 4 : 3;
           }
 
           if (totalVolts > 0) {
@@ -1064,12 +1085,39 @@ class MAVLinkService {
             if (batteryRemaining >= 0 && batteryRemaining <= 100) {
               this.telemetry.batteryPercent = batteryRemaining;
             } else if (this.telemetry.batteryVoltage > 0) {
-              this.telemetry.batteryPercent = this.calculateLiPoPercentage(this.telemetry.batteryVoltage);
+              this.telemetry.batteryPercent = this.calculateLiPoPercentage(this.telemetry.batteryVoltage, this.telemetry.batteryCellCount);
             }
           } else if (this.telemetry.batteryVoltage > 0) {
-            this.telemetry.batteryPercent = this.calculateLiPoPercentage(this.telemetry.batteryVoltage);
+            this.telemetry.batteryPercent = this.calculateLiPoPercentage(this.telemetry.batteryVoltage, this.telemetry.batteryCellCount);
           }
           this.notifyTelemetry();
+        }
+        break;
+      }
+
+      // MISSION_REQUEST (msgId = 40) & MISSION_REQUEST_INT (msgId = 51)
+      case 40:
+      case 51: {
+        if (payload.length >= 2) {
+          const requestedSeq = view.getUint16(0, true);
+          if (this.pendingMissionItems && requestedSeq < this.pendingMissionItems.length) {
+            const item = this.pendingMissionItems[requestedSeq];
+            this.sendMissionItemInt(requestedSeq, item);
+          }
+        }
+        break;
+      }
+
+      // MISSION_ACK (msgId = 47)
+      case 47: {
+        if (payload.length >= 3) {
+          const ackType = view.getUint8(2);
+          if (ackType === 0) {
+            this.logDiagnostic('MAVLINK', '[MISSION_ACK RX] Pixhawk accepted mission waypoints ✓', 'success');
+            this.addStatusMessage('NOTICE', 5, 'Mission stored in Pixhawk');
+          } else {
+            this.logDiagnostic('MAVLINK', `[MISSION_ACK RX] Mission ACK code: ${ackType}`, 'warn');
+          }
         }
         break;
       }
@@ -1793,6 +1841,71 @@ class MAVLinkService {
     return true;
   }
 
+  /**
+   * Upload autonomous mission waypoints to Pixhawk flight controller via MAVLink mission protocol
+   * (MISSION_COUNT -> MISSION_REQUEST/MISSION_REQUEST_INT -> MISSION_ITEM_INT -> MISSION_ACK)
+   */
+  public async uploadMissionWaypoints(
+    items: Array<{ lat: number; lon: number; alt: number; command?: number }>
+  ): Promise<boolean> {
+    const isConnected = this.connectionState.isConnected || this.connectionState.isUsbConnected;
+    if (!isConnected && !this.simInterval) {
+      this.logDiagnostic('ERROR', 'Cannot upload mission: MAVLink link not connected', 'error');
+      return false;
+    }
+
+    this.pendingMissionItems = items;
+    this.addStatusMessage('NOTICE', 5, `Uploading ${items.length} waypoints to Pixhawk FC...`);
+
+    if (this.connectionState.isRealHardware || isConnected) {
+      // 1. Send MISSION_COUNT (msgId 44)
+      const payload = new Uint8Array(4);
+      const view = new DataView(payload.buffer);
+      view.setUint16(0, items.length, true);
+      view.setUint8(2, this.connectionState.systemId || 1);
+      view.setUint8(3, this.connectionState.componentId || 1);
+
+      const packet = this.buildMavlink1Frame(44 /* MISSION_COUNT */, payload);
+      await usbHostService.sendBytes(packet);
+      this.connectionState.bytesSent += packet.length;
+      this.logDiagnostic('MAVLINK', `[MISSION_COUNT TX] Announced ${items.length} waypoints to Pixhawk`, 'info');
+      return true;
+    } else {
+      this.logDiagnostic('MAVLINK', `[SIMULATOR] Stored ${items.length} mission waypoints`, 'info');
+      return true;
+    }
+  }
+
+  public async sendMissionItemInt(
+    seq: number,
+    item: { lat: number; lon: number; alt: number; command?: number }
+  ): Promise<boolean> {
+    const payload = new Uint8Array(37);
+    const view = new DataView(payload.buffer);
+    view.setFloat32(0, 0, true); // param1: hold time
+    view.setFloat32(4, 2.0, true); // param2: accept radius (2m)
+    view.setFloat32(8, 0, true); // param3: pass radius
+    view.setFloat32(12, 0, true); // param4: yaw
+    view.setInt32(16, Math.round(item.lat * 1e7), true);
+    view.setInt32(20, Math.round(item.lon * 1e7), true);
+    view.setFloat32(24, item.alt, true);
+    view.setUint16(28, seq, true);
+    view.setUint16(30, item.command || 16 /* MAV_CMD_NAV_WAYPOINT */, true);
+    view.setUint8(32, this.connectionState.systemId || 1);
+    view.setUint8(33, this.connectionState.componentId || 1);
+    view.setUint8(34, 3 /* MAV_FRAME_GLOBAL_RELATIVE_ALT */);
+    view.setUint8(35, seq === 0 ? 1 : 0);
+    view.setUint8(36, 1); // autocontinue
+
+    const packet = this.buildMavlink1Frame(73 /* MISSION_ITEM_INT */, payload);
+    const success = await usbHostService.sendBytes(packet);
+    if (success) {
+      this.connectionState.bytesSent += packet.length;
+      this.logDiagnostic('MAVLINK', `[MISSION_ITEM_INT TX] Sent waypoint ${seq + 1}/${this.pendingMissionItems?.length || 1} (${item.lat.toFixed(6)}, ${item.lon.toFixed(6)}, ${item.alt}m)`, 'info');
+    }
+    return success;
+  }
+
   private async sendMavlinkCommandLong(
     command: number,
     param1: number = 0,
@@ -1905,8 +2018,10 @@ class MAVLinkService {
       45: 232, // MISSION_CLEAR_ALL
       46: 11,  // MISSION_ITEM_REACHED
       47: 153, // MISSION_ACK
+      51: 196, // MISSION_REQUEST_INT
       62: 183, // NAV_CONTROLLER_OUTPUT
       66: 148, // REQUEST_DATA_STREAM
+      73: 38,  // MISSION_ITEM_INT
       76: 152, // COMMAND_LONG
       77: 143, // COMMAND_ACK
       124: 87, // GPS2_RAW
@@ -1943,8 +2058,9 @@ class MAVLinkService {
     this.telemetry.gps.satellites = 14;
     this.telemetry.gps.hdop = 0.8;
     this.telemetry.gps.fixType = '3D_FIX';
-    this.telemetry.batteryVoltage = 16.2;
-    this.telemetry.batteryPercent = 95;
+    this.telemetry.batteryVoltage = 12.6; // 3S LiPo fully charged
+    this.telemetry.batteryPercent = 100;
+    this.telemetry.batteryCellCount = 3;
 
     this.startSimulationTelemetryLoop();
     this.logDiagnostic('SYSTEM', 'Switched to Benchmark Software-in-the-Loop Simulator mode', 'info');
@@ -2008,18 +2124,39 @@ class MAVLinkService {
     this.currentWpIndex = 0;
   }
 
-  private calculateLiPoPercentage(voltage: number): number {
-    const is4S = voltage > 13.0 && voltage < 17.5;
-    const is3S = voltage > 9.0 && voltage <= 13.0;
-    const is6S = voltage > 20.0;
+  private calculateLiPoPercentage(voltage: number, cellCount?: number): number {
+    let cells = cellCount;
+    if (!cells || cells <= 0) {
+      if (voltage > 20.0) cells = 6;
+      else if (voltage > 13.2) cells = 4;
+      else cells = 3; // Default 3S LiPo for this drone
+    }
 
-    let cellVolt = voltage / 4.0;
-    if (is3S) cellVolt = voltage / 3.0;
-    else if (is6S) cellVolt = voltage / 6.0;
+    const cellVolt = voltage / cells;
 
-    if (cellVolt >= 4.2) return 100;
-    if (cellVolt <= 3.3) return 0;
-    return Math.round(((cellVolt - 3.3) / (4.2 - 3.3)) * 100);
+    // Standard calibrated non-linear LiPo discharge curve per cell:
+    // 4.20V: 100%
+    // 4.05V: 90%
+    // 3.90V: 70%
+    // 3.82V: 50% (nominal storage)
+    // 3.75V: 25%
+    // 3.70V: 15% (low battery warning threshold)
+    // 3.50V: 5% (critical failsafe threshold)
+    // 3.30V: 0% (empty / cut-off)
+    if (cellVolt >= 4.20) return 100;
+    if (cellVolt <= 3.30) return 0;
+
+    if (cellVolt >= 4.05) {
+      return Math.round(90 + ((cellVolt - 4.05) / 0.15) * 10);
+    } else if (cellVolt >= 3.82) {
+      return Math.round(50 + ((cellVolt - 3.82) / 0.23) * 40);
+    } else if (cellVolt >= 3.70) {
+      return Math.round(15 + ((cellVolt - 3.70) / 0.12) * 35);
+    } else if (cellVolt >= 3.50) {
+      return Math.round(5 + ((cellVolt - 3.50) / 0.20) * 10);
+    } else {
+      return Math.round(((cellVolt - 3.30) / 0.20) * 5);
+    }
   }
 
   private emitPacket(msgName: MAVLinkPacket['msgName'], payload: Record<string, any>) {

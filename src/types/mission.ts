@@ -133,6 +133,7 @@ export interface DroneTelemetry {
   batteryPercent: number;
   batteryVoltage: number;
   batteryCurrent?: number;
+  batteryCellCount?: number;
   flightMode: string;
   isArmed: boolean;
   vehicleState?: 'ARMED' | 'DISARMED' | 'ARMING' | 'DISARMING' | 'UNKNOWN';

@@ -1553,6 +1553,8 @@ class MAVLinkService {
     this.telemetry.targetAltitude = targetAltMeters;
     this.addStatusMessage('NOTICE', 5, `Sending Takeoff Command to ${targetAltMeters}m...`);
     if (this.connectionState.isRealHardware || isConnected) {
+      // ArduPilot requires GUIDED flight mode to accept MAV_CMD_NAV_TAKEOFF (22)
+      await this.setFlightMode('GUIDED');
       await this.sendMavlinkCommandLong(22 /* MAV_CMD_NAV_TAKEOFF */, 0, 0, 0, 0, 0, 0, targetAltMeters);
       this.notifyTelemetry();
       return true;

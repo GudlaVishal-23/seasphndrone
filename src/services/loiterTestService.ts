@@ -232,8 +232,9 @@ class LoiterTestService {
       return { success: true };
     }
 
-    // Step 1: Arm Pixhawk (pass forceOverride to bypass ArduPilot pre-arm checks)
+    // Step 1: Switch to GUIDED mode & Arm Pixhawk (pass forceOverride to bypass ArduPilot pre-arm checks)
     try {
+      await mavlinkService.setFlightMode('GUIDED');
       await mavlinkService.sendArmCommand(forceOverride);
     } catch (e: any) {
       this.abort(`Arming failed: ${e?.message || e}`);
@@ -244,8 +245,12 @@ class LoiterTestService {
     this.armingWatchdog = setTimeout(() => {
       if (this.state.step === 'ARMING') {
         const telem = mavlinkService.getTelemetry();
+        const conn = mavlinkService.getConnectionState();
         if (!telem.isArmed) {
-          this.abort('Arming timeout: Pixhawk FC did not arm motors within 8 seconds.');
+          const detail = conn.preArmFailReason
+            ? `Pixhawk FC: ${conn.preArmFailReason}`
+            : 'Pixhawk FC did not arm motors within 8 seconds. Verify Pixhawk Safety Switch / Gyros.';
+          this.abort(detail);
         }
       }
     }, 8000);

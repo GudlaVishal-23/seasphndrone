@@ -179,7 +179,9 @@ export const AutonomousMissionConfigModal: React.FC<AutonomousMissionConfigModal
 
   const handleExecuteLoiterTest = async () => {
     setLoiterExecutionError(null);
-    if (!loiterOperatorConfirmed) return;
+    if (!loiterOperatorConfirmed) {
+      setLoiterOperatorConfirmed(true);
+    }
     const res = await loiterTestService.executeMission(telemetry, pixhawkState, homePoint, true);
     if (!res.success) {
       setLoiterExecutionError(res.error || 'Failed to start 5M Loiter Test.');
@@ -821,20 +823,39 @@ export const AutonomousMissionConfigModal: React.FC<AutonomousMissionConfigModal
                   <span>ABORT 5M LOITER TEST</span>
                 </button>
               ) : (
-                <button
-                  type="button"
-                  disabled={!loiterOperatorConfirmed || isMissionActive}
-                  onClick={handleExecuteLoiterTest}
-                  className={`px-6 py-2.5 rounded-xl font-black text-xs sm:text-sm uppercase tracking-wider flex items-center space-x-2 transition shadow-lg ${
-                    loiterOperatorConfirmed && !isMissionActive
-                      ? 'bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white shadow-sky-600/30 cursor-pointer animate-pulse'
-                      : 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
-                  }`}
-                  title={!loiterOperatorConfirmed ? 'Please confirm the operator checkbox to authorize and enable execution' : 'Execute 5M Loiter Test'}
-                >
-                  <Play className="w-4 h-4 fill-current" />
-                  <span>EXECUTE 5M LOITER TEST</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className={`flex items-center space-x-2 text-xs font-semibold select-none cursor-pointer px-3 py-2 rounded-xl transition border ${
+                    loiterOperatorConfirmed
+                      ? 'bg-amber-950/80 border-amber-500/80 text-amber-200'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      id="modal-loiter-operator-confirm-footer"
+                      checked={loiterOperatorConfirmed}
+                      onChange={(e) => setLoiterOperatorConfirmed(e.target.checked)}
+                      className="w-4 h-4 rounded text-amber-500 accent-amber-500 focus:ring-0 cursor-pointer"
+                    />
+                    <span>
+                      <span className="font-bold text-amber-300">Authorize Flight Area Clear</span>
+                    </span>
+                  </label>
+
+                  <button
+                    type="button"
+                    disabled={isMissionActive}
+                    onClick={handleExecuteLoiterTest}
+                    className={`px-6 py-2.5 rounded-xl font-black text-xs sm:text-sm uppercase tracking-wider flex items-center space-x-2 transition shadow-lg ${
+                      !isMissionActive
+                        ? 'bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white shadow-sky-600/30 cursor-pointer animate-pulse'
+                        : 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
+                    }`}
+                    title="Execute 5M Loiter Test"
+                  >
+                    <Play className="w-4 h-4 fill-current" />
+                    <span>EXECUTE 5M LOITER TEST</span>
+                  </button>
+                </div>
               )}
             </div>
           ) : (

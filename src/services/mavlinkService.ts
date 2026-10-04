@@ -164,6 +164,10 @@ class MAVLinkService {
   };
 
   private pendingMissionItems: Array<{ lat: number; lon: number; alt: number; command?: number }> = [];
+  // Ground Elevation & Relative Altitude Tracking (AGL vs AMSL)
+  private groundElevationMsl: number = 0;
+  private hasCalibratedGroundElevation: boolean = false;
+  private lastGlobalPosIntAltTime: number = 0;
 
   // MAVLink Parser Buffers
   private rxBuffer: Uint8Array = new Uint8Array(4096);
@@ -489,7 +493,7 @@ class MAVLinkService {
   public async setHomePoint(lat?: number, lon?: number, alt?: number): Promise<HomePoint> {
     const validLat = (lat !== undefined && Math.abs(lat) > 0.0001) ? lat : (this.telemetry.latitude || this.telemetry.gps.latitude);
     const validLon = (lon !== undefined && Math.abs(lon) > 0.0001) ? lon : (this.telemetry.longitude || this.telemetry.gps.longitude);
-    const validAlt = (alt !== undefined) ? alt : (this.telemetry.gps.altitude || this.telemetry.altitude);
+    const validAlt = (alt !== undefined) ? alt : (this.telemetry.gps.altitude || this.groundElevationMsl || this.telemetry.altitude);
 
     // Command MAV_CMD_DO_SET_HOME (179)
     // param1 = 1.0: use current vehicle position; 0.0: use explicit coords in param5, 6, 7
@@ -516,12 +520,54 @@ class MAVLinkService {
       isSet: true
     };
 
+    this.groundElevationMsl = validAlt;
+    this.hasCalibratedGroundElevation = true;
+
+    // Reset relative altitude to 0.0m AGL if vehicle is on ground disarmed
+    if (!this.telemetry.isArmed) {
+      this.telemetry.altitude = 0.0;
+    }
+
     this.telemetry.distanceToHome = 0;
     this.notifyTelemetry();
     this.notifyConnection();
-    this.logDiagnostic('SYSTEM', `Home Point Locked: ${validLat.toFixed(6)}, ${validLon.toFixed(6)} (Alt: ${validAlt.toFixed(1)}m)`, 'success');
+    this.logDiagnostic('SYSTEM', `Home Point Locked: ${validLat.toFixed(6)}, ${validLon.toFixed(6)} (Alt: ${validAlt.toFixed(1)}m MSL)`, 'success');
     this.addStatusMessage('INFO', 6, `Home Point Locked: ${validLat.toFixed(6)}, ${validLon.toFixed(6)}`);
     return this.homePoint;
+  }
+
+  public clearHomePoint(): void {
+    this.homePoint = {
+      latitude: 0,
+      longitude: 0,
+      altitude: 0,
+      timestamp: 0,
+      isSet: false
+    };
+    this.telemetry.distanceToHome = 0;
+    this.notifyTelemetry();
+    this.notifyConnection();
+    this.logDiagnostic('SYSTEM', 'Home Point Cleared by Operator', 'info');
+    this.addStatusMessage('INFO', 6, 'Home Point Cleared');
+  }
+
+  /**
+   * Calibrate ground altitude baseline (AGL zero datum).
+   * Zeroes the relative altitude on the ground based on current MSL barometer/GPS reading.
+   */
+  public calibrateGroundAltitude(): void {
+    const currentMsl = this.telemetry.gps.altitude || (this.homePoint.isSet ? this.homePoint.altitude : 0) || this.groundElevationMsl;
+    if (currentMsl > 0) {
+      this.groundElevationMsl = currentMsl;
+      this.hasCalibratedGroundElevation = true;
+    }
+    if (this.homePoint.isSet && this.groundElevationMsl > 0) {
+      this.homePoint.altitude = this.groundElevationMsl;
+    }
+    this.telemetry.altitude = 0.0;
+    this.notifyTelemetry();
+    this.addStatusMessage('NOTICE', 5, `Ground altitude zeroed (Datum: ${this.groundElevationMsl.toFixed(1)}m MSL).`);
+    this.logDiagnostic('SYSTEM', `Ground altitude calibrated to 0.0m AGL (Base MSL: ${this.groundElevationMsl.toFixed(1)}m)`, 'success');
   }
 
   private addStatusMessage(severity: PixhawkStatusMessage['severity'], severityLevel: number, text: string) {
@@ -770,6 +816,12 @@ class MAVLinkService {
     this.telemetry.pixhawkConnected = false;
     this.telemetry.isArmed = false;
     this.telemetry.flightMode = 'DISARMED';
+    this.telemetry.altitude = 0.0;
+
+    // Reset Ground Elevation and Relative Altitude tracking
+    this.groundElevationMsl = 0;
+    this.hasCalibratedGroundElevation = false;
+    this.lastGlobalPosIntAltTime = 0;
 
     this.logDiagnostic('TRANSPORT', 'MAVLink connection completely cleaned up & disconnected.', 'info');
     this.notifyConnection();
@@ -1037,8 +1089,28 @@ class MAVLinkService {
           if (Number.isFinite(heading) && heading >= 0) {
             this.telemetry.heading = heading;
           }
-          if (Number.isFinite(alt) && alt >= 0) {
-            this.telemetry.altitude = +alt.toFixed(2);
+          if (Number.isFinite(alt)) {
+            // VFR_HUD alt is AMSL (Mean Sea Level), typically ~450m-500m inland.
+            // Calibrate ground elevation baseline when vehicle is disarmed on ground.
+            if (!this.telemetry.isArmed && (!this.hasCalibratedGroundElevation || this.groundElevationMsl === 0) && alt > 0) {
+              this.groundElevationMsl = +alt.toFixed(2);
+              this.hasCalibratedGroundElevation = true;
+            }
+
+            const groundRef = (this.homePoint.isSet && this.homePoint.altitude > 0)
+              ? this.homePoint.altitude
+              : this.groundElevationMsl;
+
+            // Only fallback to VFR_HUD if GLOBAL_POSITION_INT (authoritative EKF relative_alt) is stale (>1500ms)
+            const hasRecentGlobalPos = (now - this.lastGlobalPosIntAltTime) < 1500;
+            if (!hasRecentGlobalPos) {
+              if (groundRef > 0) {
+                const relAlt = Math.max(0, alt - groundRef);
+                this.telemetry.altitude = (!this.telemetry.isArmed && relAlt < 1.0) ? 0.0 : +relAlt.toFixed(2);
+              } else if (!this.telemetry.isArmed) {
+                this.telemetry.altitude = 0.0;
+              }
+            }
           }
           this.notifyTelemetry();
         }
@@ -1169,8 +1241,13 @@ class MAVLinkService {
             this.telemetry.gps.longitude = lon;
             this.telemetry.gps.altitude = alt;
 
+            if (!this.telemetry.isArmed && (!this.hasCalibratedGroundElevation || this.groundElevationMsl === 0) && alt > 0) {
+              this.groundElevationMsl = alt;
+              this.hasCalibratedGroundElevation = true;
+            }
+
             // Auto-seed initial Home if disarmed on ground and home is not yet set
-            if (!this.homePoint.isSet && !this.telemetry.isArmed && this.telemetry.altitude <= 1.5) {
+            if (!this.homePoint.isSet && !this.telemetry.isArmed) {
               this.homePoint = {
                 latitude: lat,
                 longitude: lon,
@@ -1178,6 +1255,9 @@ class MAVLinkService {
                 timestamp: now,
                 isSet: true
               };
+              this.groundElevationMsl = alt;
+              this.hasCalibratedGroundElevation = true;
+              this.telemetry.altitude = 0.0;
             }
           }
           this.notifyTelemetry();
@@ -1190,7 +1270,8 @@ class MAVLinkService {
         if (payload.length >= 28) {
           const lat = view.getInt32(4, true) / 1e7;
           const lon = view.getInt32(8, true) / 1e7;
-          const relativeAlt = view.getInt32(16, true) / 1000;
+          const mslAlt = view.getInt32(12, true) / 1000;
+          const rawRelAlt = view.getInt32(16, true) / 1000;
           const vx = view.getInt16(20, true) / 100;
           const vy = view.getInt16(22, true) / 100;
           const vz = view.getInt16(24, true) / 100;
@@ -1207,7 +1288,31 @@ class MAVLinkService {
               }
             }
           }
-          this.telemetry.altitude = +Math.max(0, relativeAlt).toFixed(2);
+
+          if (!this.telemetry.isArmed && (!this.hasCalibratedGroundElevation || this.groundElevationMsl === 0) && mslAlt > 0) {
+            this.groundElevationMsl = +mslAlt.toFixed(2);
+            this.hasCalibratedGroundElevation = true;
+          }
+
+          const groundRef = (this.homePoint.isSet && this.homePoint.altitude > 0)
+            ? this.homePoint.altitude
+            : this.groundElevationMsl;
+
+          let computedRelAlt = rawRelAlt;
+          // Guard: If autopilot firmware sent raw MSL in relative_alt (common before Home lock)
+          if (Math.abs(rawRelAlt - mslAlt) < 5 && rawRelAlt > 50 && groundRef > 0) {
+            computedRelAlt = Math.max(0, mslAlt - groundRef);
+          }
+
+          // When disarmed on the ground, clamp small sensor variations strictly to 0.0m AGL
+          if (!this.telemetry.isArmed && computedRelAlt <= 1.0) {
+            computedRelAlt = 0.0;
+          } else {
+            computedRelAlt = Math.max(0, computedRelAlt);
+          }
+
+          this.telemetry.altitude = +computedRelAlt.toFixed(2);
+          this.lastGlobalPosIntAltTime = now;
           this.telemetry.groundSpeed = +Math.hypot(vx, vy).toFixed(2);
           this.telemetry.verticalSpeed = +(-vz).toFixed(2);
           this.telemetry.heading = +hdg.toFixed(0);
@@ -1237,6 +1342,11 @@ class MAVLinkService {
               timestamp: now,
               isSet: true
             };
+            this.groundElevationMsl = alt;
+            this.hasCalibratedGroundElevation = true;
+            if (!this.telemetry.isArmed) {
+              this.telemetry.altitude = 0.0;
+            }
             if (this.telemetry.latitude !== 0 && this.telemetry.longitude !== 0) {
               const dy = (this.telemetry.latitude - this.homePoint.latitude) * 111320;
               const dx = (this.telemetry.longitude - this.homePoint.longitude) * 111320 * Math.cos((this.homePoint.latitude * Math.PI) / 180);
@@ -1734,8 +1844,8 @@ class MAVLinkService {
     }
     if (this.connectionState.isRealHardware || isConnected) {
       await this.setFlightMode('GUIDED');
-      // MAV_CMD_DO_REPOSITION (192): param1 = ground speed, param2 = flags, param5 = lat, param6 = lon, param7 = alt
-      return await this.sendMavlinkCommandLong(192 /* MAV_CMD_DO_REPOSITION */, groundSpeedMps, 0, 0, 0, lat, lon, alt);
+      // MAV_CMD_DO_REPOSITION (192): param1 = ground speed, param2 = flags (1 = MAV_DO_REPOSITION_FLAGS_CHANGE_MODE), param5 = lat, param6 = lon, param7 = alt
+      return await this.sendMavlinkCommandLong(192 /* MAV_CMD_DO_REPOSITION */, groundSpeedMps, 1, 0, 0, lat, lon, alt);
     } else {
       return true;
     }
@@ -1744,6 +1854,7 @@ class MAVLinkService {
   /**
    * Controlled Mid-Flight Altitude Update:
    * Changes the target cruising altitude safely via MAV_CMD_DO_CHANGE_ALTITUDE (186)
+   * Frame 3 = MAV_FRAME_GLOBAL_RELATIVE_ALT (relative to home/ground elevation, NOT AMSL)
    */
   public async setTargetAltitude(targetAltMeters: number): Promise<boolean> {
     const isConnected = this.connectionState.isConnected || this.connectionState.isUsbConnected;
@@ -1751,8 +1862,8 @@ class MAVLinkService {
     this.addStatusMessage('NOTICE', 5, `Updating Target Altitude to ${targetAltMeters}m...`);
 
     if (this.connectionState.isRealHardware || isConnected) {
-      // MAV_CMD_DO_CHANGE_ALTITUDE (186): param1 = Target altitude, param2 = Frame (0 = global/default)
-      await this.sendMavlinkCommandLong(186 /* MAV_CMD_DO_CHANGE_ALTITUDE */, targetAltMeters, 0, 0, 0, 0, 0, 0);
+      // MAV_CMD_DO_CHANGE_ALTITUDE (186): param1 = Target altitude, param2 = Frame (3 = MAV_FRAME_GLOBAL_RELATIVE_ALT)
+      await this.sendMavlinkCommandLong(186 /* MAV_CMD_DO_CHANGE_ALTITUDE */, targetAltMeters, 3 /* MAV_FRAME_GLOBAL_RELATIVE_ALT */, 0, 0, 0, 0, 0);
       this.notifyTelemetry();
       return true;
     } else {

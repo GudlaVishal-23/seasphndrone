@@ -47,10 +47,10 @@ const char* FALLBACK_PASS = "";
 // =====================================================================================
 // 2. CLOUD RELAY WSS CONFIGURATION (ACTIVE PRODUCTION RELAY)
 // =====================================================================================
-const char* RELAY_HOST    = "saeindia-groundstation.onrender.com";
+const char* RELAY_HOST    = "saeindia-szj0.onrender.com";
 const uint16_t RELAY_PORT = 443;
 const char* RELAY_PATH    = "/connector?token=saeindia_sec_99348a7b1c0e";
-const char* RELAY_WSS_URL = "wss://saeindia-groundstation.onrender.com/connector?token=saeindia_sec_99348a7b1c0e";
+const char* RELAY_WSS_URL = "wss://saeindia-szj0.onrender.com/connector?token=saeindia_sec_99348a7b1c0e";
 
 // Google Trust Services (GTS Root R4) Root CA used by Render.com
 const char RENDER_CA_CERT[] PROGMEM = 
@@ -279,11 +279,11 @@ void connectToCloudRelay() {
   Serial.println("☁️  [WSS] Connecting to Render Cloud Relay via SSL...");
   Serial.printf("🔗 [WSS] URL: %s\n", RELAY_WSS_URL);
   
-  // Set CA Certificate for ESP32 SSL validation
-  wsClient.setCACert(RENDER_CA_CERT);
+  // Enable Insecure TLS mode (bypasses mobile hotspot NTP time lag and Cloudflare CA rotation)
+  wsClient.setInsecure();
   bool connected = wsClient.connect(RELAY_WSS_URL);
   if (!connected) {
-    wsClient.setCACert(GLOBALSIGN_ROOT_CA);
+    wsClient.setCACert(RENDER_CA_CERT);
     connected = wsClient.connect(RELAY_WSS_URL);
   }
   if (!connected) {
@@ -328,8 +328,8 @@ void setup() {
   PixhawkSerial.begin(PIXHAWK_BAUD, SERIAL_8N1, PIXHAWK_RX_PIN, PIXHAWK_TX_PIN);
   Serial.println("✅ [UART] Hardware Serial1 initialized on GPIO 18 (RX) and GPIO 17 (TX).");
 
-  // Configure WebSocket Client callbacks and SSL CA
-  wsClient.setCACert(RENDER_CA_CERT);
+  // Configure WebSocket Client callbacks and SSL mode
+  wsClient.setInsecure();
   wsClient.onMessage(onMessageCallback);
   wsClient.onEvent(onEventsCallback);
 

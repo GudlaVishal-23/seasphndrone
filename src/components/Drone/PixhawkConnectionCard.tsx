@@ -118,13 +118,15 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
   const [esp32SecureEndpoint, setEsp32SecureEndpoint] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('esp32_secure_endpoint');
-      if (saved && saved.trim().length > 0 && !saved.includes('saeindia-szj0') && !saved.includes('saeindia-groundstation')) return saved.trim();
-      if (window.location?.host && !window.location.host.includes('netlify') && !window.location.host.includes('5173')) {
+      if (saved && saved.trim().length > 0 && !saved.includes('sae-ground-station') && !saved.includes('saeindia-groundstation')) {
+        return saved.trim();
+      }
+      if (window.location?.host && !window.location.host.includes('netlify') && !window.location.host.includes('5173') && !window.location.host.includes('sae-ground-station')) {
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         return `${proto}//${window.location.host}/ws`;
       }
     }
-    return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://sae-ground-station.onrender.com/ws';
+    return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://saeindia-szj0.onrender.com/ws';
   });
 
   // Secure Relay Token
@@ -747,9 +749,9 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
                     type="text"
                     value={esp32SecureEndpoint}
                     onChange={(e) => setEsp32SecureEndpoint(e.target.value)}
-                    placeholder="wss://sae-ground-station.onrender.com/ws"
+                    placeholder="wss://saeindia-szj0.onrender.com/ws"
                     className="bg-slate-900 px-2 py-1 rounded text-slate-100 font-mono text-xs w-full border border-slate-700 focus:outline-none focus:border-emerald-500"
-                    title="Cloud WSS Relay URL (e.g. wss://sae-ground-station.onrender.com/ws)"
+                    title="Cloud WSS Relay URL (e.g. wss://saeindia-szj0.onrender.com/ws)"
                   />
                 </div>
                 <div className="sm:col-span-4 flex items-center space-x-1.5">

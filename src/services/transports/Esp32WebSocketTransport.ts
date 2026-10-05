@@ -36,7 +36,7 @@ const getDefaultRelayUrl = () => {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${window.location.host}/ws`;
   }
-  return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://sae-ground-station.onrender.com/ws';
+  return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://saeindia-szj0.onrender.com/ws';
 };
 const ENV_ESP32_WS_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ESP32_WS_URL) || 'ws://192.168.31.194:8080/ws';
 const ENV_SECURE_RELAY_URL = getDefaultRelayUrl();

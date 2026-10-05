@@ -91,7 +91,7 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
   private connectStartTime: number = 0;
 
   // Wi-Fi State Persistence (Independent of WebSocket & Page Reload)
-  private wifiSsid: string = 'DRONE_WIFI_2.4G';
+  private wifiSsid: string = 'drone123';
   private wifiConnected: boolean = true;
 
   private isConnecting: boolean = false;
@@ -367,9 +367,10 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
       }
 
       // Append token if configured and not already included
-      if (this.relayToken && !url.includes('token=')) {
+      const effectiveToken = (this.relayToken || ENV_RELAY_TOKEN || 'saeindia_sec_99348a7b1c0e').trim();
+      if (effectiveToken && !url.includes('token=')) {
         const sep = url.includes('?') ? '&' : '?';
-        url = `${url}${sep}token=${encodeURIComponent(this.relayToken)}`;
+        url = `${url}${sep}token=${encodeURIComponent(effectiveToken)}`;
       }
 
       return url;

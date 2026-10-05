@@ -31,8 +31,15 @@ export interface Esp32WebSocketOptions {
 }
 
 // Environment defaults
+const getDefaultRelayUrl = () => {
+  if (typeof window !== 'undefined' && window.location?.host && !window.location.host.includes('netlify') && !window.location.host.includes('5173')) {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}/ws`;
+  }
+  return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://sae-ground-station.onrender.com/ws';
+};
 const ENV_ESP32_WS_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ESP32_WS_URL) || 'ws://192.168.31.194:8080/ws';
-const ENV_SECURE_RELAY_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://saeindia-szj0.onrender.com/ws';
+const ENV_SECURE_RELAY_URL = getDefaultRelayUrl();
 const ENV_RELAY_TOKEN = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_RELAY_TOKEN) || 'saeindia_sec_99348a7b1c0e';
 
 function parseWsEndpoint(urlStr: string) {

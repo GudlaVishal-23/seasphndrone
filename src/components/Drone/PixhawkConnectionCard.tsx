@@ -118,7 +118,7 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
       const saved = localStorage.getItem('esp32_secure_endpoint');
       if (saved && saved.trim().length > 0) return saved.trim();
     }
-    return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || '';
+    return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://saeindia-groundstation.onrender.com/ws';
   });
 
   // Secure Relay Token
@@ -127,7 +127,7 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
       const saved = localStorage.getItem('esp32_relay_token');
       if (saved && saved.trim().length > 0) return saved.trim();
     }
-    return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_RELAY_TOKEN) || 'saeindia_secret_token_2026';
+    return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_RELAY_TOKEN) || 'saeindia_sec_99348a7b1c0e';
   });
 
   // Mobile collapsed toggle
@@ -741,9 +741,9 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
                     type="text"
                     value={esp32SecureEndpoint}
                     onChange={(e) => setEsp32SecureEndpoint(e.target.value)}
-                    placeholder="wss://your-relay-domain.onrender.com/ws"
+                    placeholder="wss://saeindia-groundstation.onrender.com/ws"
                     className="bg-slate-900 px-2 py-1 rounded text-slate-100 font-mono text-xs w-full border border-slate-700 focus:outline-none focus:border-emerald-500"
-                    title="Cloud WSS Relay URL (e.g. wss://sae-relay.onrender.com/ws)"
+                    title="Cloud WSS Relay URL (e.g. wss://saeindia-groundstation.onrender.com/ws)"
                   />
                 </div>
                 <div className="sm:col-span-4 flex items-center space-x-1.5">

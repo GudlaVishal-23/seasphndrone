@@ -1,6 +1,37 @@
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { parse } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Path to compiled frontend dist directory
+const distCandidates = [
+  path.resolve(__dirname, '../dist'),
+  path.resolve(__dirname, './dist'),
+  path.resolve(process.cwd(), 'dist')
+];
+const DIST_PATH = distCandidates.find(p => fs.existsSync(p)) || null;
+
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.wasm': 'application/wasm'
+};
 
 const PORT = process.env.PORT || 8443;
 const RELAY_TOKEN = process.env.RELAY_TOKEN || 'saeindia_secret_token_2026';
@@ -15,11 +46,11 @@ let rxBytesTotal = 0;
 let txBytesTotal = 0;
 let packetsForwarded = 0;
 
-// Create HTTP server for health checks & WebSocket upgrades
+// Create HTTP server for health checks, static frontend, and WebSocket upgrades
 const server = http.createServer((req, res) => {
   const parsedUrl = parse(req.url, true);
   
-  if (parsedUrl.pathname === '/' || parsedUrl.pathname === '/health') {
+  if (parsedUrl.pathname === '/health') {
     res.writeHead(200, {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*'
@@ -35,6 +66,52 @@ const server = http.createServer((req, res) => {
       rxBytesTotal,
       txBytesTotal,
       packetsForwarded
+    }, null, 2));
+    return;
+  }
+
+  // If frontend dist is available, serve static files (SPA fallback to index.html)
+  if (DIST_PATH) {
+    let reqPath = parsedUrl.pathname || '/';
+    let safePath = path.normalize(reqPath).replace(/^(\.\.[\/\\])+/, '');
+    let filePath = path.join(DIST_PATH, safePath);
+
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      const ext = path.extname(filePath).toLowerCase();
+      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable'
+      });
+      fs.createReadStream(filePath).pipe(res);
+      return;
+    }
+
+    // SPA fallback: return index.html for client-side routing
+    const indexPath = path.join(DIST_PATH, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-cache'
+      });
+      fs.createReadStream(indexPath).pipe(res);
+      return;
+    }
+  }
+
+  if (parsedUrl.pathname === '/') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({
+      service: 'SAE INDIA MAVLink Secure WSS Relay',
+      status: 'ok',
+      uptime: process.uptime(),
+      connectorOnline: connectorSocket !== null && connectorSocket.readyState === WebSocket.OPEN,
+      esp32Online,
+      esp32LastError,
+      browserClientsCount: browserSockets.size
     }, null, 2));
     return;
   }

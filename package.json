@@ -10,6 +10,7 @@
     "cap:sync": "cap sync",
     "cap:android": "cap open android",
     "relay:start": "node relay-server/server.js",
+    "start": "node relay-server/server.js",
     "connector:start": "node local-connector/connector.js",
     "test:e2e": "node test-e2e.cjs"
   },

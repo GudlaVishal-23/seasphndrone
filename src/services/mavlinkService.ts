@@ -696,7 +696,7 @@ class MAVLinkService {
         wifiSsid: transportManager.getEsp32Transport().getWifiSsid()
       };
     } else {
-      const defaultRelayUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://saeindia-groundstation.onrender.com/ws';
+      const defaultRelayUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://saeindia-szj0.onrender.com/ws';
       const protocolMode = options?.protocolMode || (options?.mode === 'SECURE' ? 'WSS' : 'AUTO');
       const mode = options?.mode || (protocolMode === 'WSS' ? 'SECURE' : 'LOCAL');
       const host = (options?.host && options.host.trim().length > 0 ? options.host.trim() : '192.168.31.194');

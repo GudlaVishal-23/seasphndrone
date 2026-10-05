@@ -118,7 +118,7 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
       const saved = localStorage.getItem('esp32_secure_endpoint');
       if (saved && saved.trim().length > 0) return saved.trim();
     }
-    return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://saeindia-groundstation.onrender.com/ws';
+    return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://saeindia-szj0.onrender.com/ws';
   });
 
   // Secure Relay Token
@@ -741,9 +741,9 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
                     type="text"
                     value={esp32SecureEndpoint}
                     onChange={(e) => setEsp32SecureEndpoint(e.target.value)}
-                    placeholder="wss://saeindia-groundstation.onrender.com/ws"
+                    placeholder="wss://saeindia-szj0.onrender.com/ws"
                     className="bg-slate-900 px-2 py-1 rounded text-slate-100 font-mono text-xs w-full border border-slate-700 focus:outline-none focus:border-emerald-500"
-                    title="Cloud WSS Relay URL (e.g. wss://saeindia-groundstation.onrender.com/ws)"
+                    title="Cloud WSS Relay URL (e.g. wss://saeindia-szj0.onrender.com/ws)"
                   />
                 </div>
                 <div className="sm:col-span-4 flex items-center space-x-1.5">

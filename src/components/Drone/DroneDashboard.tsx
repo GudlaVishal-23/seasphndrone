@@ -13,6 +13,7 @@ import { AutonomousMissionConfigModal } from '../Mission/AutonomousMissionConfig
 import { DisarmSafetyConfirmModal } from '../common/DisarmSafetyConfirmModal';
 import { BatteryMonitorCard } from '../common/BatteryMonitorCard';
 import { GoogleMapGroundStation } from '../GroundStation/GoogleMapGroundStation';
+import { PixhawkConnectionCard } from './PixhawkConnectionCard';
 import {
   Play,
   RotateCcw,
@@ -304,6 +305,9 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
 
   return (
     <div className="space-y-4 font-mono select-none">
+      {/* 0. AUTOMATIC USB-OTG & ESP32-S3 WI-FI / CLOUD WSS RELAY CONNECTION CARD */}
+      <PixhawkConnectionCard connectionState={pixhawkState} />
+
       {/* 0. RESPONSIVE STATUS HUD HEADER (Requirement #13) */}
       <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-2xl">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-2 text-xs">

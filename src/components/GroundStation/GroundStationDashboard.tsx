@@ -27,6 +27,7 @@ import { MissionStatusCard } from './MissionStatusCard';
 import { VisionStatusCard } from './VisionStatusCard';
 import { CollapsibleEventLog } from './CollapsibleEventLog';
 import { LiveVideoFeed } from './LiveVideoFeed';
+import { PixhawkConnectionCard } from '../Drone/PixhawkConnectionCard';
 import { customRouteService } from '../../services/customRouteService';
 import { ReturnBehavior, GroundStationMission } from '../../types/groundStationMap';
 import { Sliders } from 'lucide-react';
@@ -192,6 +193,11 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
 
   return (
     <div className="p-3 sm:p-5 max-w-7xl mx-auto space-y-4 sm:space-y-5 font-mono select-none">
+      {/* ============================================================ */}
+      {/* 0. ESP32 / PIXHAWK / CLOUD WSS CONNECTION CARD (CONNECT BUTTON) */}
+      {/* ============================================================ */}
+      <PixhawkConnectionCard connectionState={pixhawkState} />
+
       {/* ============================================================ */}
       {/* 1. OPERATIONS BAR: IP Camera -> Scanner -> Status -> Timer  */}
       {/* ============================================================ */}

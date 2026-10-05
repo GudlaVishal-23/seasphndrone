@@ -47,10 +47,10 @@ const char* FALLBACK_PASS = "";
 // =====================================================================================
 // 2. CLOUD RELAY WSS CONFIGURATION (ACTIVE PRODUCTION RELAY)
 // =====================================================================================
-const char* RELAY_HOST    = "sae-ground-station.onrender.com";
+const char* RELAY_HOST    = "saeindia-szj0.onrender.com";
 const uint16_t RELAY_PORT = 443;
 const char* RELAY_PATH    = "/connector?token=saeindia_sec_99348a7b1c0e";
-const char* RELAY_WSS_URL = "wss://sae-ground-station.onrender.com/connector?token=saeindia_sec_99348a7b1c0e";
+const char* RELAY_WSS_URL = "wss://saeindia-szj0.onrender.com/connector?token=saeindia_sec_99348a7b1c0e";
 
 // Google Trust Services (GTS Root R4) Root CA used by Render.com
 const char RENDER_CA_CERT[] PROGMEM = 
@@ -279,13 +279,9 @@ void connectToCloudRelay() {
   Serial.println("☁️  [WSS] Connecting to Render Cloud Relay via SSL...");
   Serial.printf("🔗 [WSS] URL: %s\n", RELAY_WSS_URL);
   
-  // Enable Insecure TLS mode (bypasses mobile hotspot NTP time lag and Cloudflare CA rotation)
+  // Enable Insecure TLS mode (bypasses mobile hotspot NTP time lag and GTS/Cloudflare CA date check)
   wsClient.setInsecure();
   bool connected = wsClient.connect(RELAY_WSS_URL);
-  if (!connected) {
-    wsClient.setCACert(RENDER_CA_CERT);
-    connected = wsClient.connect(RELAY_WSS_URL);
-  }
   if (!connected) {
     Serial.println("⚠️  [WSS] Connection attempt failed. Retrying in 3 seconds...");
   }

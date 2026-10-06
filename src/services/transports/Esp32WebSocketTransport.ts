@@ -344,7 +344,7 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
     const formattedPath = this.formatPath(this.path);
 
     if (proto === 'wss') {
-      let ep = (this.secureEndpoint || ENV_SECURE_RELAY_URL || 'wss://saeindia-szj0.onrender.com/ws').trim();
+      let ep = (this.secureEndpoint || ENV_SECURE_RELAY_URL || 'wss://saeindia-relay.onrender.com/ws').trim();
       let url = ep.replace(/^ws:\/\//i, 'wss://');
       if (!url.startsWith('wss://')) {
         url = `wss://${url}`;

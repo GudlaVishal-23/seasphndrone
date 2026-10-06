@@ -1149,7 +1149,7 @@ class MAVLinkService {
         break;
       }
 
-      // MISSION_REQUEST (msgId = 40)
+      // MISSION_REQUEST (msgId = 40) - ArduPilot prefers/requires MISSION_ITEM_INT
       case 40: {
         if (payload.length >= 2) {
           // Pixhawk responded -> stop retrying MISSION_COUNT
@@ -1157,12 +1157,12 @@ class MAVLinkService {
             clearInterval(this.missionCountRetryTimer);
             this.missionCountRetryTimer = null;
           }
-          this.resetMissionItemWatchdog(4000);
+          this.resetMissionItemWatchdog(6000);
 
           const requestedSeq = view.getUint16(0, true);
           if (this.pendingMissionItems && requestedSeq < this.pendingMissionItems.length) {
             const item = this.pendingMissionItems[requestedSeq];
-            this.sendMissionItem(requestedSeq, item);
+            this.sendMissionItemInt(requestedSeq, item);
           }
         }
         break;
@@ -1176,7 +1176,7 @@ class MAVLinkService {
             clearInterval(this.missionCountRetryTimer);
             this.missionCountRetryTimer = null;
           }
-          this.resetMissionItemWatchdog(4000);
+          this.resetMissionItemWatchdog(6000);
 
           const requestedSeq = view.getUint16(0, true);
           if (this.pendingMissionItems && requestedSeq < this.pendingMissionItems.length) {
@@ -1982,7 +1982,7 @@ class MAVLinkService {
     }
   }
 
-  private resetMissionItemWatchdog(timeoutMs: number = 4000) {
+  private resetMissionItemWatchdog(timeoutMs: number = 6000) {
     if (this.missionUploadTimeoutTimer) {
       clearTimeout(this.missionUploadTimeoutTimer);
     }
@@ -2134,7 +2134,7 @@ class MAVLinkService {
     item: { lat: number; lon: number; alt: number; command?: number }
   ): Promise<boolean> {
     const isMav2 = this.connectionState.mavlinkVersion === 'MAVLink 2.0';
-    const payload = new Uint8Array(isMav2 ? 38 : 37);
+    const payload = new Uint8Array(37);
     const view = new DataView(payload.buffer);
     view.setFloat32(0, 0, true); // param1: hold time
     view.setFloat32(4, 2.0, true); // param2: accept radius (2m)
@@ -2150,9 +2150,6 @@ class MAVLinkService {
     view.setUint8(34, 3 /* MAV_FRAME_GLOBAL_RELATIVE_ALT */);
     view.setUint8(35, seq === 1 ? 1 : 0 /* current: Seq 1 is active takeoff, Seq 0 is Home */);
     view.setUint8(36, 1 /* autocontinue */);
-    if (isMav2) {
-      view.setUint8(37, 0 /* mission_type: MAV_MISSION_TYPE_MISSION */);
-    }
 
     const packet = isMav2
       ? this.buildMavlink2Frame(73 /* MISSION_ITEM_INT */, payload)

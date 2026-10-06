@@ -265,6 +265,15 @@ export class SearchEngine {
   private startPathFollowingLoop(): void {
     if (this.pathFollowInterval) clearInterval(this.pathFollowInterval);
 
+    let lastCommandTime = 0;
+
+    // Command first waypoint immediately
+    if (this.activePath && this.activePath.waypoints.length > 0) {
+      const initialWp = this.activePath.waypoints[0];
+      mavlinkService.flyToPosition(initialWp.lat, initialWp.lng, this.config.searchAltitude, this.config.flightSpeedMs);
+      lastCommandTime = Date.now();
+    }
+
     this.pathFollowInterval = setInterval(() => {
       if (!this.isRunning || this.isSuspended) return;
       if (!this.activePath || !this.activePath.waypoints.length) return;
@@ -276,17 +285,25 @@ export class SearchEngine {
         return;
       }
 
+      // Periodically refresh position command to Pixhawk (every 2.5 seconds)
+      if (Date.now() - lastCommandTime >= 2500) {
+        lastCommandTime = Date.now();
+        mavlinkService.flyToPosition(currentWp.lat, currentWp.lng, this.config.searchAltitude, this.config.flightSpeedMs);
+      }
+
       // Check distance to current waypoint
       const currentPos: LatLngPoint = { lat: telemetry.latitude, lng: telemetry.longitude };
       const wpPos: LatLngPoint = { lat: currentWp.lat, lng: currentWp.lng };
       const dist = BaseSearchAlgorithm.getDistanceMeters(currentPos, wpPos);
 
-      // Waypoint reached threshold (e.g. 2.5m)
-      if (dist <= 2.5) {
+      // Waypoint reached threshold (e.g. 2.8m)
+      if (dist <= 2.8) {
         if (this.currentWaypointIndex < this.activePath.waypoints.length - 1) {
           this.currentWaypointIndex++;
           const nextWp = this.activePath.waypoints[this.currentWaypointIndex];
           this.statusMessage = `Progressing to Waypoint ${this.currentWaypointIndex + 1}/${this.activePath.waypoints.length} (Lane ${nextWp.laneIndex || 1})`;
+          lastCommandTime = Date.now();
+          mavlinkService.flyToPosition(nextWp.lat, nextWp.lng, this.config.searchAltitude, this.config.flightSpeedMs);
           this.notify();
         } else {
           this.onSearchPathCompleted();

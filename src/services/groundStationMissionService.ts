@@ -590,6 +590,11 @@ export class GroundStationMissionService {
 
   /**
    * Transmits mission to the drone communication layer (ESP32-S3 / Pixhawk MAVLink).
+   * Follows standard ArduPilot mission protocol:
+   * Seq 0: Home coordinate
+   * Seq 1: Takeoff to target altitude
+   * Seq 2..N: Shape waypoints
+   * Final Seq: Return To Launch or Land
    */
   public async uploadMissionToDrone(): Promise<{ success: boolean; message: string }> {
     if (!this.currentMission) {
@@ -601,39 +606,152 @@ export class GroundStationMissionService {
     }
 
     try {
-      // 1. Update Mission Engine configuration
-      missionEngine.updateSearchAltitude(this.currentMission.altitude);
-      missionEngine.setMissionDuration(Math.max(120, this.currentMission.estimatedDuration + 60));
+      const alt = this.currentMission.altitude;
+      const home = mavlinkService.getHomePoint();
+      const telem = mavlinkService.getTelemetry();
 
-      // 2. Transmit target altitude to flight controller via MAVLink
-      await mavlinkService.setTargetAltitude(this.currentMission.altitude);
+      const homeLat = home.isSet && home.latitude !== 0 ? home.latitude : (telem.latitude || this.currentMission.waypoints[0].lat);
+      const homeLon = home.isSet && home.longitude !== 0 ? home.longitude : (telem.longitude || this.currentMission.waypoints[0].lng);
 
-      // 3. If real connection or simulation exists, send initial waypoint position guidance
-      const firstWp = this.currentMission.waypoints[0];
-      if (firstWp) {
-        await mavlinkService.flyToPosition(
-          firstWp.lat,
-          firstWp.lng,
-          firstWp.altitude,
-          firstWp.speed
-        );
+      // 1. Build standard ArduPilot MAVLink mission sequence
+      const missionPayload: Array<{ lat: number; lon: number; alt: number; command?: number }> = [];
+
+      // Item 0: Home Position (ArduPilot standard requirement)
+      missionPayload.push({
+        lat: homeLat,
+        lon: homeLon,
+        alt: 0,
+        command: 16 /* MAV_CMD_NAV_WAYPOINT */
+      });
+
+      // Item 1: Takeoff to target altitude
+      missionPayload.push({
+        lat: homeLat,
+        lon: homeLon,
+        alt: alt,
+        command: 22 /* MAV_CMD_NAV_TAKEOFF */
+      });
+
+      // Items 2..N: Shape Waypoints
+      for (const wp of this.currentMission.waypoints) {
+        let cmd = 16; // MAV_CMD_NAV_WAYPOINT
+        if (wp.action === 'RTL') cmd = 20; // MAV_CMD_NAV_RETURN_TO_LAUNCH
+        else if (wp.action === 'LAND') cmd = 21; // MAV_CMD_NAV_LAND
+        missionPayload.push({
+          lat: wp.lat,
+          lon: wp.lng,
+          alt: wp.altitude || alt,
+          command: cmd
+        });
       }
 
-      this.currentMission.isUploaded = true;
-      this.notify();
+      // Ensure final waypoint is RTL or LAND if not already present
+      const lastCmd = missionPayload[missionPayload.length - 1].command;
+      if (lastCmd !== 20 && lastCmd !== 21) {
+        missionPayload.push({
+          lat: homeLat,
+          lon: homeLon,
+          alt: 0,
+          command: 20 /* MAV_CMD_NAV_RETURN_TO_LAUNCH */
+        });
+      }
 
-      audioService.playBeep(880, 150);
-      audioService.triggerHaptic('medium');
+      // 2. Transmit to Pixhawk FC via MAVLink mission protocol
+      const uploadRes = await mavlinkService.uploadMissionWaypoints(missionPayload);
 
-      return {
-        success: true,
-        message: `Mission successfully uploaded to Drone FC (${this.currentMission.waypoints.length} waypoints, ${this.currentMission.totalDistance}m at ${this.currentMission.altitude}m alt).`,
-      };
+      if (uploadRes.success) {
+        this.currentMission.isUploaded = true;
+        missionEngine.updateSearchAltitude(alt);
+        missionEngine.setMissionDuration(Math.max(120, this.currentMission.estimatedDuration + 60));
+        this.notify();
+
+        audioService.playBeep(880, 150);
+        audioService.triggerHaptic('medium');
+
+        return {
+          success: true,
+          message: `Mission successfully uploaded to Drone FC (${this.currentMission.waypoints.length} waypoints, ${this.currentMission.totalDistance}m at ${alt}m alt).`
+        };
+      } else {
+        return {
+          success: false,
+          message: uploadRes.message || 'Mission upload was rejected by flight controller.'
+        };
+      }
     } catch (err: any) {
       console.error('[GCS Mission Upload Error]', err);
       return {
         success: false,
-        message: `Failed to upload mission: ${err?.message || 'Communication error with ESP32-S3 link'}`,
+        message: `Failed to upload mission: ${err?.message || 'Communication error with ESP32-S3 link'}`
+      };
+    }
+  }
+
+  /**
+   * Commences flight for the currently configured Ground Station mission.
+   * If uploaded, commands FC to arm and enters AUTO mode to execute shape.
+   * If in GUIDED mode fallback, guides vehicle through waypoints.
+   */
+  public async startGroundStationMission(forceBypass: boolean = false): Promise<{ success: boolean; message: string }> {
+    if (!this.currentMission || !this.currentMission.waypoints.length) {
+      return { success: false, message: 'No mission generated to start.' };
+    }
+
+    try {
+      const telem = mavlinkService.getTelemetry();
+      const alt = this.currentMission.altitude;
+      const speed = this.currentMission.speed;
+
+      // 1. Arm vehicle if disarmed
+      if (!telem.isArmed) {
+        await mavlinkService.sendArmCommand(forceBypass);
+      }
+
+      // 2. If already uploaded, execute in AUTO mode (native ArduPilot onboard path execution)
+      if (this.currentMission.isUploaded) {
+        audioService.playBeep(880, 150);
+        await mavlinkService.setFlightMode('AUTO');
+        await mavlinkService.commandStartMission();
+        return {
+          success: true,
+          message: `AUTONOMOUS ${this.currentMission.missionType} MISSION COMMENCED in AUTO flight mode at ${alt}m altitude!`
+        };
+      }
+
+      // 3. If not yet uploaded, attempt upload first
+      const uploadRes = await this.uploadMissionToDrone();
+      if (uploadRes.success) {
+        audioService.playBeep(880, 150);
+        await mavlinkService.setFlightMode('AUTO');
+        await mavlinkService.commandStartMission();
+        return {
+          success: true,
+          message: `Mission uploaded and started in AUTO mode at ${alt}m altitude!`
+        };
+      }
+
+      // 4. Guided Flight Fallback (if MAVLink mission storage unavailable)
+      await mavlinkService.setFlightMode('GUIDED');
+      await mavlinkService.commandTakeoff(alt);
+
+      // If Circle, trigger native orbit command
+      const geom = this.currentMission.geometry;
+      if (this.currentMission.missionType === 'CIRCLE' && geom?.circleCenter && geom?.circleRadiusMeters) {
+        const center = geom.circleCenter;
+        const radius = geom.circleRadiusMeters;
+        setTimeout(async () => {
+          await mavlinkService.commandOrbit(radius, speed, center.lat, center.lng, alt);
+        }, 6000);
+      }
+
+      return {
+        success: true,
+        message: `Takeoff initiated to ${alt}m in GUIDED mode. Autopilot guidance active.`
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: `Failed to start flight: ${err?.message || err}`
       };
     }
   }

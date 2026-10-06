@@ -430,7 +430,8 @@ class CircleTestService {
     // Upload MAVLink mission containing takeoff, circular perimeter waypoints, return to center, and land
     try {
       const missionPayload = [
-        { lat: centerLat, lon: centerLon, alt: targetAlt, command: 22 /* MAV_CMD_NAV_TAKEOFF */ },
+        { lat: centerLat, lon: centerLon, alt: 0, command: 16 /* Seq 0: Home point (ArduPilot standard) */ },
+        { lat: centerLat, lon: centerLon, alt: targetAlt, command: 22 /* Seq 1: MAV_CMD_NAV_TAKEOFF */ },
         ...waypoints.map((wp) => ({ lat: wp.lat, lon: wp.lon, alt: wp.alt, command: 16 /* MAV_CMD_NAV_WAYPOINT */ })),
         { lat: centerLat, lon: centerLon, alt: targetAlt, command: 16 /* MAV_CMD_NAV_WAYPOINT */ },
         { lat: centerLat, lon: centerLon, alt: 0, command: 21 /* MAV_CMD_NAV_LAND */ }
@@ -592,10 +593,13 @@ class CircleTestService {
 
     // Calculate arc distance between consecutive circle waypoints: (2 * PI * R) / totalWaypoints
     const arcLengthMeters = (2 * Math.PI * radius) / totalWaypoints;
-    const estimatedTimePerWpSec = Math.max(2.0, arcLengthMeters / speed);
-    const maxTimeoutPerWpMs = Math.round((estimatedTimePerWpSec + 4.0) * 1000);
+    const estimatedTimePerWpSec = Math.max(3.0, arcLengthMeters / speed);
+    // Give drone ample time (at least 25 seconds per waypoint) to navigate to each arc point
+    const maxTimeoutPerWpMs = Math.max(25000, Math.round((estimatedTimePerWpSec * 3 + 10) * 1000));
 
     if (this.waypointsTicker) clearInterval(this.waypointsTicker);
+
+    let lastRepositionSendTime = Date.now();
 
     this.waypointsTicker = setInterval(async () => {
       if (this.state.step !== 'ORBITING') {
@@ -620,11 +624,18 @@ class CircleTestService {
       );
 
       const elapsedOnWpMs = Date.now() - this.currentWpStartTime;
-      const waypointReached = dist <= 2.2 || elapsedOnWpMs >= maxTimeoutPerWpMs;
+      const waypointReached = dist <= 2.8 || elapsedOnWpMs >= maxTimeoutPerWpMs;
+
+      // Periodically refresh position target to Pixhawk position controller every 2.5 seconds
+      if (Date.now() - lastRepositionSendTime >= 2500) {
+        lastRepositionSendTime = Date.now();
+        mavlinkService.flyToPosition(currentTarget.lat, currentTarget.lon, alt, speed);
+      }
 
       if (waypointReached) {
         this.currentWpIdx++;
         this.currentWpStartTime = Date.now();
+        lastRepositionSendTime = Date.now();
 
         // Check if lap or all laps complete
         if (this.currentWpIdx >= totalWaypoints) {

@@ -39,8 +39,11 @@ export class TransportManager {
     this.transports.set(sim.id, sim);
 
     // Auto-select primary transport based on environment
+    const savedMethod = typeof window !== 'undefined' ? localStorage.getItem('preferred_connection_method') : null;
     if (Capacitor.isNativePlatform()) {
-      if (Capacitor.getPlatform() === 'android') {
+      if (savedMethod === 'ESP32') {
+        this.activeTransport = esp32;
+      } else if (Capacitor.getPlatform() === 'android') {
         this.activeTransport = androidUsb;
       } else if (Capacitor.getPlatform() === 'ios') {
         this.activeTransport = iosUsb;
@@ -48,12 +51,12 @@ export class TransportManager {
         this.activeTransport = androidUsb;
       }
     } else {
-      if (webSerial.isAvailable()) {
+      if (savedMethod === 'USB' && webSerial.isAvailable()) {
         this.activeTransport = webSerial;
-      } else if (webUsb.isAvailable()) {
+      } else if (savedMethod === 'USB' && webUsb.isAvailable()) {
         this.activeTransport = webUsb;
       } else {
-        this.activeTransport = sim;
+        this.activeTransport = esp32;
       }
     }
 

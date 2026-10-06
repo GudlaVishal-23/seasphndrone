@@ -10,12 +10,17 @@
  * EXACT WIRING:
  *   PIXHAWK TELEM2                     ESP32-S3
  *   -----------------                  -----------------
- *   Pin 1  +5V        ───────────────  NC (Powered externally or via USB)
+ *   Pin 1  +5V        ───────────────  5V / VIN pin (Supported! Safe when drone LiPo battery is connected)
  *   Pin 2  TX         ───────────────  GPIO 18 (RX on ESP32-S3)
  *   Pin 3  RX         ───────────────  GPIO 17 (TX on ESP32-S3)
- *   Pin 4  CTS        ───────────────  NC
- *   Pin 5  RTS        ───────────────  NC
+ *   Pin 4  CTS        ───────────────  NC (Not connected)
+ *   Pin 5  RTS        ───────────────  NC (Not connected)
  *   Pin 6  GND        ───────────────  GND (Common Ground)
+ *
+ * POWER NOTE:
+ *   - TELEM2 Pin 1 (+5V) can power the ESP32-S3 directly via the 5V/VIN pin.
+ *   - When running on Pixhawk Battery (Power Module / LiPo), TELEM2 delivers 2.5A-3A.
+ *   - If Pixhawk is powered ONLY by PC USB without battery, current is limited to ~500mA total.
  *
  * ARDUINO IDE SETTINGS (CRITICAL FOR ESP32-S3 SERIAL MONITOR):
  *   1. Tools -> Board -> "ESP32S3 Dev Module"

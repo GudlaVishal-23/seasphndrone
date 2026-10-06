@@ -31,28 +31,22 @@ export interface Esp32WebSocketOptions {
 }
 
 // Environment defaults
-const getDefaultRelayUrl = () => {
-  if (typeof window !== 'undefined' && window.location?.host && !window.location.host.includes('netlify') && !window.location.host.includes('5173')) {
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${window.location.host}/ws`;
-  }
-  return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://saeindia-szj0.onrender.com/ws';
-};
-const ENV_ESP32_WS_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ESP32_WS_URL) || 'ws://192.168.31.194:8080/ws';
-const ENV_SECURE_RELAY_URL = getDefaultRelayUrl();
+const ENV_ESP32_WS_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ESP32_WS_URL) || 'wss://saeindia-szj0.onrender.com/ws';
+const ENV_SECURE_RELAY_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://saeindia-szj0.onrender.com/ws';
 const ENV_RELAY_TOKEN = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_RELAY_TOKEN) || 'saeindia_sec_99348a7b1c0e';
+const ENV_WIFI_SSID = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_WIFI_SSID) || 'drone123';
 
 function parseWsEndpoint(urlStr: string) {
   try {
     const clean = urlStr.trim().replace(/^ws(s)?:\/\//i, 'http$1://');
     const parsed = new URL(clean);
     return {
-      host: parsed.hostname || '192.168.31.194',
+      host: parsed.hostname || 'saeindia-szj0.onrender.com',
       port: parsed.port ? parseInt(parsed.port, 10) : (clean.startsWith('https://') ? 443 : 8080),
       path: parsed.pathname || '/ws'
     };
   } catch (e) {
-    return { host: '192.168.31.194', port: 8080, path: '/ws' };
+    return { host: 'saeindia-szj0.onrender.com', port: 443, path: '/ws' };
   }
 }
 
@@ -67,16 +61,16 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
   private socket: WebSocket | null = null;
 
   // Protocol configuration: 'AUTO' | 'WS' | 'WSS'
-  private protocolMode: WebSocketProtocolMode = 'AUTO';
+  private protocolMode: WebSocketProtocolMode = 'WSS';
   // Connection Mode: 'LOCAL' (ws://) vs 'SECURE' (wss://)
-  private connectionMode: WebSocketConnectionMode = 'LOCAL';
+  private connectionMode: WebSocketConnectionMode = 'SECURE';
 
   private localHost: string = '192.168.31.194';
   private localPort: number = 8080;
   private path: string = '/ws';
-  private secureEndpoint: string = '';
+  private secureEndpoint: string = ENV_SECURE_RELAY_URL;
   private relayToken: string = ENV_RELAY_TOKEN;
-  private currentProtocol: 'ws' | 'wss' = 'ws';
+  private currentProtocol: 'ws' | 'wss' = 'wss';
   private currentBaudRate: number = 57600;
 
   // Relay Multi-Hop Status
@@ -91,7 +85,7 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
   private connectStartTime: number = 0;
 
   // Wi-Fi State Persistence (Independent of WebSocket & Page Reload)
-  private wifiSsid: string = 'drone123';
+  private wifiSsid: string = ENV_WIFI_SSID;
   private wifiConnected: boolean = true;
 
   private isConnecting: boolean = false;
@@ -116,18 +110,11 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
     this.path = defaultWs.path;
     this.secureEndpoint = (ENV_SECURE_RELAY_URL || '').trim();
     this.relayToken = ENV_RELAY_TOKEN;
+    this.wifiSsid = ENV_WIFI_SSID;
 
-    const isHttpsOrigin = typeof window !== 'undefined' && window.location.protocol === 'https:';
-
-    if (isHttpsOrigin) {
-      this.protocolMode = 'WSS';
-      this.connectionMode = 'SECURE';
-      this.currentProtocol = 'wss';
-    } else {
-      this.protocolMode = 'AUTO';
-      this.connectionMode = 'LOCAL';
-      this.currentProtocol = 'ws';
-    }
+    this.protocolMode = 'WSS';
+    this.connectionMode = 'SECURE';
+    this.currentProtocol = 'wss';
 
     if (typeof window !== 'undefined') {
       try {
@@ -142,18 +129,16 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
         const savedBaud = localStorage.getItem('esp32_baud');
         const savedSsid = localStorage.getItem('esp32_wifi_ssid');
 
-        if (!isHttpsOrigin) {
-          if (savedProtoMode === 'AUTO' || savedProtoMode === 'WS' || savedProtoMode === 'WSS') {
-            this.protocolMode = savedProtoMode;
-          } else if (savedMode === 'SECURE') {
-            this.protocolMode = 'WSS';
-          } else if (savedMode === 'LOCAL') {
-            this.protocolMode = 'AUTO';
-          }
+        if (savedProtoMode === 'WS' || savedProtoMode === 'WSS') {
+          this.protocolMode = savedProtoMode;
+        } else {
+          this.protocolMode = 'WSS';
+        }
 
-          if (savedMode === 'LOCAL' || savedMode === 'SECURE') {
-            this.connectionMode = savedMode;
-          }
+        if (savedMode === 'LOCAL' || savedMode === 'SECURE') {
+          this.connectionMode = savedMode;
+        } else {
+          this.connectionMode = 'SECURE';
         }
 
         if (savedHost && savedHost.trim().length > 0) {
@@ -161,24 +146,34 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
         }
         if (savedPort) this.localPort = parseInt(savedPort, 10) || 8080;
         if (savedPath !== null && savedPath !== undefined) this.path = savedPath;
-        if (savedSecureEndpoint && savedSecureEndpoint.trim().length > 0) {
+        if (savedSecureEndpoint && savedSecureEndpoint.trim().length > 0 && !savedSecureEndpoint.includes('192.168.')) {
           this.secureEndpoint = savedSecureEndpoint.trim();
+        } else {
+          this.secureEndpoint = ENV_SECURE_RELAY_URL;
         }
-        if (savedToken && savedToken.trim().length > 0) {
+        if (savedToken && savedToken.trim().length > 0 && savedToken !== 'saeindia_secret_token_2026' && savedToken !== 'CHANGE_ME') {
           this.relayToken = savedToken.trim();
+        } else {
+          this.relayToken = ENV_RELAY_TOKEN;
         }
-        if (!isHttpsOrigin && (savedProto === 'ws' || savedProto === 'wss')) {
+        if (savedProto === 'ws' || savedProto === 'wss') {
           this.currentProtocol = savedProto;
+        } else {
+          this.currentProtocol = 'wss';
         }
         if (savedBaud) this.currentBaudRate = parseInt(savedBaud, 10) || 57600;
-        if (savedSsid) this.wifiSsid = savedSsid;
+        if (savedSsid && savedSsid !== 'DRONE_WIFI_2.4G') {
+          this.wifiSsid = savedSsid;
+        } else {
+          this.wifiSsid = ENV_WIFI_SSID;
+        }
 
-        // Auto-reconnect after browser reload if previously connected
-        const autoConnect = localStorage.getItem('esp32_autoconnect');
-        if (autoConnect === 'true') {
+        // Auto-connect to ESP32 Cloud Relay on startup unless user explicitly clicked manual disconnect
+        const manualDis = localStorage.getItem('esp32_manual_disconnect');
+        if (manualDis !== 'true') {
           setTimeout(() => {
             if (!this.manualDisconnect && !this.socket) {
-              console.log('[WS] Page reloaded: Auto-reconnecting to ESP32 WebSocket (Wi-Fi preserved)...');
+              console.log('[WS] Auto-connecting to ESP32 Cloud WSS Relay (' + this.wifiSsid + ')...');
               this.connect();
             }
           }, 400);
@@ -332,7 +327,12 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
     if (this.protocolMode === 'WS') return 'ws';
     if (this.protocolMode === 'WSS') return 'wss';
 
-    // AUTO MODE on HTTP origin:
+    // AUTO MODE: If secure endpoint is configured, prefer WSS to connect to active cloud relay
+    if (this.secureEndpoint || ENV_SECURE_RELAY_URL) {
+      return 'wss';
+    }
+
+    // Fallback on HTTP origin without configured secure endpoint:
     return 'ws';
   }
 
@@ -344,11 +344,7 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
     const formattedPath = this.formatPath(this.path);
 
     if (proto === 'wss') {
-      let ep = (this.secureEndpoint || ENV_SECURE_RELAY_URL || '').trim();
-      if (!ep) {
-        return `wss://${this.localHost}:${this.localPort}${formattedPath}`;
-      }
-
+      let ep = (this.secureEndpoint || ENV_SECURE_RELAY_URL || 'wss://saeindia-szj0.onrender.com/ws').trim();
       let url = ep.replace(/^ws:\/\//i, 'wss://');
       if (!url.startsWith('wss://')) {
         url = `wss://${url}`;
@@ -367,10 +363,10 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
       }
 
       // Append token if configured and not already included
-      const effectiveToken = (this.relayToken || ENV_RELAY_TOKEN || 'saeindia_sec_99348a7b1c0e').trim();
-      if (effectiveToken && !url.includes('token=')) {
+      const tokenToUse = (this.relayToken || ENV_RELAY_TOKEN).trim();
+      if (tokenToUse && !url.includes('token=')) {
         const sep = url.includes('?') ? '&' : '?';
-        url = `${url}${sep}token=${encodeURIComponent(effectiveToken)}`;
+        url = `${url}${sep}token=${encodeURIComponent(tokenToUse)}`;
       }
 
       return url;
@@ -510,6 +506,12 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
 
     // Reset flags & clear existing timers
     this.manualDisconnect = false;
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('esp32_manual_disconnect');
+        localStorage.setItem('esp32_autoconnect', 'true');
+      } catch (e) {}
+    }
     this.reconnectAttempts = 0;
     this.clearAllTimers();
     this.cleanupSocket(false);
@@ -692,32 +694,36 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
             // Check for JSON status message from Secure Cloud Relay
             try {
               const meta = JSON.parse(event.data);
-              if (meta && meta.type === 'RELAY_STATUS') {
-                this.connectorOnline = Boolean(meta.connectorOnline);
-                this.esp32Online = Boolean(meta.esp32Online);
+              if (meta && (meta.type === 'RELAY_STATUS' || meta.type === 'connection_ack')) {
+                const isEspOnline = meta.esp32Online === true;
+                const isConnOnline = meta.connectorOnline !== false && (meta.connectorOnline === true || isEspOnline);
+                this.connectorOnline = isConnOnline;
+                this.esp32Online = isEspOnline;
+                this.wifiConnected = true;
 
-                if (!this.connectorOnline) {
+                if (isEspOnline) {
+                  this.errorCategory = 'NONE';
+                  this.lastErrorMessage = '';
+                  this.linkState = 'CONNECTED';
+                  this.notifyState({
+                    phase: 'SERIAL_OPEN',
+                    message: `ESP32-S3 Wi-Fi bridge (${this.wifiSsid}) ONLINE ✓ Cloud WSS streaming active.`
+                  });
+                } else if (!isConnOnline) {
                   this.errorCategory = 'CONNECTOR_OFFLINE';
-                  this.lastErrorMessage = 'ESP32 connector offline.';
+                  this.lastErrorMessage = 'ESP32 bridge offline on cloud relay.';
                   this.notifyState({
                     phase: 'WAITING_FOR_MAVLINK',
-                    message: 'ESP32 connector offline.',
+                    message: 'ESP32 bridge offline on cloud relay.',
                     error: 'CONNECTOR_OFFLINE'
                   });
-                } else if (!this.esp32Online) {
+                } else {
                   this.errorCategory = 'ESP32_UNAVAILABLE';
                   this.lastErrorMessage = meta.error || 'ESP32 unavailable.';
                   this.notifyState({
                     phase: 'WAITING_FOR_MAVLINK',
                     message: 'ESP32 unavailable.',
                     error: 'ESP32_UNAVAILABLE'
-                  });
-                } else {
-                  this.errorCategory = 'NONE';
-                  this.lastErrorMessage = '';
-                  this.notifyState({
-                    phase: 'SERIAL_OPEN',
-                    message: 'Secure WSS Relay and Local Connector connected. Waiting for MAVLink heartbeat...'
                   });
                 }
                 return;
@@ -902,6 +908,7 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem('esp32_autoconnect', 'false');
+        localStorage.setItem('esp32_manual_disconnect', 'true');
       } catch (e) {
         // ignore
       }

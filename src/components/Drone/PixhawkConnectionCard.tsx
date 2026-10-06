@@ -64,10 +64,9 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
   const [wifiSsid, setWifiSsid] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('esp32_wifi_ssid');
-      if (saved && saved !== 'DRONE_WIFI_2.4G') return saved;
-      try { localStorage.setItem('esp32_wifi_ssid', 'drone123'); } catch (e) {}
+      if (saved && saved !== 'DRONE_WIFI_2.4G' && saved.trim().length > 0) return saved.trim();
     }
-    return 'drone123';
+    return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_WIFI_SSID) || 'drone123';
   });
 
   // Connection Transport Method: 'ESP32' | 'USB' | 'SIM'
@@ -84,11 +83,11 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
     if (isHttpsOrigin) return 'WSS';
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('esp32_proto_mode') as 'AUTO' | 'WS' | 'WSS';
-      if (saved === 'AUTO' || saved === 'WS' || saved === 'WSS') return saved;
+      if (saved === 'WS' || saved === 'WSS') return saved;
       const savedMode = localStorage.getItem('esp32_conn_mode');
       if (savedMode === 'SECURE') return 'WSS';
     }
-    return 'AUTO';
+    return 'WSS';
   });
 
   // Local ESP32 IP, Port & Path settings
@@ -118,13 +117,7 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
   const [esp32SecureEndpoint, setEsp32SecureEndpoint] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('esp32_secure_endpoint');
-      if (saved && saved.trim().length > 0 && !saved.includes('sae-ground-station') && !saved.includes('saeindia-groundstation')) {
-        return saved.trim();
-      }
-      if (window.location?.host && !window.location.host.includes('netlify') && !window.location.host.includes('5173') && !window.location.host.includes('sae-ground-station')) {
-        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        return `${proto}//${window.location.host}/ws`;
-      }
+      if (saved && saved.trim().length > 0 && !saved.includes('192.168.')) return saved.trim();
     }
     return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://saeindia-szj0.onrender.com/ws';
   });
@@ -133,7 +126,7 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
   const [esp32RelayToken, setEsp32RelayToken] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('esp32_relay_token');
-      if (saved && saved.trim().length > 0) return saved.trim();
+      if (saved && saved.trim().length > 0 && saved !== 'saeindia_secret_token_2026' && saved !== 'CHANGE_ME') return saved.trim();
     }
     return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_RELAY_TOKEN) || 'saeindia_sec_99348a7b1c0e';
   });
@@ -737,38 +730,55 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
               </div>
             </div>
 
-            {/* Secure Relay URL and Token inputs when SECURE / WSS is active */}
-            {esp32Mode === 'SECURE' && (
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-slate-950/80 p-2.5 rounded-lg border border-emerald-500/30 text-xs">
-                <div className="sm:col-span-8 flex items-center space-x-1.5">
-                  <span className="text-emerald-400 font-bold shrink-0 flex items-center space-x-1">
-                    <Lock className="w-3 h-3" />
-                    <span>Secure Relay URL:</span>
-                  </span>
-                  <input
-                    type="text"
-                    value={esp32SecureEndpoint}
-                    onChange={(e) => setEsp32SecureEndpoint(e.target.value)}
-                    placeholder="wss://saeindia-szj0.onrender.com/ws"
-                    className="bg-slate-900 px-2 py-1 rounded text-slate-100 font-mono text-xs w-full border border-slate-700 focus:outline-none focus:border-emerald-500"
-                    title="Cloud WSS Relay URL (e.g. wss://saeindia-szj0.onrender.com/ws)"
-                  />
-                </div>
-                <div className="sm:col-span-4 flex items-center space-x-1.5">
-                  <span className="text-slate-400 font-bold shrink-0 text-[10px] uppercase">
-                    Token:
-                  </span>
-                  <input
-                    type="password"
-                    value={esp32RelayToken}
-                    onChange={(e) => setEsp32RelayToken(e.target.value)}
-                    placeholder="RELAY_TOKEN"
-                    className="bg-slate-900 px-2 py-1 rounded text-slate-100 font-mono text-xs w-full border border-slate-700 focus:outline-none focus:border-emerald-500"
-                    title="Shared Secret Token for Secure Relay"
-                  />
-                </div>
+            {/* Wi-Fi SSID and Secure Relay Endpoint Configuration */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-slate-950/80 p-2.5 rounded-lg border border-purple-500/30 text-xs">
+              <div className="sm:col-span-4 flex items-center space-x-1.5">
+                <span className="text-purple-300 font-bold shrink-0 flex items-center space-x-1">
+                  <Wifi className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Wi-Fi SSID:</span>
+                </span>
+                <input
+                  type="text"
+                  value={wifiSsid}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setWifiSsid(next);
+                    if (typeof window !== 'undefined') localStorage.setItem('esp32_wifi_ssid', next);
+                    mavlinkService.setWifiSsid(next);
+                  }}
+                  placeholder="drone123"
+                  className="bg-slate-900 px-2 py-1 rounded text-purple-200 font-mono text-xs w-full border border-slate-700 focus:outline-none focus:border-purple-500"
+                  title="Wi-Fi SSID network ESP32 is connected to (e.g. drone123)"
+                />
               </div>
-            )}
+              <div className="sm:col-span-5 flex items-center space-x-1.5">
+                <span className="text-emerald-400 font-bold shrink-0 flex items-center space-x-1">
+                  <Lock className="w-3 h-3" />
+                  <span>Cloud WSS Relay:</span>
+                </span>
+                <input
+                  type="text"
+                  value={esp32SecureEndpoint}
+                  onChange={(e) => setEsp32SecureEndpoint(e.target.value)}
+                  placeholder="wss://saeindia-szj0.onrender.com/ws"
+                  className="bg-slate-900 px-2 py-1 rounded text-slate-100 font-mono text-xs w-full border border-slate-700 focus:outline-none focus:border-emerald-500"
+                  title="Cloud WSS Relay URL (e.g. wss://saeindia-szj0.onrender.com/ws)"
+                />
+              </div>
+              <div className="sm:col-span-3 flex items-center space-x-1.5">
+                <span className="text-slate-400 font-bold shrink-0 text-[10px] uppercase">
+                  Token:
+                </span>
+                <input
+                  type="password"
+                  value={esp32RelayToken}
+                  onChange={(e) => setEsp32RelayToken(e.target.value)}
+                  placeholder="RELAY_TOKEN"
+                  className="bg-slate-900 px-2 py-1 rounded text-slate-100 font-mono text-xs w-full border border-slate-700 focus:outline-none focus:border-emerald-500"
+                  title="Shared Secret Token for Secure Relay"
+                />
+              </div>
+            </div>
 
             {/* Real-Time Status Card */}
             <div className={`p-3 rounded-xl border transition ${
@@ -1011,7 +1021,7 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
                 <div className="bg-slate-900/90 p-2 rounded-lg border border-slate-800 flex items-center justify-between">
                   <div>
                     <div className="text-[10px] text-slate-400 uppercase font-bold">Wi-Fi Network</div>
-                    <div className="text-purple-300 font-bold truncate mt-0.5" title={wifiSsid || 'Default'}>
+                    <div className="text-purple-300 font-bold truncate mt-0.5" title={wifiSsid || 'drone123'}>
                       {wifiSsid || 'drone123'}
                     </div>
                   </div>

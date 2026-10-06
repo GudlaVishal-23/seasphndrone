@@ -69,8 +69,8 @@ export const ConnectionStatusDeck: React.FC<ConnectionStatusDeckProps> = ({
         <StatusItem
           icon={<Wifi className="w-3.5 h-3.5" />}
           label="Wi-Fi"
-          value={isWifiOn ? 'ON' : 'OFF'}
-          status={isWifiOn ? 'ok' : 'error'}
+          value={pixhawkState.isUsbConnected ? (pixhawkState.wifiSsid || 'drone123') : isWifiOn ? (pixhawkState.wifiSsid || 'ONLINE') : 'OFF'}
+          status={pixhawkState.isUsbConnected || isWifiOn ? 'ok' : 'error'}
         />
         <StatusItem
           icon={<Cpu className="w-3.5 h-3.5" />}

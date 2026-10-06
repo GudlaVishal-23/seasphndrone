@@ -60,6 +60,9 @@ interface GoogleMapGroundStationProps {
   onSetHomePoint: (coords?: { lat: number; lng: number }) => void;
   onStartMission: () => void;
   onEmergencyRTL: () => void;
+  onStopAbortMission?: () => void;
+  targetLocation?: { lat: number; lng: number } | null;
+  targetLabel?: string;
   className?: string;
   isPipVideoVisible?: boolean;
   onTogglePipVideo?: () => void;

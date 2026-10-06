@@ -817,6 +817,19 @@ class MissionEngine {
     return false;
   }
 
+  public clearHomePoint(): void {
+    mavlinkService.clearHomePoint();
+    this.transitionTo('IDLE', 'Home point cleared by operator');
+    this.persistState();
+    this.notifyState();
+  }
+
+  public abortMission(reason: string = 'Mission aborted by operator'): void {
+    this.triggerEmergencyRTL(reason);
+    this.transitionTo('IDLE', reason);
+    this.notifyState();
+  }
+
   public setForceBypassChecks(val: boolean) {
     this.forceBypassChecks = val;
   }

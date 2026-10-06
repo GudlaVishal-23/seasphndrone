@@ -541,6 +541,32 @@ class MAVLinkService {
     return this.homePoint;
   }
 
+  public clearHomePoint(): void {
+    this.homePoint = {
+      latitude: 0,
+      longitude: 0,
+      altitude: 0,
+      timestamp: 0,
+      isSet: false
+    };
+    this.telemetry.distanceToHome = 0;
+    this.notifyTelemetry();
+    this.notifyConnection();
+    this.logDiagnostic('SYSTEM', 'Home Point Cleared by Operator', 'info');
+    this.addStatusMessage('INFO', 6, 'Home Point Cleared');
+  }
+
+  public calibrateGroundAltitude(): void {
+    const currentMsl = this.telemetry.gps.altitude || (this.homePoint.isSet ? this.homePoint.altitude : 0);
+    if (this.homePoint.isSet && currentMsl > 0) {
+      this.homePoint.altitude = currentMsl;
+    }
+    this.telemetry.altitude = 0.0;
+    this.notifyTelemetry();
+    this.addStatusMessage('NOTICE', 5, 'Ground altitude zeroed.');
+    this.logDiagnostic('SYSTEM', 'Ground altitude calibrated to 0.0m AGL', 'success');
+  }
+
   private addStatusMessage(severity: PixhawkStatusMessage['severity'], severityLevel: number, text: string) {
     const msg: PixhawkStatusMessage = {
       id: `STAT_${Date.now()}_${Math.floor(Math.random() * 1000)}`,

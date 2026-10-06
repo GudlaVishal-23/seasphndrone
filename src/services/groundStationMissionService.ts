@@ -730,29 +730,72 @@ export class GroundStationMissionService {
         };
       }
 
-      // 4. Guided Flight Fallback (if MAVLink mission storage unavailable)
+      // 4. Guided Flight Fallback (if MAVLink onboard mission storage unavailable)
       await mavlinkService.setFlightMode('GUIDED');
       await mavlinkService.commandTakeoff(alt);
 
-      // If Circle, trigger native orbit command
-      const geom = this.currentMission.geometry;
-      if (this.currentMission.missionType === 'CIRCLE' && geom?.circleCenter && geom?.circleRadiusMeters) {
-        const center = geom.circleCenter;
-        const radius = geom.circleRadiusMeters;
-        setTimeout(async () => {
-          await mavlinkService.commandOrbit(radius, speed, center.lat, center.lng, alt);
-        }, 6000);
-      }
+      // Start live guided shape execution so the drone completes the shape
+      this.runGuidedWaypointSequencer(this.currentMission.waypoints, alt, speed);
 
       return {
         success: true,
-        message: `Takeoff initiated to ${alt}m in GUIDED mode. Autopilot guidance active.`
+        message: `Takeoff initiated to ${alt}m in GUIDED mode. Ground Station active guidance running (${this.currentMission.waypoints.length} waypoints).`
       };
     } catch (err: any) {
       return {
         success: false,
         message: `Failed to start flight: ${err?.message || err}`
       };
+    }
+  }
+
+  private guidedSequencerActive: boolean = false;
+
+  public stopGuidedSequencer(): void {
+    this.guidedSequencerActive = false;
+  }
+
+  private async runGuidedWaypointSequencer(
+    waypoints: GroundStationWaypoint[],
+    alt: number,
+    speed: number
+  ): Promise<void> {
+    if (this.guidedSequencerActive) return;
+    this.guidedSequencerActive = true;
+
+    // Wait 7s for takeoff climb to target altitude
+    await new Promise((r) => setTimeout(r, 7000));
+
+    for (let i = 0; i < waypoints.length; i++) {
+      if (!this.guidedSequencerActive) break;
+      const wp = waypoints[i];
+      const targetAlt = wp.altitude || alt;
+
+      if (wp.action === 'RTL') {
+        await mavlinkService.commandRTL();
+        break;
+      } else if (wp.action === 'LAND') {
+        await mavlinkService.commandLand();
+        break;
+      }
+
+      await mavlinkService.flyToPosition(wp.lat, wp.lng, targetAlt, speed);
+
+      // Monitor distance to waypoint (advance when <= 3.5m or after 15s timeout)
+      const startWpTime = Date.now();
+      while (this.guidedSequencerActive && Date.now() - startWpTime < 15000) {
+        const cur = mavlinkService.getTelemetry();
+        const dy = (cur.latitude - wp.lat) * 111320;
+        const dx = (cur.longitude - wp.lng) * 111320 * Math.cos((wp.lat * Math.PI) / 180);
+        const dist = Math.hypot(dx, dy);
+        if (dist <= 3.5) break;
+        await new Promise((r) => setTimeout(r, 600));
+      }
+    }
+
+    if (this.guidedSequencerActive) {
+      this.guidedSequencerActive = false;
+      await mavlinkService.commandRTL();
     }
   }
 }

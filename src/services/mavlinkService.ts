@@ -1779,6 +1779,7 @@ class MAVLinkService {
     if (this.connectionState.isRealHardware || isConnected) {
       // ArduPilot requires GUIDED flight mode to accept MAV_CMD_NAV_TAKEOFF (22)
       await this.setFlightMode('GUIDED');
+      await this.sendMavlinkCommandInt(22 /* MAV_CMD_NAV_TAKEOFF */, 0, 0, 0, 0, 0, 0, targetAltMeters, 6 /* MAV_FRAME_GLOBAL_RELATIVE_ALT_INT */);
       await this.sendMavlinkCommandLong(22 /* MAV_CMD_NAV_TAKEOFF */, 0, 0, 0, 0, 0, 0, targetAltMeters);
       this.notifyTelemetry();
       return true;
@@ -1850,8 +1851,23 @@ class MAVLinkService {
     }
     if (this.connectionState.isRealHardware || isConnected) {
       await this.setFlightMode('GUIDED');
-      // MAV_CMD_DO_REPOSITION (192): param1 = ground speed, param2 = flags, param5 = lat, param6 = lon, param7 = alt
-      return await this.sendMavlinkCommandLong(192 /* MAV_CMD_DO_REPOSITION */, groundSpeedMps, 0, 0, 0, lat, lon, alt);
+      // 1. Send modern COMMAND_INT (75) with MAV_CMD_DO_REPOSITION (192) - full int32 precision for lat/lon
+      const latE7 = Math.round(lat * 1e7);
+      const lonE7 = Math.round(lon * 1e7);
+      await this.sendMavlinkCommandInt(
+        192 /* MAV_CMD_DO_REPOSITION */,
+        groundSpeedMps,
+        1.0 /* MAV_DO_REPOSITION_FLAGS_CHANGE_MODE */,
+        0,
+        0,
+        latE7,
+        lonE7,
+        alt,
+        6 /* MAV_FRAME_GLOBAL_RELATIVE_ALT_INT */
+      );
+
+      // 2. Also send COMMAND_LONG (192) as fallback for older Pixhawk firmwares
+      return await this.sendMavlinkCommandLong(192 /* MAV_CMD_DO_REPOSITION */, groundSpeedMps, 1.0, 0, 0, lat, lon, alt);
     } else {
       return true;
     }
@@ -2224,6 +2240,51 @@ class MAVLinkService {
       this.logDiagnostic('MAVLINK', `[MISSION_ITEM_INT TX] Sent waypoint ${seq + 1}/${this.pendingMissionItems?.length || 1} (Seq ${seq}, Cmd: ${cmd}, Lat: ${item.lat.toFixed(6)}, Lon: ${item.lon.toFixed(6)}, Alt: ${item.alt}m, Frame: ${frame})`, 'info');
     }
     return success;
+  }
+
+  public async sendMavlinkCommandInt(
+    command: number,
+    param1: number = 0,
+    param2: number = 0,
+    param3: number = 0,
+    param4: number = 0,
+    x: number = 0,
+    y: number = 0,
+    z: number = 0,
+    frame: number = 6
+  ): Promise<boolean> {
+    try {
+      const isMav2 = this.connectionState.mavlinkVersion === 'MAVLink 2.0';
+      const payload = new Uint8Array(35);
+      const view = new DataView(payload.buffer);
+      view.setFloat32(0, param1, true);
+      view.setFloat32(4, param2, true);
+      view.setFloat32(8, param3, true);
+      view.setFloat32(12, param4, true);
+      view.setInt32(16, Math.round(x), true);
+      view.setInt32(20, Math.round(y), true);
+      view.setFloat32(24, z, true);
+      view.setUint16(28, command, true);
+      const targetSys = this.connectionState.systemId || 1;
+      const targetComp = this.connectionState.componentId || 1;
+      view.setUint8(30, targetSys);
+      view.setUint8(31, targetComp);
+      view.setUint8(32, frame);
+      view.setUint8(33, 0);
+      view.setUint8(34, 0);
+
+      const packet = isMav2
+        ? this.buildMavlink2Frame(75 /* COMMAND_INT */, payload)
+        : this.buildMavlink1Frame(75 /* COMMAND_INT */, payload);
+
+      const success = await usbHostService.sendBytes(packet);
+      if (success) {
+        this.connectionState.bytesSent += packet.length;
+      }
+      return success;
+    } catch {
+      return false;
+    }
   }
 
   private async sendMavlinkCommandLong(

@@ -285,16 +285,22 @@ class LoiterTestService {
         this.climbWatchdog = setTimeout(() => {
           if (this.state.step === 'TAKEOFF_CLIMB') {
             const currentTelem = mavlinkService.getTelemetry();
-            if (currentTelem.altitude < 4.0) {
+            if (currentTelem.altitude >= 3.0) {
+              console.warn(`[LOITER_TEST] Climb watchdog timer expired, but aircraft is airborne at ${currentTelem.altitude.toFixed(1)}m. Entering loiter hold.`);
+              this.enterLoiterHold();
+            } else {
               this.abort('Takeoff/Climb timeout: Did not reach 5 m within 25 seconds.');
             }
           }
         }, 25000);
       }
 
-      // 2. Climb to 5m reached -> Enter LOITER mode
+      // 2. Climb to 5m reached or climb rate leveled off -> Enter LOITER mode
       if (this.state.step === 'TAKEOFF_CLIMB') {
-        if (telem.altitude >= (5 - this.config.altitudeTolerance)) {
+        const altReached = telem.altitude >= (5 - Math.max(1.0, this.config.altitudeTolerance || 1.0));
+        const climbLeveledOff = telem.altitude >= 3.5 && Math.abs(telem.verticalSpeed) < 0.25;
+
+        if (altReached || climbLeveledOff) {
           if (this.climbWatchdog) clearTimeout(this.climbWatchdog);
           this.enterLoiterHold();
         }

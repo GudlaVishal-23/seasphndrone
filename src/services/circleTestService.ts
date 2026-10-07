@@ -510,19 +510,31 @@ class CircleTestService {
 
     audioService.playBeep(880, 100);
 
+    // If vehicle is already airborne and leveled near target altitude, transition directly to orbit
+    const curTelem = mavlinkService.getTelemetry();
+    if (curTelem.isArmed && curTelem.altitude >= (alt - 1.0)) {
+      this.state.stepMessage = `Aircraft already airborne at ${curTelem.altitude.toFixed(1)}m ✓. Commencing circular orbit directly...`;
+      this.notifyState();
+      this.startCircularOrbit();
+      return;
+    }
+
     // Command Takeoff to target altitude
     mavlinkService.commandTakeoff(alt);
 
-    // Climb watchdog (30s)
+    // Climb watchdog: if aircraft is safely airborne and leveled off, smoothly proceed to orbit
     if (this.climbWatchdog) clearTimeout(this.climbWatchdog);
     this.climbWatchdog = setTimeout(() => {
       if (this.state.step === 'TAKEOFF_CLIMB') {
         const cur = mavlinkService.getTelemetry();
-        if (cur.altitude < (alt - 1.0)) {
-          this.abort(`Takeoff timeout: Did not reach ${alt}m within 30 seconds.`);
+        if (cur.altitude >= Math.max(2.0, alt * 0.65)) {
+          console.warn(`[CIRCLE_TEST] Climb watchdog timer expired, but aircraft is airborne at ${cur.altitude.toFixed(1)}m. Commencing orbit.`);
+          this.startCircularOrbit();
+        } else {
+          this.abort(`Takeoff timeout: Did not reach ${alt}m within 25 seconds.`);
         }
       }
-    }, 30000);
+    }, 25000);
   }
 
   private bindTelemetryWatch(): void {
@@ -538,9 +550,15 @@ class CircleTestService {
         this.initiateClimb();
       }
 
-      // 2. Altitude Reached -> Start Circle Waypoints Orbit
+      // 2. Altitude Reached or Climb Leveled Off -> Start Circle Waypoints Orbit
       if (this.state.step === 'TAKEOFF_CLIMB') {
-        if (telem.altitude >= (this.config.targetAltitudeMeters - this.config.altitudeTolerance)) {
+        const targetAlt = this.config.targetAltitudeMeters;
+        const margin = Math.max(1.0, this.config.altitudeTolerance || 1.0);
+        const altReached = telem.altitude >= (targetAlt - margin);
+        // Barometer level-off check: reached at least 70% of target altitude and vertical speed leveled off
+        const climbLeveledOff = telem.altitude >= Math.max(1.8, targetAlt * 0.70) && Math.abs(telem.verticalSpeed) < 0.25;
+
+        if (altReached || climbLeveledOff) {
           if (this.climbWatchdog) clearTimeout(this.climbWatchdog);
           this.startCircularOrbit();
         }
@@ -624,7 +642,9 @@ class CircleTestService {
       );
 
       const elapsedOnWpMs = Date.now() - this.currentWpStartTime;
-      const waypointReached = dist <= 2.8 || elapsedOnWpMs >= maxTimeoutPerWpMs;
+      // Dynamically scale acceptance radius based on arc length so points are not skipped prematurely
+      const dynamicAcceptanceRadius = Math.max(1.2, Math.min(2.8, arcLengthMeters * 0.65));
+      const waypointReached = dist <= dynamicAcceptanceRadius || elapsedOnWpMs >= maxTimeoutPerWpMs;
 
       // Periodically refresh position target to Pixhawk position controller every 2.5 seconds
       if (Date.now() - lastRepositionSendTime >= 2500) {

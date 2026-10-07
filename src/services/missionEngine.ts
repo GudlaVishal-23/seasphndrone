@@ -262,13 +262,15 @@ class MissionEngine {
       // Automatic Climb Sequence: Takeoff / Climbing -> Target Altitude Reached -> Stabilizing -> Searching
       if ((this.currentState === 'TAKEOFF' || this.currentState === 'CLIMBING' || this.currentState === 'CLIMBING_TO_ALTITUDE') && this.commandAuthority === 'AUTONOMOUS') {
         const targetAlt = this.missionConfig.searchAltitude;
-        const tolerance = this.missionConfig.altitudeToleranceMeters || 0.5;
+        const tolerance = Math.max(1.0, this.missionConfig.altitudeToleranceMeters || 1.0);
+        const altReached = telemetry.altitude >= (targetAlt - tolerance);
+        const climbLeveledOff = telemetry.altitude >= Math.max(2.0, targetAlt * 0.70) && Math.abs(telemetry.verticalSpeed) < 0.25;
 
-        if (telemetry.altitude >= (targetAlt - tolerance)) {
-          // Target altitude reached; transition to altitude stabilization phase
+        if (altReached || climbLeveledOff) {
+          // Target altitude reached or climb leveled off; transition to altitude stabilization phase
           this.transitionTo(
             'ALTITUDE_STABILIZING',
-            `Target altitude ${targetAlt}m reached (Current: ${telemetry.altitude.toFixed(1)}m). Stabilizing position for ${this.missionConfig.stabilizationSeconds}s before starting search.`
+            `Target altitude envelope reached (${telemetry.altitude.toFixed(1)}m / ${targetAlt}m). Stabilizing position for ${this.missionConfig.stabilizationSeconds}s before starting search.`
           );
 
           if (this.stabilizationTimer) clearTimeout(this.stabilizationTimer);
@@ -277,7 +279,7 @@ class MissionEngine {
             if (
               this.currentState === 'ALTITUDE_STABILIZING' &&
               this.commandAuthority === 'AUTONOMOUS' &&
-              Math.abs(currentTelem.altitude - targetAlt) <= (tolerance + 0.8)
+              (Math.abs(currentTelem.altitude - targetAlt) <= (tolerance + 1.2) || Math.abs(currentTelem.verticalSpeed) < 0.30)
             ) {
               this.transitionTo(
                 'SEARCHING',

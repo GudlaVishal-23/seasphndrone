@@ -957,7 +957,7 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
     }
     try {
       const payload = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-      this.socket.send(payload);
+      this.socket.send(payload as ArrayBuffer);
       this.cumulativeTxBytes += data.length;
       return true;
     } catch (e) {

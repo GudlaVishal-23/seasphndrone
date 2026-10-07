@@ -111,7 +111,13 @@ export const MissionConfigurationCard: React.FC<MissionConfigurationCardProps> =
     if (enabled) {
       circleTestService.setDiameter(circleRadius * 2);
       circleTestService.setLaps(circleTurns);
-      circleTestService.setAltitude(searchAltitude);
+      // Synchronize altitude only if user has not set a custom circle altitude
+      const existingCircleAlt = circleTestService.getConfig().targetAltitudeMeters;
+      if (existingCircleAlt && existingCircleAlt > 0) {
+        setSearchAltitude(existingCircleAlt);
+      } else {
+        circleTestService.setAltitude(searchAltitude);
+      }
       circleTestService.setFlightSpeed(searchSpeed);
     }
   };

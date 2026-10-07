@@ -610,8 +610,12 @@ export class GroundStationMissionService {
       const home = mavlinkService.getHomePoint();
       const telem = mavlinkService.getTelemetry();
 
-      const homeLat = home.isSet && home.latitude !== 0 ? home.latitude : (telem.latitude || this.currentMission.waypoints[0].lat);
-      const homeLon = home.isSet && home.longitude !== 0 ? home.longitude : (telem.longitude || this.currentMission.waypoints[0].lng);
+      const homeLat = home.isSet && Math.abs(home.latitude) > 0.001
+        ? home.latitude
+        : (Math.abs(telem.latitude) > 0.001 ? telem.latitude : this.currentMission.waypoints[0].lat);
+      const homeLon = home.isSet && Math.abs(home.longitude) > 0.001
+        ? home.longitude
+        : (Math.abs(telem.longitude) > 0.001 ? telem.longitude : this.currentMission.waypoints[0].lng);
 
       // 1. Build standard ArduPilot MAVLink mission sequence
       const missionPayload: Array<{ lat: number; lon: number; alt: number; command?: number }> = [];
@@ -705,6 +709,7 @@ export class GroundStationMissionService {
       // 1. Arm vehicle if disarmed
       if (!telem.isArmed) {
         await mavlinkService.sendArmCommand(forceBypass);
+        await new Promise((r) => setTimeout(r, 1200));
       }
 
       // 2. If already uploaded, execute in AUTO mode (native ArduPilot onboard path execution)

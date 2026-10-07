@@ -1867,7 +1867,8 @@ class MAVLinkService {
       );
 
       // 2. Also send COMMAND_LONG (192) as fallback for older Pixhawk firmwares
-      return await this.sendMavlinkCommandLong(192 /* MAV_CMD_DO_REPOSITION */, groundSpeedMps, 1.0, 0, 0, lat, lon, alt);
+      await this.sendMavlinkCommandLong(192 /* MAV_CMD_DO_REPOSITION */, groundSpeedMps, 1.0, 0, 0, lat, lon, alt);
+      return true;
     } else {
       return true;
     }

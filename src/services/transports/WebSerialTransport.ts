@@ -12,7 +12,7 @@ export class WebSerialTransport implements MavlinkTransport {
   private reader: any = null;
   private writer: any = null;
   private isReading = false;
-  private baudRate = 57600;
+  private baudRate = 115200;
 
   constructor() {
     if (this.isAvailable()) {
@@ -45,7 +45,7 @@ export class WebSerialTransport implements MavlinkTransport {
       return false;
     }
 
-    this.baudRate = options?.baudRate || 57600;
+    this.baudRate = options?.baudRate || 115200;
 
     try {
       const ports = await (navigator as any).serial.getPorts();

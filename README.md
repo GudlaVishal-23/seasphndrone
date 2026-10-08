@@ -50,14 +50,14 @@ saeindia/
 ### 2. Deploy Backend to Render
 
 1. In [Render](https://dashboard.render.com/), click **New +** $\to$ **Blueprint** (or **Web Service**).
-2. Connect your GitHub repository: `https://github.com/RISHITBARLA/saeindia.git`.
+2. Connect your GitHub repository: `https://github.com/GudlaVishal-23/seasphndrone.git`.
 3. Render automatically reads [`render.yaml`](./render.yaml):
    - **Root directory**: `backend`
    - **Build command**: `npm install`
    - **Start command**: `npm start`
    - **Health check path**: `/health`
 4. Set Environment Variables:
-   - `RELAY_TOKEN`: `saeindia_sec_99348a7b1c0e` (or custom token)
+   - `RELAY_TOKEN`: `<your_secure_relay_token>` (must match frontend `VITE_RELAY_TOKEN`)
    - `PORT`: `10000`
 5. Click **Apply / Create Web Service**.
 

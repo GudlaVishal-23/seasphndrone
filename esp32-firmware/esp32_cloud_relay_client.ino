@@ -54,8 +54,8 @@ const char* FALLBACK_PASS = "";
 // =====================================================================================
 const char* RELAY_HOST    = "saeindia-szj0.onrender.com";
 const uint16_t RELAY_PORT = 443;
-const char* RELAY_PATH    = "/connector?token=saeindia_sec_99348a7b1c0e";
-const char* RELAY_WSS_URL = "wss://saeindia-szj0.onrender.com/connector?token=saeindia_sec_99348a7b1c0e";
+const char* RELAY_PATH    = "/connector?token=YOUR_RELAY_TOKEN";
+const char* RELAY_WSS_URL = "wss://saeindia-szj0.onrender.com/connector?token=YOUR_RELAY_TOKEN";
 
 // Google Trust Services (GTS Root R4) Root CA used by Render.com
 const char RENDER_CA_CERT[] PROGMEM = 

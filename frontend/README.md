@@ -37,7 +37,7 @@ ntl deploy --prod
 
 Configure in Netlify Site Settings $\to$ **Environment variables**:
 - `VITE_RELAY_URL`: URL of your Render backend relay (e.g. `wss://saeindia-szj0.onrender.com/ws` or `https://saeindia-szj0.onrender.com`)
-- `VITE_RELAY_TOKEN`: Secret handshake token (e.g. `saeindia_sec_99348a7b1c0e`)
+- `VITE_RELAY_TOKEN`: Secret handshake token (e.g. `<your_secure_relay_token>`)
 
 ---
 

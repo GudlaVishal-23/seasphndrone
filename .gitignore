@@ -11,6 +11,8 @@ dist-ssr/
 .env
 .env.local
 .env.*.local
+.env.production
+.env*.production
 local-connector/.env
 relay-server/.env
 

@@ -4,6 +4,9 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  SECRETS_SCAN_ENABLED = "false"
+  SECRETS_SCAN_OMIT_KEYS = "VITE_RELAY_TOKEN,VITE_SECURE_RELAY_URL"
+  SECRETS_SCAN_OMIT_PATHS = "dist/**"
 
 # Single-Page Application (SPA) redirect rule for React Router / client routes
 [[redirects]]

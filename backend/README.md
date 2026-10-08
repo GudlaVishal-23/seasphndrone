@@ -18,7 +18,7 @@ It bridges telemetry and MAVLink binary frames between:
 
 ### Method 2: Manual Web Service
 1. In Render Dashboard, click **New +** $\to$ **Web Service**.
-2. Connect your GitHub repository: `https://github.com/RISHITBARLA/saeindia.git`.
+2. Connect your GitHub repository: `https://github.com/GudlaVishal-23/seasphndrone.git`.
 3. Set the configuration:
    - **Name**: `saeindia-relay-server`
    - **Root Directory**: `backend`
@@ -28,7 +28,7 @@ It bridges telemetry and MAVLink binary frames between:
    - **Plan**: `Free`
 4. Add Environment Variables:
    - `PORT`: `10000` (or leave default assigned by Render)
-   - `RELAY_TOKEN`: `saeindia_sec_99348a7b1c0e` (or your chosen secure token)
+   - `RELAY_TOKEN`: `<your_secure_relay_token>` (or your chosen secure token)
 
 ---
 

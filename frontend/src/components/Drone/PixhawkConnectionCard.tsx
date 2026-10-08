@@ -128,7 +128,7 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
       const saved = localStorage.getItem('esp32_relay_token');
       if (saved && saved.trim().length > 0 && saved !== 'saeindia_secret_token_2026' && saved !== 'CHANGE_ME') return saved.trim();
     }
-    return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_RELAY_TOKEN) || 'saeindia_sec_99348a7b1c0e';
+    return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_RELAY_TOKEN) || '';
   });
 
   // Mobile collapsed toggle

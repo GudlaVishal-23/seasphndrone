@@ -156,7 +156,6 @@ server.on('upgrade', (request, socket, head) => {
   if (pathname === '/connector') {
     const allowedTokens = new Set([
       RELAY_TOKEN.trim(),
-      'saeindia_sec_99348a7b1c0e',
       'saeindia_secret_token_2026'
     ]);
 

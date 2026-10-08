@@ -21,3 +21,4 @@ relay-server/.env
 .vscode/
 .idea/
 .DS_Store
+graphify-out/

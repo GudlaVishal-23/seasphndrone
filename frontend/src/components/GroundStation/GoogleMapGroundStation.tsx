@@ -119,6 +119,7 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
   const [generatedMission, setGeneratedMission] = useState<GroundStationMission | null>(null);
   const [isPreviewActive, setIsPreviewActive] = useState<boolean>(true);
   const [uploadFeedback, setUploadFeedback] = useState<{ success: boolean; message: string } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<string>('');
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isArmingModalOpen, setIsArmingModalOpen] = useState<boolean>(false);
   const [forceBypassChecks, setForceBypassChecks] = useState<boolean>(false);
@@ -1028,9 +1029,14 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
 
     setIsUploading(true);
     setUploadFeedback(null);
+    setUploadProgress('Checking connection to Pixhawk...');
 
-    const res = await groundStationMissionService.uploadMissionToDrone();
+    const res = await groundStationMissionService.uploadMissionToDrone((stage) => {
+      setUploadProgress(stage);
+    });
+
     setIsUploading(false);
+    setUploadProgress('');
     setUploadFeedback(res);
 
     if (res.success) {
@@ -1712,6 +1718,12 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
                     </button>
                   ))}
                 </div>
+
+                {altitude < 15 && (
+                  <div className="text-[10px] text-amber-300 bg-amber-950/40 border border-amber-800/40 px-2 py-1 rounded flex items-center space-x-1">
+                    <span>⚠️ Note: Flight altitude is {altitude}m. Pixhawk default RTL_ALT is 15m (drone climbs to 15m on RTL).</span>
+                  </div>
+                )}
               </div>
 
               {/* Speed Configuration */}
@@ -1877,8 +1889,16 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
                 </div>
               )}
 
+              {/* In-Flight Upload Progress Status */}
+              {isUploading && (
+                <div className="p-2.5 rounded-xl border border-sky-500/50 bg-sky-950/80 text-sky-300 text-xs flex items-center space-x-2 animate-pulse">
+                  <div className="w-4 h-4 border-2 border-sky-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                  <span className="leading-tight font-medium">{uploadProgress || 'Communicating with flight controller...'}</span>
+                </div>
+              )}
+
               {/* Upload Feedback Message */}
-              {uploadFeedback && (
+              {!isUploading && uploadFeedback && (
                 <div className={`p-2.5 rounded-xl border text-xs flex items-center space-x-2 ${
                   uploadFeedback.success
                     ? 'bg-emerald-950/70 border-emerald-500/60 text-emerald-300'

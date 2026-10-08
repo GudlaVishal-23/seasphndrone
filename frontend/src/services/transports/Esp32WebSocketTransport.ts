@@ -31,9 +31,9 @@ export interface Esp32WebSocketOptions {
 }
 
 // Environment defaults
-const ENV_ESP32_WS_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ESP32_WS_URL) || 'wss://saeindia-szj0.onrender.com/ws';
-const ENV_SECURE_RELAY_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://saeindia-szj0.onrender.com/ws';
-const ENV_RELAY_TOKEN = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_RELAY_TOKEN) || '';
+const ENV_ESP32_WS_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ESP32_WS_URL) || 'wss://seasphndrone-backend.onrender.com/ws';
+const ENV_SECURE_RELAY_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://seasphndrone-backend.onrender.com/ws';
+const ENV_RELAY_TOKEN = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_RELAY_TOKEN) || 'saeindia_sec_99348a7b1c0e';
 const ENV_WIFI_SSID = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_WIFI_SSID) || 'drone123';
 
 function parseWsEndpoint(urlStr: string) {
@@ -41,12 +41,12 @@ function parseWsEndpoint(urlStr: string) {
     const clean = urlStr.trim().replace(/^ws(s)?:\/\//i, 'http$1://');
     const parsed = new URL(clean);
     return {
-      host: parsed.hostname || 'saeindia-szj0.onrender.com',
+      host: parsed.hostname || 'seasphndrone-backend.onrender.com',
       port: parsed.port ? parseInt(parsed.port, 10) : (clean.startsWith('https://') ? 443 : 8080),
       path: parsed.pathname || '/ws'
     };
   } catch (e) {
-    return { host: 'saeindia-szj0.onrender.com', port: 443, path: '/ws' };
+    return { host: 'seasphndrone-backend.onrender.com', port: 443, path: '/ws' };
   }
 }
 
@@ -344,7 +344,7 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
     const formattedPath = this.formatPath(this.path);
 
     if (proto === 'wss') {
-      let ep = (this.secureEndpoint || ENV_SECURE_RELAY_URL || 'wss://saeindia-szj0.onrender.com/ws').trim();
+      let ep = (this.secureEndpoint || ENV_SECURE_RELAY_URL || 'wss://seasphndrone-backend.onrender.com/ws').trim();
       let url = ep.replace(/^ws:\/\//i, 'wss://');
       if (!url.startsWith('wss://')) {
         url = `wss://${url}`;
@@ -588,8 +588,29 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
           : `Connecting to ESP32 MAVLink bridge at ${wsUrl}...`
       });
 
-      // 6-second connection timeout watchdog (guaranteed single instance)
+      // Progressive connection timeout: 30s for cloud WSS (allows Render free-tier cold start) vs 6s for local LAN
+      const timeoutDurationMs = protocolToTry === 'wss' ? 30000 : 6000;
+
+      let wakeUpTimer: ReturnType<typeof setTimeout> | null = null;
+      if (protocolToTry === 'wss' && wsUrl.includes('.onrender.com')) {
+        // Asynchronously trigger HTTP GET on /health to kickstart Render container spin-up
+        try {
+          const healthUrl = wsUrl.replace(/^wss:\/\//i, 'https://').split('?')[0].replace(/\/ws$/, '/health');
+          fetch(healthUrl, { mode: 'no-cors' }).catch(() => {});
+        } catch (e) {}
+
+        wakeUpTimer = setTimeout(() => {
+          if (this.isConnecting) {
+            this.notifyState({
+              phase: 'SERIAL_OPENING',
+              message: 'Waking up cloud relay container on Render (~25s cold start)...'
+            });
+          }
+        }, 3500);
+      }
+
       this.connectTimeoutTimer = setTimeout(() => {
+        if (wakeUpTimer) clearTimeout(wakeUpTimer);
         if (this.isConnecting && (!this.socket || this.socket.readyState !== WebSocket.OPEN)) {
           this.isConnecting = false;
           this.cleanupSocket(false);
@@ -599,7 +620,7 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
 
           if (protocolToTry === 'wss') {
             diagError = 'RELAY_UNAVAILABLE';
-            timeoutDetails = ' Secure relay unavailable.';
+            timeoutDetails = ' Cloud relay did not respond within 30 seconds.';
           } else {
             diagError = isLocalTarget ? 'ESP32_UNAVAILABLE' : 'CONNECTION_TIMEOUT';
             timeoutDetails = ` Could not reach ${wsUrl} within 6 seconds. Verify ESP32 is powered and device is on the same local Wi-Fi.`;
@@ -607,7 +628,7 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
 
           this.linkState = 'ERROR';
           this.errorCategory = diagError;
-          this.lastErrorMessage = protocolToTry === 'wss' ? 'Secure relay unavailable.' : `Connection timeout to ${wsUrl}.${timeoutDetails}`;
+          this.lastErrorMessage = protocolToTry === 'wss' ? `Secure relay unavailable.${timeoutDetails}` : `Connection timeout to ${wsUrl}.${timeoutDetails}`;
 
           console.error(`[WS ERROR] ${this.lastErrorMessage}`);
 
@@ -625,7 +646,7 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
           });
           resolve(false);
         }
-      }, 6000);
+      }, timeoutDurationMs);
 
       try {
         const socket = new WebSocket(wsUrl);
@@ -633,6 +654,7 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
         this.socket = socket;
 
         socket.onopen = () => {
+          if (wakeUpTimer) clearTimeout(wakeUpTimer);
           this.clearAllTimers();
           this.isConnecting = false;
           this.reconnectAttempts = 0;
@@ -956,8 +978,8 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
       return false;
     }
     try {
-      const payload = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-      this.socket.send(payload as ArrayBuffer);
+      // Zero-copy direct transmit: modern browsers accept ArrayBufferView (Uint8Array) directly without copying
+      this.socket.send(data);
       this.cumulativeTxBytes += data.length;
       return true;
     } catch (e) {

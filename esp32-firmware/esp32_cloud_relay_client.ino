@@ -170,6 +170,7 @@ void onMessageCallback(WebsocketsMessage message) {
     const uint8_t* payload = (const uint8_t*)message.c_str();
     size_t length = message.length();
     PixhawkSerial.write(payload, length);
+    PixhawkSerial.flush(); // Flush hardware FIFO immediately so bytes reach TELEM2 with 0ms buffering delay
 
     totalTxBytesToPixhawk += length;
     totalCommandsReceived++;
@@ -326,8 +327,11 @@ void setup() {
   // Initialize Pixhawk Hardware UART1:
   // RX = GPIO 18 (connects to Pixhawk TELEM2 Pin 2 TX)
   // TX = GPIO 17 (connects to Pixhawk TELEM2 Pin 3 RX)
+  PixhawkSerial.setRxBufferSize(2048); // Expand hardware FIFO to prevent buffer overflow on burst telemetry
+  PixhawkSerial.setTxBufferSize(2048); // Expand hardware FIFO for smooth outbound MAVLink commands
   PixhawkSerial.begin(PIXHAWK_BAUD, SERIAL_8N1, PIXHAWK_RX_PIN, PIXHAWK_TX_PIN);
-  Serial.println("✅ [UART] Hardware Serial1 initialized on GPIO 18 (RX) and GPIO 17 (TX).");
+  PixhawkSerial.setTimeout(5); // Non-blocking 5ms timeout for ultra-low-latency UART reads
+  Serial.println("✅ [UART] Hardware Serial1 initialized on GPIO 18 (RX) and GPIO 17 (TX) with 2048-byte FIFO buffers.");
 
   // Configure WebSocket Client callbacks and SSL mode
   wsClient.setInsecure();

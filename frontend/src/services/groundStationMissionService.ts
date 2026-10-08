@@ -1,7 +1,7 @@
 import { LatLngPoint, HomePoint } from '../types/mission';
 import { GroundStationMission, GroundStationWaypoint, MissionType } from '../types/groundStationMap';
 import { missionEngine } from './missionEngine';
-import { mavlinkService } from './mavlinkService';
+import { mavlinkService, MavlinkMissionItem } from './mavlinkService';
 import { audioService } from './audioService';
 
 /**
@@ -597,7 +597,9 @@ export class GroundStationMissionService {
    * Seq 2..N: Shape waypoints
    * Final Seq: Return To Launch or Land
    */
-  public async uploadMissionToDrone(): Promise<{ success: boolean; message: string }> {
+  public async uploadMissionToDrone(
+    onProgress?: (stage: string, current: number, total: number) => void
+  ): Promise<{ success: boolean; message: string }> {
     if (!this.currentMission) {
       return { success: false, message: 'No mission generated to upload.' };
     }
@@ -618,35 +620,80 @@ export class GroundStationMissionService {
         ? home.longitude
         : (Math.abs(telem.longitude) > 0.001 ? telem.longitude : this.currentMission.waypoints[0].lng);
 
-      // 1. Build standard ArduPilot MAVLink mission sequence
-      const missionPayload: Array<{ lat: number; lon: number; alt: number; command?: number }> = [];
+      if (Math.abs(homeLat) < 0.001 || Math.abs(homeLon) < 0.001) {
+        return { success: false, message: 'Invalid Home position: Latitude and Longitude cannot be (0, 0).' };
+      }
 
-      // Item 0: Home Position (ArduPilot standard requirement)
+      // 1. Build standard ArduPilot MAVLink mission sequence
+      const missionPayload: Array<MavlinkMissionItem> = [];
+
+      // Item 0: Home Position (ArduPilot standard requirement: frame MAV_FRAME_GLOBAL, alt 0)
       missionPayload.push({
+        seq: 0,
         lat: homeLat,
         lon: homeLon,
         alt: 0,
-        command: 16 /* MAV_CMD_NAV_WAYPOINT */
+        command: 16 /* MAV_CMD_NAV_WAYPOINT */,
+        frame: 0 /* MAV_FRAME_GLOBAL */,
+        param1: 0,
+        param2: 0,
+        param3: 0,
+        param4: 0,
+        autocontinue: 1,
+        current: 0
       });
 
-      // Item 1: Takeoff to target altitude
+      // Item 1: Takeoff to target altitude (frame MAV_FRAME_GLOBAL_RELATIVE_ALT_INT = 6)
       missionPayload.push({
+        seq: 1,
         lat: homeLat,
         lon: homeLon,
         alt: alt,
-        command: 22 /* MAV_CMD_NAV_TAKEOFF */
+        command: 22 /* MAV_CMD_NAV_TAKEOFF */,
+        frame: 6 /* MAV_FRAME_GLOBAL_RELATIVE_ALT_INT */,
+        param1: 0, // pitch
+        param2: 0,
+        param3: 0,
+        param4: 0, // yaw
+        autocontinue: 1,
+        current: 0
       });
 
       // Items 2..N: Shape Waypoints
       for (const wp of this.currentMission.waypoints) {
         let cmd = 16; // MAV_CMD_NAV_WAYPOINT
-        if (wp.action === 'RTL') cmd = 20; // MAV_CMD_NAV_RETURN_TO_LAUNCH
-        else if (wp.action === 'LAND') cmd = 21; // MAV_CMD_NAV_LAND
+        let frame = 6; // MAV_FRAME_GLOBAL_RELATIVE_ALT_INT
+        let p1 = (wp as any).param1 !== undefined ? (wp as any).param1 : 0;
+        let p2 = (wp as any).param2 !== undefined ? (wp as any).param2 : 2.0; // 2m accept radius
+        let p3 = (wp as any).param3 !== undefined ? (wp as any).param3 : 0;
+        let p4 = (wp as any).param4 !== undefined ? (wp as any).param4 : 0;
+
+        if (wp.action === 'RTL') {
+          cmd = 20; // MAV_CMD_NAV_RETURN_TO_LAUNCH
+          frame = 0;
+          p1 = 0; p2 = 0; p3 = 0; p4 = 0;
+        } else if (wp.action === 'LAND') {
+          cmd = 21; // MAV_CMD_NAV_LAND
+          frame = 0;
+          p1 = 0; p2 = 0; p3 = 0; p4 = 0;
+        } else if (wp.action === 'LOITER') {
+          cmd = 19; // MAV_CMD_NAV_LOITER_TIME
+          p1 = p1 || 5; // Default 5s loiter
+        }
+
         missionPayload.push({
+          seq: missionPayload.length,
           lat: wp.lat,
           lon: wp.lng,
           alt: wp.altitude || alt,
-          command: cmd
+          command: cmd,
+          frame,
+          param1: p1,
+          param2: p2,
+          param3: p3,
+          param4: p4,
+          autocontinue: 1,
+          current: 0
         });
       }
 
@@ -654,15 +701,23 @@ export class GroundStationMissionService {
       const lastCmd = missionPayload[missionPayload.length - 1].command;
       if (lastCmd !== 20 && lastCmd !== 21) {
         missionPayload.push({
+          seq: missionPayload.length,
           lat: homeLat,
           lon: homeLon,
           alt: 0,
-          command: 20 /* MAV_CMD_NAV_RETURN_TO_LAUNCH */
+          command: 20 /* MAV_CMD_NAV_RETURN_TO_LAUNCH */,
+          frame: 0,
+          param1: 0,
+          param2: 0,
+          param3: 0,
+          param4: 0,
+          autocontinue: 1,
+          current: 0
         });
       }
 
       // 2. Transmit to Pixhawk FC via MAVLink mission protocol
-      const uploadRes = await mavlinkService.uploadMissionWaypoints(missionPayload);
+      const uploadRes = await mavlinkService.uploadMissionWaypoints(missionPayload, true, onProgress);
 
       if (uploadRes.success) {
         this.currentMission.isUploaded = true;
@@ -673,11 +728,16 @@ export class GroundStationMissionService {
         audioService.playBeep(880, 150);
         audioService.triggerHaptic('medium');
 
+        const rtlNote = alt < 15
+          ? ` (Advisory: Flight alt is ${alt}m. Pixhawk default RTL_ALT is 15m; on RTL vehicle will climb to 15m unless RTL_ALT parameter is adjusted)`
+          : '';
+
         return {
           success: true,
-          message: `Mission successfully uploaded to Drone FC (${this.currentMission.waypoints.length} waypoints, ${this.currentMission.totalDistance}m at ${alt}m alt).`
+          message: (uploadRes.message || `Mission successfully uploaded to Drone FC (${this.currentMission.waypoints.length} waypoints, ${this.currentMission.totalDistance}m at ${alt}m alt).`) + rtlNote
         };
       } else {
+        this.currentMission.isUploaded = false;
         return {
           success: false,
           message: uploadRes.message || 'Mission upload was rejected by flight controller.'

@@ -15,6 +15,22 @@ type TelemetryListener = (telemetry: DroneTelemetry) => void;
 type MAVLinkPacketListener = (packet: MAVLinkPacket) => void;
 type ConnectionStateListener = (state: PixhawkConnectionState) => void;
 
+export interface MavlinkMissionItem {
+  seq?: number;
+  lat: number;
+  lon: number;
+  alt: number;
+  command?: number;
+  frame?: number;
+  param1?: number;
+  param2?: number;
+  param3?: number;
+  param4?: number;
+  current?: number;
+  autocontinue?: number;
+  mission_type?: number;
+}
+
 // ArduPilot Copter Flight Mode Map
 const ARDUPILOT_MODES: Record<number, string> = {
   0: 'STABILIZE',
@@ -167,12 +183,17 @@ class MAVLinkService {
   };
   private homePointManualLock: boolean = false;
 
-  private pendingMissionItems: Array<{ lat: number; lon: number; alt: number; command?: number }> = [];
-  private missionUploadResolver: ((result: { success: boolean; message: string }) => void) | null = null;
+  private pendingMissionItems: MavlinkMissionItem[] = [];
+  private missionUploadResolver: ((result: { success: boolean; message: string; upload_id?: string }) => void) | null = null;
   private missionClearResolver: ((result: { success: boolean; message: string }) => void) | null = null;
+  private missionDownloadResolver: ((result: { success: boolean; items: MavlinkMissionItem[]; message: string }) => void) | null = null;
+  private downloadedMissionItems: MavlinkMissionItem[] = [];
+  private expectedDownloadCount: number = 0;
+  private currentUploadId: string | null = null;
   private missionUploadTimeoutTimer: any = null;
   private missionCountRetryTimer: any = null;
   private missionUploadOverallTimer: any = null;
+  private missionItemRetryTimer: any = null;
   private lastRequestedSeq: number = -1;
   private lastSentSeq: number = -1;
   private lastSentTimeMs: number = 0;
@@ -624,6 +645,41 @@ class MAVLinkService {
     return true;
   }
 
+  /**
+   * Translates cryptic ArduPilot STATUSTEXT and pre-arm failures into actionable, human-readable guidance.
+   */
+  public explainPreArmFailure(raw: string): string {
+    const lower = (raw || '').toLowerCase();
+    if (lower.includes('compass') && (lower.includes('calibrat') || lower.includes('health') || lower.includes('variance') || lower.includes('offset'))) {
+      return 'Compass Error: Move drone away from metal structures, or perform compass calibration in Mission Planner.';
+    }
+    if (lower.includes('gps') || lower.includes('3d fix') || lower.includes('hdop') || lower.includes('pos hold') || lower.includes('bad gps') || lower.includes('need 3d')) {
+      return 'GPS Not Ready: Requires 3D GPS fix with ≥ 6 satellites and HDOP < 2.0 before arming in GUIDED / autonomous modes.';
+    }
+    if (lower.includes('safety switch') || (lower.includes('safety') && lower.includes('switch'))) {
+      return 'Safety Switch Locked: Press and hold the physical red safety switch on Pixhawk until solid.';
+    }
+    if (lower.includes('baro') || lower.includes('barometer')) {
+      return 'Barometer Stabilizing: Wait 15–30 seconds after powering on level ground before arming.';
+    }
+    if (lower.includes('batt') || lower.includes('voltage') || lower.includes('low batt')) {
+      return 'Battery Failsafe: Voltage is below safe arming threshold. Replace or charge LiPo battery.';
+    }
+    if (lower.includes('rc') || lower.includes('radio') || lower.includes('throttle')) {
+      return 'RC / Radio Check: Ensure RC transmitter is powered ON and throttle stick is centered or zeroed.';
+    }
+    if (lower.includes('accel') || lower.includes('ahrs') || lower.includes('inertial')) {
+      return 'IMU / Accel Check: Keep vehicle completely stationary on level ground.';
+    }
+    if (lower.includes('log') || lower.includes('sd card')) {
+      return 'MicroSD Card Check: Pixhawk SD card is missing, full, or write-protected.';
+    }
+    if (lower.includes('fence')) {
+      return 'Geo-Fence Alert: Vehicle is outside configured geofence boundary.';
+    }
+    return raw;
+  }
+
   public evaluatePreArmSafety(): { passed: boolean; reason?: string } {
     if (!this.connectionState.isConnected && !this.simInterval) {
       return { passed: false, reason: 'Pixhawk FC Disconnected (Connect ESP32-S3 / USB & verify MAVLink Heartbeat)' };
@@ -636,7 +692,7 @@ class MAVLinkService {
     // Real Hardware: Check for genuine Pixhawk PreArm failures from STATUSTEXT
     if (this.connectionState.isRealHardware) {
       if (this.connectionState.preArmFailReason && !this.telemetry.isArmed) {
-        return { passed: false, reason: this.connectionState.preArmFailReason };
+        return { passed: false, reason: this.explainPreArmFailure(this.connectionState.preArmFailReason) };
       }
     } else {
       // Simulation: Only check GPS if mode requires position
@@ -1157,6 +1213,81 @@ class MAVLinkService {
         break;
       }
 
+      // MISSION_COUNT (msgId = 44) - Received from FC during mission download/readback
+      case 44: {
+        if (payload.length >= 2 && this.missionDownloadResolver) {
+          const count = view.getUint16(0, true);
+          this.expectedDownloadCount = count;
+          this.downloadedMissionItems = [];
+          this.logDiagnostic('MAVLINK', `[MAVLINK] RX MISSION_COUNT count=${count} sys=${sysId} comp=${compId}`, 'info');
+          if (count === 0) {
+            this.sendMissionAck(0);
+            const res = this.missionDownloadResolver;
+            this.missionDownloadResolver = null;
+            res({ success: true, items: [], message: 'Pixhawk reports 0 mission items in storage' });
+          } else {
+            this.sendMissionRequestInt(0);
+          }
+        }
+        break;
+      }
+
+      // MISSION_ITEM_INT (msgId = 73) & MISSION_ITEM (msgId = 39) - Received during download/readback
+      case 73:
+      case 39: {
+        if (this.missionDownloadResolver && payload.length >= 37) {
+          const p1 = view.getFloat32(0, true);
+          const p2 = view.getFloat32(4, true);
+          const p3 = view.getFloat32(8, true);
+          const p4 = view.getFloat32(12, true);
+          let lat: number, lon: number;
+          if (msgId === 73) {
+            lat = view.getInt32(16, true) / 1e7;
+            lon = view.getInt32(20, true) / 1e7;
+          } else {
+            lat = view.getFloat32(16, true);
+            lon = view.getFloat32(20, true);
+          }
+          const alt = view.getFloat32(24, true);
+          const seq = view.getUint16(28, true);
+          const cmd = view.getUint16(30, true);
+          const frame = view.getUint8(34);
+          const autocontinue = view.getUint8(36);
+
+          this.downloadedMissionItems.push({
+            seq,
+            command: cmd,
+            frame,
+            param1: p1,
+            param2: p2,
+            param3: p3,
+            param4: p4,
+            lat,
+            lon,
+            alt,
+            autocontinue
+          });
+
+          this.logDiagnostic('MAVLINK', `[MAVLINK] RX ${msgId === 73 ? 'MISSION_ITEM_INT' : 'MISSION_ITEM'} seq=${seq} cmd=${cmd} lat=${lat.toFixed(6)} lon=${lon.toFixed(6)} alt=${alt.toFixed(1)}m`, 'info');
+
+          const nextSeq = this.downloadedMissionItems.length;
+          if (nextSeq < this.expectedDownloadCount) {
+            this.sendMissionRequestInt(nextSeq);
+          } else {
+            this.sendMissionAck(0);
+            const res = this.missionDownloadResolver;
+            this.missionDownloadResolver = null;
+            this.logDiagnostic('MAVLINK', `[MISSION READBACK] Successfully verified ${this.downloadedMissionItems.length} items from Pixhawk ✓`, 'success');
+            res({
+              success: true,
+              items: this.downloadedMissionItems,
+              message: `Successfully verified ${this.downloadedMissionItems.length} items from Pixhawk`
+            });
+          }
+        }
+        break;
+      }
+
       // MISSION_REQUEST (msgId = 40) & MISSION_REQUEST_INT (msgId = 51)
       case 40:
       case 51: {
@@ -1172,12 +1303,15 @@ class MAVLinkService {
 
           const requestedSeq = view.getUint16(0, true);
           const now = Date.now();
+          const reqName = msgId === 51 ? 'MISSION_REQUEST_INT' : 'MISSION_REQUEST';
 
           // Debounce rapid duplicate requests for the exact same sequence within 150ms
           if (requestedSeq === this.lastSentSeq && now - this.lastSentTimeMs < 150) {
-            this.logDiagnostic('MAVLINK', `[MISSION_REQUEST] Debounced duplicate request for seq ${requestedSeq} (${now - this.lastSentTimeMs}ms)`, 'info');
+            this.logDiagnostic('MAVLINK', `[MAVLINK] Debounced duplicate ${reqName} for seq ${requestedSeq} (${now - this.lastSentTimeMs}ms)`, 'info');
             break;
           }
+
+          this.logDiagnostic('MAVLINK', `[MAVLINK] RX ${reqName} seq=${requestedSeq}`, 'info');
 
           if (this.pendingMissionItems && requestedSeq < this.pendingMissionItems.length) {
             this.lastRequestedSeq = requestedSeq;
@@ -1186,15 +1320,37 @@ class MAVLinkService {
             const item = this.pendingMissionItems[requestedSeq];
 
             // Critical ArduPilot compliance:
-            // - If Pixhawk sends msg 40 (MISSION_REQUEST) -> Respond with msg 39 (MISSION_ITEM) with float coordinates and frame 3
-            // - If Pixhawk sends msg 51 (MISSION_REQUEST_INT) -> Respond with msg 73 (MISSION_ITEM_INT) with int32 degE7 coordinates and frame 6
+            // - If Pixhawk sends msg 40 (MISSION_REQUEST) -> Respond with msg 39 (MISSION_ITEM) with float coordinates
+            // - If Pixhawk sends msg 51 (MISSION_REQUEST_INT) -> Respond with msg 73 (MISSION_ITEM_INT) with int32 degE7 coordinates
             if (msgId === 40) {
               this.sendMissionItem(requestedSeq, item);
             } else {
               this.sendMissionItemInt(requestedSeq, item);
             }
+
+            // Item retransmission watchdog (retry up to 5 times if FC drops the packet)
+            if (this.missionItemRetryTimer) {
+              clearTimeout(this.missionItemRetryTimer);
+              this.missionItemRetryTimer = null;
+            }
+            let itemRetries = 0;
+            const scheduleItemRetry = () => {
+              this.missionItemRetryTimer = setTimeout(() => {
+                if (this.missionUploadResolver && this.lastRequestedSeq === requestedSeq && itemRetries < 5) {
+                  itemRetries++;
+                  this.logDiagnostic('MAVLINK', `[MAVLINK] Retrying waypoint seq ${requestedSeq} (attempt ${itemRetries}/5)...`, 'warn');
+                  if (msgId === 40) {
+                    this.sendMissionItem(requestedSeq, item);
+                  } else {
+                    this.sendMissionItemInt(requestedSeq, item);
+                  }
+                  scheduleItemRetry();
+                }
+              }, 1500);
+            };
+            scheduleItemRetry();
           } else {
-            this.logDiagnostic('MAVLINK', `[MISSION_REQUEST] Requested seq ${requestedSeq} out of bounds (pending items: ${this.pendingMissionItems?.length || 0})`, 'warn');
+            this.logDiagnostic('MAVLINK', `[MAVLINK] Requested seq ${requestedSeq} out of bounds (pending items: ${this.pendingMissionItems?.length || 0})`, 'warn');
           }
         }
         break;
@@ -1415,6 +1571,9 @@ class MAVLinkService {
           }
           if (text.length > 0) {
             const lower = text.toLowerCase();
+            const explanation = this.explainPreArmFailure(text);
+            const displayMsg = explanation !== text ? `${text} (${explanation})` : text;
+
             // Surface all Arm, PreArm, Logging, Calibration, and Safety rejections to UI
             if (
               lower.includes('arm') || 
@@ -1429,14 +1588,14 @@ class MAVLinkService {
               lower.includes('bad') || 
               severityLevel <= 4
             ) {
-              this.connectionState.preArmFailReason = text;
+              this.connectionState.preArmFailReason = explanation;
               if (lower.includes('arm') || lower.includes('fail')) {
                 this.connectionState.vehicleState = 'DISARMED';
                 this.telemetry.vehicleState = 'DISARMED';
               }
             }
-            this.logDiagnostic('MAVLINK', `[STATUSTEXT] [${severity}] ${text}`, severityLevel <= 3 ? 'error' : severityLevel === 4 ? 'warn' : 'info');
-            this.addStatusMessage(severity, severityLevel, text);
+            this.logDiagnostic('MAVLINK', `[STATUSTEXT] [${severity}] ${displayMsg}`, severityLevel <= 3 ? 'error' : severityLevel === 4 ? 'warn' : 'info');
+            this.addStatusMessage(severity, severityLevel, displayMsg);
             this.notifyConnection();
             this.notifyTelemetry();
           }
@@ -1513,13 +1672,14 @@ class MAVLinkService {
               this.logDiagnostic('MAVLINK', '[ARM ACK] ARM COMMAND ACCEPTED ✓ (Awaiting Heartbeat armed confirmation)', 'success');
               this.addStatusMessage('INFO', 6, 'ARM COMMAND ACCEPTED (Waiting for vehicle armed state)');
             } else {
-              if (!this.connectionState.preArmFailReason) {
-                this.connectionState.preArmFailReason = `Pixhawk Rejection: ${resultName} (Code ${result})`;
-              }
+              const baseReason = this.connectionState.preArmFailReason 
+                ? this.explainPreArmFailure(this.connectionState.preArmFailReason)
+                : `Pixhawk rejected Arm (${resultName}). Check safety switch pressed, GPS 3D fix, and compass calibration.`;
+              this.connectionState.preArmFailReason = baseReason;
               this.connectionState.vehicleState = 'DISARMED';
               this.telemetry.vehicleState = 'DISARMED';
-              this.logDiagnostic('MAVLINK', `[ARM ACK] ARM COMMAND REJECTED by Pixhawk (${resultName})`, 'warn');
-              this.addStatusMessage('WARNING', 4, `ARM COMMAND REJECTED: ${this.connectionState.preArmFailReason}`);
+              this.logDiagnostic('MAVLINK', `[ARM ACK] ARM COMMAND REJECTED by Pixhawk (${resultName}): ${baseReason}`, 'warn');
+              this.addStatusMessage('WARNING', 4, `ARM COMMAND REJECTED: ${baseReason}`);
             }
             this.notifyConnection();
             this.notifyTelemetry();
@@ -2038,6 +2198,10 @@ class MAVLinkService {
       clearTimeout(this.missionUploadOverallTimer);
       this.missionUploadOverallTimer = null;
     }
+    if (this.missionItemRetryTimer) {
+      clearTimeout(this.missionItemRetryTimer);
+      this.missionItemRetryTimer = null;
+    }
     this.missionTransferActive = false;
   }
 
@@ -2102,7 +2266,7 @@ class MAVLinkService {
         usbHostService.sendBytes(packet).then((ok) => {
           if (ok) {
             this.connectionState.bytesSent += packet.length;
-            this.logDiagnostic('MAVLINK', `[MISSION_CLEAR_ALL TX] Sent clear all waypoints to SysID ${targetSys} CompID ${targetComp}`, 'info');
+            this.logDiagnostic('MAVLINK', `[MAVLINK] TX MISSION_CLEAR_ALL target=${targetSys}/${targetComp} type=MISSION`, 'info');
           }
         }).catch((err) => {
           console.error('[MISSION_CLEAR_ALL TX Error]', err);
@@ -2116,76 +2280,176 @@ class MAVLinkService {
 
   /**
    * Upload autonomous mission waypoints to Pixhawk flight controller via MAVLink mission protocol
-   * (MISSION_CLEAR_ALL -> MISSION_COUNT -> MISSION_REQUEST/MISSION_REQUEST_INT -> MISSION_ITEM/MISSION_ITEM_INT -> MISSION_ACK)
+   * (MISSION_CLEAR_ALL -> MISSION_COUNT -> MISSION_REQUEST/MISSION_REQUEST_INT -> MISSION_ITEM/MISSION_ITEM_INT -> MISSION_ACK -> READBACK VERIFICATION)
    */
   public async uploadMissionWaypoints(
-    items: Array<{ lat: number; lon: number; alt: number; command?: number }>,
-    allowRetry: boolean = true
-  ): Promise<{ success: boolean; message: string }> {
-    const isConnected = this.connectionState.isConnected || this.connectionState.isUsbConnected;
-    if (!isConnected && !this.simInterval) {
-      this.logDiagnostic('ERROR', 'Cannot upload mission: MAVLink link not connected', 'error');
-      return { success: false, message: 'MAVLink link not connected' };
+    items: Array<MavlinkMissionItem>,
+    allowRetry: boolean = true,
+    onProgress?: (stage: string, current: number, total: number) => void
+  ): Promise<{ success: boolean; message: string; upload_id?: string }> {
+    // 1. Concurrency guard: Serialize uploads
+    if (this.missionUploadResolver !== null) {
+      return {
+        success: false,
+        message: 'A mission upload is already in progress. Please wait for completion.'
+      };
     }
+
+    // 2. Mission validation before touching link
+    if (!items || items.length === 0) {
+      return { success: false, message: 'Cannot upload empty mission (0 items).' };
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (typeof it.lat !== 'number' || isNaN(it.lat) || typeof it.lon !== 'number' || isNaN(it.lon) || typeof it.alt !== 'number' || isNaN(it.alt)) {
+        return { success: false, message: `Invalid waypoint at index ${i}: Coordinates or altitude contain NaN or non-finite values.` };
+      }
+      if (i > 0 && Math.abs(it.lat) < 0.001 && Math.abs(it.lon) < 0.001) {
+        return { success: false, message: `Invalid waypoint at index ${i}: Latitude and Longitude cannot be (0, 0).` };
+      }
+      if (it.lat < -90 || it.lat > 90 || it.lon < -180 || it.lon > 180) {
+        return { success: false, message: `Invalid waypoint at index ${i}: Latitude (${it.lat}) or Longitude (${it.lon}) out of WGS-84 bounds.` };
+      }
+    }
+
+    // 3. Confirm live link: Require fresh HEARTBEAT within 4000ms
+    const now = Date.now();
+    const heartbeatAgeMs = this.connectionState.lastHeartbeat ? (now - this.connectionState.lastHeartbeat) : Infinity;
+    const isConnected = this.connectionState.isConnected || this.connectionState.isUsbConnected;
+
+    if (this.connectionState.isRealHardware && !this.simInterval) {
+      if (!isConnected || heartbeatAgeMs > 4000) {
+        const ageSec = Number.isFinite(heartbeatAgeMs) ? (heartbeatAgeMs / 1000).toFixed(1) + 's' : 'never received';
+        const errMsg = `Cannot upload mission: No fresh MAVLink heartbeat from Pixhawk in last 4s (last RX: ${ageSec} ago). Ensure Pixhawk is powered and TELEM2 baud matches ESP32 (57600).`;
+        this.logDiagnostic('ERROR', errMsg, 'error');
+        return { success: false, message: errMsg };
+      }
+    } else if (!isConnected && !this.simInterval) {
+      return { success: false, message: 'Cannot upload mission: MAVLink link not connected' };
+    }
+
+    const upload_id = `up_${Date.now().toString(36).slice(-4)}`;
+    this.currentUploadId = upload_id;
+    const startTime = Date.now();
+
+    this.logDiagnostic('MAVLINK', `[MISSION] upload_id=${upload_id} requested items=${items.length}`, 'info');
+    this.logDiagnostic(
+      'MAVLINK',
+      `[MAVLINK] connection=established transport=${this.connectionState.diagnostics.driverType || 'active'} age=${(heartbeatAgeMs / 1000).toFixed(1)}s`,
+      'info'
+    );
+
+    // Register job with backend (asynchronous notification)
+    try {
+      fetch('/mission/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upload_id, items })
+      }).catch(() => {});
+    } catch (e) {}
 
     this.clearMissionUploadTimers();
 
-    // 1. Mandatory Pre-Upload Wipe: Clear old/desynced EEPROM mission state on Pixhawk
-    this.addStatusMessage('NOTICE', 5, 'Clearing existing Pixhawk mission table...');
-    this.logDiagnostic('MAVLINK', '[MISSION UPLOAD] Sending MISSION_CLEAR_ALL to wipe any dirty Pixhawk mission state...', 'info');
-    await this.clearMissionWaypoints();
-    await new Promise((r) => setTimeout(r, 250));
-
-    this.pendingMissionItems = items;
-    this.lastRequestedSeq = -1;
-    this.lastSentSeq = -1;
-    this.lastSentTimeMs = 0;
-    this.missionTransferActive = false;
-    this.addStatusMessage('NOTICE', 5, `Uploading ${items.length} waypoints to Pixhawk FC...`);
-
     if (this.connectionState.isRealHardware) {
-      return new Promise<{ success: boolean; message: string }>(async (resolve) => {
+      // 4. Pre-Upload Wipe: Clear old mission state with MISSION_CLEAR_ALL
+      onProgress?.('Clearing flight controller mission table...', 0, items.length);
+      this.addStatusMessage('NOTICE', 5, 'Clearing existing Pixhawk mission table...');
+      this.logDiagnostic('MAVLINK', `[MISSION UPLOAD] Sending MISSION_CLEAR_ALL (upload_id=${upload_id})...`, 'info');
+      await this.clearMissionWaypoints();
+      await new Promise((r) => setTimeout(r, 200));
+
+      this.pendingMissionItems = items;
+      this.lastRequestedSeq = -1;
+      this.lastSentSeq = -1;
+      this.lastSentTimeMs = 0;
+      this.missionTransferActive = false;
+
+      return new Promise<{ success: boolean; message: string; upload_id?: string }>(async (resolve) => {
         this.missionUploadResolver = async (result) => {
-          // Automatic recovery retry if FC state experienced sequence desync
-          if (!result.success && result.message.includes('INVALID_SEQUENCE') && allowRetry) {
-            this.logDiagnostic('MAVLINK', '[MISSION UPLOAD] Received INVALID_SEQUENCE. Flight controller state desynced; wiping mission with MISSION_CLEAR_ALL and re-attempting clean upload...', 'warn');
-            this.clearMissionUploadTimers();
-            await this.clearMissionWaypoints();
-            await new Promise((r) => setTimeout(r, 400));
-            const retryRes = await this.uploadMissionWaypoints(items, false);
-            resolve(retryRes);
-            return;
+          this.clearMissionUploadTimers();
+          this.missionUploadResolver = null;
+
+          if (result.success) {
+            // 5. Readback verification!
+            onProgress?.('Verifying mission readback from Pixhawk...', items.length, items.length);
+            this.logDiagnostic('MAVLINK', `[MISSION READBACK] Starting verification readback for ${items.length} items...`, 'info');
+            try {
+              const readback = await this.downloadMissionWaypoints(6000);
+              if (readback.success) {
+                if (readback.items.length !== items.length) {
+                  const mismatchErr = `Readback count mismatch: Pixhawk stored ${readback.items.length} items, expected ${items.length}.`;
+                  this.logDiagnostic('ERROR', mismatchErr, 'error');
+                  resolve({ success: false, message: mismatchErr, upload_id });
+                  return;
+                }
+                const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+                this.logDiagnostic('MAVLINK', `[MISSION] upload_id=${upload_id} SUCCESS duration=${duration}s (Readback verified)`, 'success');
+                onProgress?.('Mission verified and accepted ✓', items.length, items.length);
+                resolve({
+                  success: true,
+                  message: `Mission uploaded and verified by Pixhawk (${items.length} waypoints) ✓`,
+                  upload_id
+                });
+                return;
+              } else {
+                this.logDiagnostic('MAVLINK', `[MISSION READBACK] Readback note: ${readback.message} (FC ACK was ACCEPTED)`, 'warn');
+              }
+            } catch (rbErr: any) {
+              this.logDiagnostic('MAVLINK', `[MISSION READBACK] Readback note: ${rbErr?.message || rbErr}`, 'warn');
+            }
+
+            const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+            this.logDiagnostic('MAVLINK', `[MISSION] upload_id=${upload_id} SUCCESS duration=${duration}s`, 'success');
+            onProgress?.('Mission accepted by Pixhawk ✓', items.length, items.length);
+            resolve({
+              success: true,
+              message: `Mission uploaded and verified by Pixhawk (${items.length} waypoints) ✓`,
+              upload_id
+            });
+          } else {
+            // Automatic retry if transient sequence desync
+            if (result.message.includes('INVALID_SEQUENCE') && allowRetry) {
+              this.logDiagnostic('MAVLINK', '[MISSION UPLOAD] Received INVALID_SEQUENCE desync; wiping with MISSION_CLEAR_ALL and retrying...', 'warn');
+              await this.clearMissionWaypoints();
+              await new Promise((r) => setTimeout(r, 400));
+              const retryRes = await this.uploadMissionWaypoints(items, false, onProgress);
+              resolve(retryRes);
+              return;
+            }
+            this.logDiagnostic('ERROR', `[MISSION] upload_id=${upload_id} FAILED: ${result.message}`, 'error');
+            resolve({ success: false, message: result.message, upload_id });
           }
-          resolve(result);
         };
 
-        // 2. Scaled overall safety timer (minimum 25s, +1.5s per waypoint)
-        const overallTimeout = Math.max(25000, items.length * 1500);
+        // Overall safety timeout (scaled by item count)
+        const overallTimeout = Math.max(20000, items.length * 1500);
         this.missionUploadOverallTimer = setTimeout(() => {
           if (this.missionUploadResolver) {
-            this.logDiagnostic('MAVLINK', `[MISSION UPLOAD] Overall timeout reached (${overallTimeout / 1000}s).`, 'warn');
             const res = this.missionUploadResolver;
             this.missionUploadResolver = null;
+            this.clearMissionUploadTimers();
+            const age = ((Date.now() - this.connectionState.lastHeartbeat) / 1000).toFixed(1);
             res({
               success: false,
-              message: `Mission upload timeout: Pixhawk did not complete transfer within ${overallTimeout / 1000}s.`
+              message: `Mission upload timeout: Pixhawk did not complete transfer within ${overallTimeout / 1000}s (last RX heartbeat: ${age}s ago).`
             });
           }
-          this.clearMissionUploadTimers();
         }, overallTimeout);
 
-        // 3. Initial item watchdog: wait up to 6s for first MISSION_REQUEST
-        this.resetMissionItemWatchdog(6000);
-
-        // 4. Helper to broadcast MISSION_COUNT
+        // Broadcaster for MISSION_COUNT with retry (1200ms per attempt up to 5 attempts)
         const isMav2 = this.connectionState.mavlinkVersion === 'MAVLink 2.0';
         const targetSys = this.connectionState.systemId || 1;
         const targetComp = this.connectionState.componentId || 1;
 
-        const sendCountPacket = async (attempt: number) => {
-          if (this.missionTransferActive) {
+        let countAttempts = 0;
+        const maxCountAttempts = 5;
+
+        const sendCountPacket = async () => {
+          if (this.missionTransferActive || !this.missionUploadResolver) {
             return;
           }
+          countAttempts++;
           try {
             const payload = new Uint8Array(isMav2 ? 5 : 4);
             const view = new DataView(payload.buffer);
@@ -2204,51 +2468,66 @@ class MAVLinkService {
             this.connectionState.bytesSent += packet.length;
             this.logDiagnostic(
               'MAVLINK',
-              `[MISSION_COUNT TX] Announced ${items.length} waypoints (Attempt ${attempt}/2, ${isMav2 ? 'MAVLink 2.0' : 'MAVLink 1.0'})`,
+              `[MAVLINK] TX MISSION_COUNT count=${items.length} target=${targetSys}/${targetComp} type=MISSION (Attempt ${countAttempts}/${maxCountAttempts})`,
               'info'
             );
+            onProgress?.(`Announcing mission to Pixhawk (attempt ${countAttempts}/${maxCountAttempts})...`, 0, items.length);
+
+            if (countAttempts < maxCountAttempts) {
+              this.missionCountRetryTimer = setTimeout(() => {
+                if (!this.missionTransferActive && this.missionUploadResolver) {
+                  sendCountPacket();
+                }
+              }, 1200);
+            } else {
+              // Set watchdog for final attempt
+              this.missionUploadTimeoutTimer = setTimeout(() => {
+                if (!this.missionTransferActive && this.missionUploadResolver) {
+                  const res = this.missionUploadResolver;
+                  this.missionUploadResolver = null;
+                  this.clearMissionUploadTimers();
+                  const age = ((Date.now() - this.connectionState.lastHeartbeat) / 1000).toFixed(1);
+                  res({
+                    success: false,
+                    message: `Upload failed: Pixhawk did not respond to MISSION_COUNT after ${maxCountAttempts} attempts (last RX heartbeat: ${age}s ago).`
+                  });
+                }
+              }, 1800);
+            }
           } catch (e: any) {
             console.error('[MISSION_COUNT TX Error]', e);
           }
         };
 
-        // Send initial MISSION_COUNT
-        await sendCountPacket(1);
-
-        // Retry MISSION_COUNT ONCE after 3500ms ONLY IF FC has NOT responded with any item request
-        this.missionCountRetryTimer = setTimeout(async () => {
-          if (!this.missionTransferActive && this.missionUploadResolver) {
-            this.logDiagnostic('MAVLINK', `[MISSION UPLOAD] FC has not responded with item request within 3.5s; retrying MISSION_COUNT (Attempt 2/2)...`, 'info');
-            await sendCountPacket(2);
-          }
-        }, 3500);
+        // Send first MISSION_COUNT attempt
+        await sendCountPacket();
       });
     } else {
+      this.pendingMissionItems = items;
       this.logDiagnostic('MAVLINK', `[SIMULATOR] Stored ${items.length} mission waypoints`, 'info');
-      return { success: true, message: `Simulator stored ${items.length} mission waypoints` };
+      onProgress?.('Mission saved to simulator ✓', items.length, items.length);
+      return { success: true, message: `Simulator stored ${items.length} mission waypoints`, upload_id };
     }
   }
 
   public async sendMissionItem(
     seq: number,
-    item: { lat: number; lon: number; alt: number; command?: number }
+    item: MavlinkMissionItem
   ): Promise<boolean> {
     const isMav2 = this.connectionState.mavlinkVersion === 'MAVLink 2.0';
     const payload = new Uint8Array(isMav2 ? 38 : 37);
     const view = new DataView(payload.buffer);
-    
+
     const cmd = item.command || 16 /* MAV_CMD_NAV_WAYPOINT */;
-    if (cmd === 16 /* MAV_CMD_NAV_WAYPOINT */) {
-      view.setFloat32(0, 0, true); // param1: hold time
-      view.setFloat32(4, 2.0, true); // param2: accept radius (2m)
-      view.setFloat32(8, 0, true); // param3: pass radius
-      view.setFloat32(12, 0, true); // param4: yaw
-    } else {
-      view.setFloat32(0, 0, true);
-      view.setFloat32(4, 0, true);
-      view.setFloat32(8, 0, true);
-      view.setFloat32(12, 0, true);
-    }
+    const p1 = item.param1 !== undefined ? item.param1 : 0;
+    const p2 = item.param2 !== undefined ? item.param2 : (cmd === 16 ? 2.0 : 0);
+    const p3 = item.param3 !== undefined ? item.param3 : 0;
+    const p4 = item.param4 !== undefined ? item.param4 : 0;
+
+    view.setFloat32(0, p1, true);
+    view.setFloat32(4, p2, true);
+    view.setFloat32(8, p3, true);
+    view.setFloat32(12, p4, true);
 
     view.setFloat32(16, item.lat, true); // x: latitude in float deg
     view.setFloat32(20, item.lon, true); // y: longitude in float deg
@@ -2257,14 +2536,15 @@ class MAVLinkService {
     view.setUint16(30, cmd, true);
     view.setUint8(32, this.connectionState.systemId || 1);
     view.setUint8(33, this.connectionState.componentId || 1);
-    
+
     // Frame: Seq 0 is Home (MAV_FRAME_GLOBAL = 0), waypoints are MAV_FRAME_GLOBAL_RELATIVE_ALT = 3
-    const frame = (seq === 0) ? 0 /* MAV_FRAME_GLOBAL */ : 3 /* MAV_FRAME_GLOBAL_RELATIVE_ALT */;
+    const defaultFrame = (seq === 0) ? 0 /* MAV_FRAME_GLOBAL */ : 3 /* MAV_FRAME_GLOBAL_RELATIVE_ALT */;
+    const frame = item.frame !== undefined ? item.frame : defaultFrame;
     view.setUint8(34, frame);
-    view.setUint8(35, 0 /* current: 0 during upload */);
-    view.setUint8(36, 1 /* autocontinue */);
+    view.setUint8(35, item.current || 0 /* current: 0 during upload */);
+    view.setUint8(36, item.autocontinue !== undefined ? item.autocontinue : 1);
     if (isMav2) {
-      view.setUint8(37, 0 /* mission_type: MAV_MISSION_TYPE_MISSION */);
+      view.setUint8(37, item.mission_type || 0 /* mission_type: MAV_MISSION_TYPE_MISSION */);
     }
 
     const packet = isMav2
@@ -2274,31 +2554,33 @@ class MAVLinkService {
     const success = await usbHostService.sendBytes(packet);
     if (success) {
       this.connectionState.bytesSent += packet.length;
-      this.logDiagnostic('MAVLINK', `[MISSION_ITEM TX] Sent waypoint ${seq + 1}/${this.pendingMissionItems?.length || 1} (Seq ${seq}, Cmd: ${cmd}, Lat: ${item.lat.toFixed(6)}, Lon: ${item.lon.toFixed(6)}, Alt: ${item.alt}m, Frame: ${frame})`, 'info');
+      this.logDiagnostic(
+        'MAVLINK',
+        `[MAVLINK] TX MISSION_ITEM seq=${seq} cmd=${cmd} frame=${frame} lat=${item.lat.toFixed(6)} lon=${item.lon.toFixed(6)} alt=${item.alt}m p1=${p1} p3=${p3}`,
+        'info'
+      );
     }
     return success;
   }
 
   public async sendMissionItemInt(
     seq: number,
-    item: { lat: number; lon: number; alt: number; command?: number }
+    item: MavlinkMissionItem
   ): Promise<boolean> {
     const isMav2 = this.connectionState.mavlinkVersion === 'MAVLink 2.0';
     const payload = new Uint8Array(isMav2 ? 38 : 37);
     const view = new DataView(payload.buffer);
-    
+
     const cmd = item.command || 16 /* MAV_CMD_NAV_WAYPOINT */;
-    if (cmd === 16 /* MAV_CMD_NAV_WAYPOINT */) {
-      view.setFloat32(0, 0, true); // param1: hold time
-      view.setFloat32(4, 2.0, true); // param2: accept radius (2m)
-      view.setFloat32(8, 0, true); // param3: pass radius
-      view.setFloat32(12, 0, true); // param4: yaw
-    } else {
-      view.setFloat32(0, 0, true);
-      view.setFloat32(4, 0, true);
-      view.setFloat32(8, 0, true);
-      view.setFloat32(12, 0, true);
-    }
+    const p1 = item.param1 !== undefined ? item.param1 : 0;
+    const p2 = item.param2 !== undefined ? item.param2 : (cmd === 16 ? 2.0 : 0);
+    const p3 = item.param3 !== undefined ? item.param3 : 0;
+    const p4 = item.param4 !== undefined ? item.param4 : 0;
+
+    view.setFloat32(0, p1, true);
+    view.setFloat32(4, p2, true);
+    view.setFloat32(8, p3, true);
+    view.setFloat32(12, p4, true);
 
     view.setInt32(16, Math.round(item.lat * 1e7), true);
     view.setInt32(20, Math.round(item.lon * 1e7), true);
@@ -2307,16 +2589,15 @@ class MAVLinkService {
     view.setUint16(30, cmd, true);
     view.setUint8(32, this.connectionState.systemId || 1);
     view.setUint8(33, this.connectionState.componentId || 1);
-    
+
     // Frame: Seq 0 is Home (MAV_FRAME_GLOBAL = 0), waypoints are MAV_FRAME_GLOBAL_RELATIVE_ALT_INT = 6
-    const frame = (seq === 0) ? 0 /* MAV_FRAME_GLOBAL */ : 6 /* MAV_FRAME_GLOBAL_RELATIVE_ALT_INT */;
+    const defaultFrame = (seq === 0) ? 0 /* MAV_FRAME_GLOBAL */ : 6 /* MAV_FRAME_GLOBAL_RELATIVE_ALT_INT */;
+    const frame = item.frame !== undefined ? item.frame : defaultFrame;
     view.setUint8(34, frame);
-    
-    // Current: 0 for all items during upload
-    view.setUint8(35, 0);
-    view.setUint8(36, 1 /* autocontinue */);
+    view.setUint8(35, item.current || 0);
+    view.setUint8(36, item.autocontinue !== undefined ? item.autocontinue : 1);
     if (isMav2) {
-      view.setUint8(37, 0 /* mission_type: MAV_MISSION_TYPE_MISSION */);
+      view.setUint8(37, item.mission_type || 0 /* mission_type: MAV_MISSION_TYPE_MISSION */);
     }
 
     const packet = isMav2
@@ -2326,7 +2607,115 @@ class MAVLinkService {
     const success = await usbHostService.sendBytes(packet);
     if (success) {
       this.connectionState.bytesSent += packet.length;
-      this.logDiagnostic('MAVLINK', `[MISSION_ITEM_INT TX] Sent waypoint ${seq + 1}/${this.pendingMissionItems?.length || 1} (Seq ${seq}, Cmd: ${cmd}, Lat: ${item.lat.toFixed(6)}, Lon: ${item.lon.toFixed(6)}, Alt: ${item.alt}m, Frame: ${frame})`, 'info');
+      this.logDiagnostic(
+        'MAVLINK',
+        `[MAVLINK] TX MISSION_ITEM_INT seq=${seq} cmd=${cmd} frame=${frame} lat=${item.lat.toFixed(6)} lon=${item.lon.toFixed(6)} alt=${item.alt}m p1=${p1} p3=${p3}`,
+        'info'
+      );
+    }
+    return success;
+  }
+
+  /**
+   * Download and readback all mission waypoints from Pixhawk to verify upload integrity.
+   */
+  public async downloadMissionWaypoints(timeoutMs: number = 6000): Promise<{ success: boolean; items: MavlinkMissionItem[]; message: string }> {
+    const isConnected = this.connectionState.isConnected || this.connectionState.isUsbConnected;
+    if (!isConnected && !this.simInterval) {
+      return { success: false, items: [], message: 'MAVLink link not connected' };
+    }
+
+    if (this.simInterval) {
+      return { success: true, items: this.pendingMissionItems || [], message: 'Simulator mission items returned' };
+    }
+
+    return new Promise<{ success: boolean; items: MavlinkMissionItem[]; message: string }>((resolve) => {
+      this.downloadedMissionItems = [];
+      this.expectedDownloadCount = 0;
+
+      const timer = setTimeout(() => {
+        this.missionDownloadResolver = null;
+        resolve({
+          success: false,
+          items: this.downloadedMissionItems,
+          message: `Readback download timeout (${timeoutMs / 1000}s)`
+        });
+      }, timeoutMs);
+
+      this.missionDownloadResolver = (res) => {
+        clearTimeout(timer);
+        resolve(res);
+      };
+
+      this.sendMissionRequestList();
+    });
+  }
+
+  public async sendMissionRequestList(): Promise<boolean> {
+    const isMav2 = this.connectionState.mavlinkVersion === 'MAVLink 2.0';
+    const targetSys = this.connectionState.systemId || 1;
+    const targetComp = this.connectionState.componentId || 1;
+    const payload = new Uint8Array(isMav2 ? 3 : 2);
+    payload[0] = targetSys;
+    payload[1] = targetComp;
+    if (isMav2) {
+      payload[2] = 0; // MAV_MISSION_TYPE_MISSION
+    }
+    const packet = isMav2
+      ? this.buildMavlink2Frame(43 /* MISSION_REQUEST_LIST */, payload)
+      : this.buildMavlink1Frame(43 /* MISSION_REQUEST_LIST */, payload);
+
+    this.logDiagnostic('MAVLINK', `[MAVLINK] TX MISSION_REQUEST_LIST target=${targetSys}/${targetComp} type=MISSION`, 'info');
+    const success = await usbHostService.sendBytes(packet);
+    if (success) {
+      this.connectionState.bytesSent += packet.length;
+    }
+    return success;
+  }
+
+  public async sendMissionRequestInt(seq: number): Promise<boolean> {
+    const isMav2 = this.connectionState.mavlinkVersion === 'MAVLink 2.0';
+    const targetSys = this.connectionState.systemId || 1;
+    const targetComp = this.connectionState.componentId || 1;
+    const payload = new Uint8Array(isMav2 ? 5 : 4);
+    const view = new DataView(payload.buffer);
+    view.setUint16(0, seq, true);
+    view.setUint8(2, targetSys);
+    view.setUint8(3, targetComp);
+    if (isMav2) {
+      view.setUint8(4, 0 /* MAV_MISSION_TYPE_MISSION */);
+    }
+    const packet = isMav2
+      ? this.buildMavlink2Frame(51 /* MISSION_REQUEST_INT */, payload)
+      : this.buildMavlink1Frame(51 /* MISSION_REQUEST_INT */, payload);
+
+    this.logDiagnostic('MAVLINK', `[MAVLINK] TX MISSION_REQUEST_INT seq=${seq} target=${targetSys}/${targetComp}`, 'info');
+    const success = await usbHostService.sendBytes(packet);
+    if (success) {
+      this.connectionState.bytesSent += packet.length;
+    }
+    return success;
+  }
+
+  public async sendMissionAck(result: number = 0): Promise<boolean> {
+    const isMav2 = this.connectionState.mavlinkVersion === 'MAVLink 2.0';
+    const targetSys = this.connectionState.systemId || 1;
+    const targetComp = this.connectionState.componentId || 1;
+    const payload = new Uint8Array(isMav2 ? 4 : 3);
+    payload[0] = targetSys;
+    payload[1] = targetComp;
+    payload[2] = result;
+    if (isMav2) {
+      payload[3] = 0; // MAV_MISSION_TYPE_MISSION
+    }
+    const packet = isMav2
+      ? this.buildMavlink2Frame(47 /* MISSION_ACK */, payload)
+      : this.buildMavlink1Frame(47 /* MISSION_ACK */, payload);
+
+    this.logDiagnostic('MAVLINK', `[MAVLINK] TX MISSION_ACK result=${result === 0 ? 'ACCEPTED(0)' : result}`, 'info');
+    const success = await usbHostService.sendBytes(packet);
+    if (success) {
+      this.connectionState.bytesSent += packet.length;
     }
     return success;
   }

@@ -36,15 +36,20 @@ The primary competition objective is:
 - QR codes MUST validate strictly against regex `^\d{2}$` (exactly two digits).
 - Audio cues (`audioService`) and haptic feedback accompany major vision milestones (box locked, QR decoded, ACK received).
 
-### 4. Telemetry Transports (`src/services/transports/`)
+### 4. Telemetry Transports (`frontend/src/services/transports/`)
 - Support hybrid communication paths:
   1. Direct ESP32-S3 WebSocket (`ws://<ip>:8080/ws`) on local field hotspot.
-  2. Production Cloud Secure Relay (`wss://<relay-url>/ws`) with authentication token.
+  2. Production Cloud Secure Relay (`wss://<relay-url>/ws`) deployed on Render (`backend/server.js`) with authentication token.
   3. Android USB Host OTG Serial (`AndroidUsbTransport`) for tethered operation.
   4. WebSerial / WebUSB for Chromium browser direct serial.
 - Always implement automatic reconnection with exponential backoff and packet stream heartbeat watchdogs.
 
-### 5. Frontend & UI Conventions
-- Built with React 18, TypeScript, Tailwind CSS, Lucide icons, Leaflet, and Capacitor.
+### 5. Frontend & UI Conventions (`frontend/`)
+- Built with React 18, TypeScript, Tailwind CSS, Lucide icons, Leaflet, and Capacitor. Configured for Netlify deployment via `frontend/netlify.toml`.
 - Tactical Dark Mode (`bg-sae-dark`, neon accents `sky-400`, `amber-400`, `emerald-400`).
 - Ensure all interactive controls feature explicit tactile feedback, disabling during in-flight commands to prevent duplicate execution.
+
+### 6. Deployment Architecture
+- **Frontend (Netlify)**: Located in `frontend/`. Deploys via `npm run build` with output in `frontend/dist`. Single-Page Application redirects managed via `netlify.toml` and `public/_redirects`.
+- **Backend (Render)**: Located in `backend/`. Deploys via `render.yaml` blueprint with health check at `/health` and WebSocket relay at `/ws`.
+

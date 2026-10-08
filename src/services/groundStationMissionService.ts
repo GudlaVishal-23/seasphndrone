@@ -137,6 +137,7 @@ export class GroundStationMissionService {
   public clearMission() {
     this.currentMission = null;
     this.notify();
+    mavlinkService.clearMissionWaypoints().catch(() => {});
   }
 
   /**

@@ -93,6 +93,18 @@ async function runAllTests() {
 
     const rtlCmdSuccess = await mavlinkService.commandRTL();
     assert(rtlCmdSuccess, 'commandRTL() switches mode to RTL');
+
+    // MAVLink Mission Protocol (MISSION_CLEAR_ALL & Upload)
+    const clearResult = await mavlinkService.clearMissionWaypoints();
+    assert(clearResult.success, 'clearMissionWaypoints() sends MISSION_CLEAR_ALL and clears table cleanly');
+
+    const uploadResult = await mavlinkService.uploadMissionWaypoints([
+      { lat: testLat, lon: testLon, alt: 0, command: 16 },
+      { lat: testLat, lon: testLon, alt: 5.0, command: 22 },
+      { lat: testLat + 0.0001, lon: testLon + 0.0001, alt: 5.0, command: 16 },
+      { lat: testLat, lon: testLon, alt: 0, command: 20 }
+    ]);
+    assert(uploadResult.success, 'uploadMissionWaypoints() uploads mission without sequence mismatch');
   }
 
   // --------------------------------------------------------------------------

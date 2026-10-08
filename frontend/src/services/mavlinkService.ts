@@ -165,6 +165,7 @@ class MAVLinkService {
     timestamp: 0,
     isSet: false
   };
+  private homePointManualLock: boolean = false;
 
   private pendingMissionItems: Array<{ lat: number; lon: number; alt: number; command?: number }> = [];
   private missionUploadResolver: ((result: { success: boolean; message: string }) => void) | null = null;
@@ -541,6 +542,7 @@ class MAVLinkService {
       timestamp: Date.now(),
       isSet: true
     };
+    this.homePointManualLock = true;
 
     this.telemetry.distanceToHome = 0;
     this.notifyTelemetry();
@@ -558,6 +560,7 @@ class MAVLinkService {
       timestamp: 0,
       isSet: false
     };
+    this.homePointManualLock = false;
     this.telemetry.distanceToHome = 0;
     this.notifyTelemetry();
     this.notifyConnection();
@@ -1315,8 +1318,12 @@ class MAVLinkService {
             this.telemetry.gps.longitude = lon;
             this.telemetry.gps.altitude = alt;
 
-            // Auto-seed initial Home if disarmed on ground and home is not yet set
-            if (!this.homePoint.isSet && !this.telemetry.isArmed && this.telemetry.altitude <= 1.5) {
+            // Auto-seed or refine initial Home if disarmed on ground and not manually locked
+            const isHomeFarFromDrone = this.homePoint.isSet && (
+              Math.abs(lat - this.homePoint.latitude) > 0.0003 ||
+              Math.abs(lon - this.homePoint.longitude) > 0.0003
+            );
+            if ((!this.homePoint.isSet || (isHomeFarFromDrone && !this.homePointManualLock)) && !this.telemetry.isArmed && this.telemetry.altitude <= 1.5) {
               this.homePoint = {
                 latitude: lat,
                 longitude: lon,

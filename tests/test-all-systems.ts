@@ -24,17 +24,17 @@ if (typeof globalThis.window === 'undefined') {
   (globalThis as any).localStorage = mockLocalStorage;
 }
 
-import { mavlinkService } from '../src/services/mavlinkService';
-import { circleTestService } from '../src/services/circleTestService';
-import { loiterTestService } from '../src/services/loiterTestService';
-import { boxDetectionService } from '../src/services/boxDetectionService';
-import { groundStationMissionService } from '../src/services/groundStationMissionService';
-import { GridSearch } from '../src/services/searchEngine/GridSearch';
-import { SpiralSearch } from '../src/services/searchEngine/SpiralSearch';
-import { PerimeterSearch } from '../src/services/searchEngine/PerimeterSearch';
-import { AdaptiveSearch } from '../src/services/searchEngine/AdaptiveSearch';
-import { DroneTelemetry, HomePoint } from '../src/types/mission';
-import { PixhawkConnectionState } from '../src/types/mavlink';
+import { mavlinkService } from '../frontend/src/services/mavlinkService';
+import { circleTestService } from '../frontend/src/services/circleTestService';
+import { loiterTestService } from '../frontend/src/services/loiterTestService';
+import { boxDetectionService } from '../frontend/src/services/boxDetectionService';
+import { groundStationMissionService } from '../frontend/src/services/groundStationMissionService';
+import { GridSearch } from '../frontend/src/services/searchEngine/GridSearch';
+import { SpiralSearch } from '../frontend/src/services/searchEngine/SpiralSearch';
+import { PerimeterSearch } from '../frontend/src/services/searchEngine/PerimeterSearch';
+import { AdaptiveSearch } from '../frontend/src/services/searchEngine/AdaptiveSearch';
+import { DroneTelemetry, HomePoint } from '../frontend/src/types/mission';
+import { PixhawkConnectionState } from '../frontend/src/types/mavlink';
 
 let totalTests = 0;
 let passedTests = 0;

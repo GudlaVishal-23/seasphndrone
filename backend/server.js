@@ -10,8 +10,10 @@ const __dirname = path.dirname(__filename);
 
 // Path to compiled frontend dist directory
 const distCandidates = [
+  path.resolve(__dirname, '../frontend/dist'),
   path.resolve(__dirname, '../dist'),
   path.resolve(__dirname, './dist'),
+  path.resolve(process.cwd(), 'frontend/dist'),
   path.resolve(process.cwd(), 'dist')
 ];
 const DIST_PATH = distCandidates.find(p => fs.existsSync(p)) || null;

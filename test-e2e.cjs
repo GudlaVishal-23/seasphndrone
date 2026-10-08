@@ -1,10 +1,10 @@
-const WebSocket = require('./relay-server/node_modules/ws');
+const WebSocket = require('ws');
 const { spawn } = require('child_process');
 
 console.log('--- STARTING END-TO-END PIPELINE VERIFICATION ---');
 
 // 1. Launch Cloud Relay on port 8765
-const relay = spawn('node', ['relay-server/server.js'], {
+const relay = spawn('node', ['backend/server.js'], {
   env: { ...process.env, PORT: '8765', RELAY_TOKEN: 'e2e-secret-key-456' }
 });
 

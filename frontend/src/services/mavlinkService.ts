@@ -563,6 +563,12 @@ class MAVLinkService {
             this.connectionState.phaseMessage = 'Pixhawk Connected ✓';
             this.notifyConnection();
           }
+
+          // Telemetry & GPS stream keeper: If connected and no GPS message received in > 3.5s, refresh stream requests
+          const lastGpsAge = Date.now() - Math.max(this.gps1Data?.lastUpdated || 0, this.gps2Data?.lastUpdated || 0);
+          if (lastGpsAge > 3500) {
+            this.requestMavlinkDataStreams();
+          }
         }
       }
     }, 500);
@@ -2184,6 +2190,14 @@ class MAVLinkService {
     this.connectionState.lastModeChangeError = undefined;
     this.notifyConnection();
 
+    // Helpful diagnostic if switching into position-dependent mode without 3D GPS lock
+    const gpsDependentModes = ['LOITER', 'GUIDED', 'AUTO', 'RTL', 'POSHOLD', 'CIRCLE'];
+    if (gpsDependentModes.includes(modeName) && (!this.telemetry.gps.isLocked || this.telemetry.gps.satellites < 6)) {
+      const gpsWarn = `Notice: ${modeName} requires a 3D GPS Fix (6+ satellites). If bench testing indoors without GPS, switch to STABILIZE or ALT_HOLD.`;
+      this.logDiagnostic('MAVLINK', `[MODE] ${gpsWarn}`, 'warn');
+      this.addStatusMessage('WARNING', 4, gpsWarn);
+    }
+
     // In simulation / test mock mode, update telemetry immediately (AUD-11)
     if (!this.connectionState.isRealHardware) {
       this.telemetry.flightMode = modeName;
@@ -2199,7 +2213,7 @@ class MAVLinkService {
       // 2. Also send COMMAND_LONG 176 as redundant fallback
       await this.sendMavlinkCommandLong(176, 1 /* MAV_MODE_FLAG_CUSTOM_MODE_ENABLED */, customMode);
 
-      // Await confirmation or rejection from Pixhawk (up to 2500ms)
+      // Await confirmation or rejection from Pixhawk (4000ms allows cellular hotspot latency)
       return new Promise<boolean>((resolve) => {
         if (this.modeChangeTimer) clearTimeout(this.modeChangeTimer);
         this.modeChangeResolver = (res) => {
@@ -2215,7 +2229,7 @@ class MAVLinkService {
             this.notifyConnection();
             resolve(matched);
           }
-        }, 2500);
+        }, 4000);
       });
     } else {
       return true;

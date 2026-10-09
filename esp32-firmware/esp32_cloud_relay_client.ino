@@ -143,9 +143,11 @@ unsigned long totalTxBytesToPixhawk   = 0;
 unsigned long totalMavlinkPacketsSent = 0;
 unsigned long totalCommandsReceived   = 0;
 
-// UART Buffer
+// UART Batch Buffer for ultra-low-latency, zero-jitter telemetry streaming
 #define UART_BUFFER_SIZE 1024
 uint8_t uartBuffer[UART_BUFFER_SIZE];
+size_t uartBatchLen = 0;
+unsigned long lastUartByteTime = 0;
 
 // =====================================================================================
 // STATUS LED HELPER
@@ -169,8 +171,9 @@ void onMessageCallback(WebsocketsMessage message) {
     // Binary MAVLink command frame received from Phone -> Forward to Pixhawk TELEM2
     const uint8_t* payload = (const uint8_t*)message.c_str();
     size_t length = message.length();
+    
+    // Write directly to ESP32 Hardware UART FIFO without blocking CPU
     PixhawkSerial.write(payload, length);
-    PixhawkSerial.flush(); // Flush hardware FIFO immediately so bytes reach TELEM2 with 0ms buffering delay
 
     totalTxBytesToPixhawk += length;
     totalCommandsReceived++;
@@ -204,49 +207,34 @@ void onEventsCallback(WebsocketsEvent event, String data) {
 }
 
 // =====================================================================================
-// WI-FI CONNECTION HELPER
+// WI-FI CONNECTION HELPER (NON-BLOCKING)
 // =====================================================================================
-void connectToWiFi() {
+void connectToWiFi(bool isInitialSetup = false) {
   if (WiFi.status() == WL_CONNECTED) return;
 
   Serial.println("---------------------------------------------------------");
   Serial.printf("📡 [WIFI] Connecting to SSID: '%s' ...\n", WIFI_SSID);
   Serial.println("---------------------------------------------------------");
   
-  // Clean disconnect to prevent 'wifi:sta is connecting, cannot set config' errors in ESP-IDF
   WiFi.disconnect(true);
-  delay(150);
+  delay(50);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  unsigned long startAttempt = millis();
-  int dotCount = 0;
-  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 10000) {
-    delay(400);
-    Serial.print(".");
-    dotCount++;
-    if (dotCount % 30 == 0) Serial.println();
-    updateLED(1);
-  }
-
-  // Fallback Wi-Fi check
-  if (WiFi.status() != WL_CONNECTED && strlen(FALLBACK_SSID) > 0) {
-    Serial.printf("\n📡 [WIFI] Trying fallback SSID: '%s' ...\n", FALLBACK_SSID);
-    WiFi.disconnect(true);
-    delay(150);
-    WiFi.begin(FALLBACK_SSID, FALLBACK_PASS);
-    startAttempt = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 10000) {
-      delay(400);
+  if (isInitialSetup) {
+    // During boot, give up to 6 seconds for quick connection
+    unsigned long startAttempt = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 6000) {
+      delay(250);
       Serial.print(".");
       updateLED(1);
     }
+    Serial.println();
   }
 
-  Serial.println();
   if (WiFi.status() == WL_CONNECTED) {
-    // Disable ESP32 802.11 modem sleep to eliminate DTIM jitter & keep latency <5ms
+    // CRITICAL: Disable ESP32 802.11 modem sleep to eliminate DTIM jitter & keep latency <5ms
     WiFi.setSleep(false);
     Serial.println("🟢 [WIFI] CONNECTED SUCCESSFULLY!");
     Serial.printf("📍 [WIFI] IP Address:    %s\n", WiFi.localIP().toString().c_str());
@@ -256,11 +244,10 @@ void connectToWiFi() {
     Serial.println("⏳ [NTP] Synchronizing network time for TLS certificate validation...");
     configTime(0, 0, "pool.ntp.org", "time.google.com");
     Serial.println("---------------------------------------------------------");
-  } else {
-    Serial.println("❌ [WIFI FAILED] Could not connect to Wi-Fi.");
-    Serial.println("   👉 1. Make sure your Phone Personal Hotspot is turned ON.");
-    Serial.println("   👉 2. If on iPhone/Android, ensure 'Maximize Compatibility' (2.4 GHz) is enabled.");
-    Serial.printf("   👉 3. Verify SSID '%s' and password match lines 40-41 in this code.\n", WIFI_SSID);
+  } else if (isInitialSetup) {
+    Serial.println("⚠️ [WIFI PENDING] Phone hotspot not yet connected. Will auto-retry in background...");
+    Serial.println("   👉 Ensure Phone Personal Hotspot is ON with 2.4 GHz ('Maximize Compatibility').");
+    Serial.printf("   👉 SSID: '%s' | Password: '%s'\n", WIFI_SSID, WIFI_PASSWORD);
     Serial.println("---------------------------------------------------------");
   }
 }
@@ -340,57 +327,58 @@ void setup() {
   wsClient.onMessage(onMessageCallback);
   wsClient.onEvent(onEventsCallback);
 
-  // Connect to Wi-Fi / Phone Hotspot
-  connectToWiFi();
+  // Connect to Wi-Fi / Phone Hotspot (initial quick attempt)
+  connectToWiFi(true);
 }
 
 // =====================================================================================
 // MAIN LOOP
 // =====================================================================================
 void loop() {
-  // 1. Maintain Wi-Fi Connection
+  // 1. Maintain Wi-Fi Connection (Non-blocking background retry)
   if (WiFi.status() != WL_CONNECTED) {
     updateLED(1);
     if (millis() - lastWiFiReconnectAttempt > WIFI_RECONNECT_INTERVAL_MS) {
       lastWiFiReconnectAttempt = millis();
-      connectToWiFi();
+      connectToWiFi(false);
     }
-    delay(100);
-    return;
-  }
-
-  // 2. Maintain WebSocket Connection to Cloud Relay
-  if (!wsClient.available()) {
-    updateLED(1);
-    connectToCloudRelay();
   } else {
-    updateLED(2); // Solid ON when fully connected
+    // 2. Maintain WebSocket Connection to Cloud Relay
+    if (!wsClient.available()) {
+      updateLED(1);
+      connectToCloudRelay();
+    } else {
+      updateLED(2); // Solid ON when fully connected
+    }
   }
 
-  // 3. Poll WebSocket Client for incoming commands from Phone
-  wsClient.poll();
+  // 3. Poll WebSocket Client for incoming commands from Phone (Zero delay)
+  if (wsClient.available()) {
+    wsClient.poll();
+  }
 
-  // 4. Send Periodic Ping to keep cloud relay connection alive
+  // 4. Send Periodic Ping to keep cloud relay connection alive through NAT
   if (wsClient.available() && millis() - lastPingTime > PING_INTERVAL_MS) {
     lastPingTime = millis();
     wsClient.ping();
   }
 
   // 5. Read binary MAVLink telemetry from Pixhawk TELEM2 -> Forward to Cloud Relay
-  size_t bytesAvailable = PixhawkSerial.available();
-  if (bytesAvailable > 0) {
-    size_t bytesToRead = (bytesAvailable > UART_BUFFER_SIZE) ? UART_BUFFER_SIZE : bytesAvailable;
-    size_t bytesRead = PixhawkSerial.readBytes(uartBuffer, bytesToRead);
+  // ULTRA-LOW-LATENCY INTELLIGENT BATCHING:
+  // Collect bytes from UART until either 256 bytes accumulate OR UART line goes idle for 12ms.
+  // This eliminates sending 1-byte SSL frames that cause high CPU load and 2-second web lag!
+  while (PixhawkSerial.available() > 0 && uartBatchLen < UART_BUFFER_SIZE) {
+    uartBuffer[uartBatchLen++] = (uint8_t)PixhawkSerial.read();
+    lastUartByteTime = millis();
+    totalRxBytesFromPixhawk++;
+  }
 
-    if (bytesRead > 0) {
-      totalRxBytesFromPixhawk += bytesRead;
+  bool shouldFlush = (uartBatchLen >= 256) || (uartBatchLen > 0 && (millis() - lastUartByteTime >= 12));
 
-      // Forward to Cloud Relay if connected
-      if (wsClient.available()) {
-        wsClient.sendBinary((const char*)uartBuffer, bytesRead);
-        totalMavlinkPacketsSent++;
-      }
-    }
+  if (shouldFlush && wsClient.available()) {
+    wsClient.sendBinary((const char*)uartBuffer, uartBatchLen);
+    totalMavlinkPacketsSent++;
+    uartBatchLen = 0;
   }
 
   // 6. Periodic 3-Second Live Status Heartbeat (Guarantees Serial Monitor is clean and CPU is not blocked)
@@ -405,3 +393,4 @@ void loop() {
                   totalTxBytesToPixhawk);
   }
 }
+

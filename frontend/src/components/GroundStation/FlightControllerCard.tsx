@@ -78,7 +78,8 @@ export const FlightControllerCard: React.FC<FlightControllerCardProps> = ({
       setFeedbackMsg(`Flight Mode changed to ${mode} ✓`);
       setTimeout(() => setFeedbackMsg(null), 2500);
     } else {
-      setFeedbackMsg(`Failed to set mode to ${mode}`);
+      const errorMsg = pixhawkState.lastModeChangeError || `Mode ${mode} rejected: Pixhawk requires 3D GPS Fix (6+ sats). Use STABILIZE or ALT_HOLD for bench testing.`;
+      setFeedbackMsg(errorMsg);
     }
   };
 

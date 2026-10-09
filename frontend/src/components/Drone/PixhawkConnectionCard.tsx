@@ -911,7 +911,7 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
                       <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                       <span>Browser</span>
                     </span>
-                    <span className="text-[9px] text-slate-400 mt-0.5">HTTPS Vercel</span>
+                    <span className="text-[9px] text-slate-400 mt-0.5">HTTPS Netlify</span>
                   </div>
 
                   <div className={`p-2 rounded-lg border flex flex-col items-center ${
@@ -1162,7 +1162,7 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
                   The browser connects securely via WSS to the cloud relay. The local connector agent running on your ESP32 Wi-Fi bridges packets outbound to the relay and forwards to the ESP32 via local WS.
                 </p>
                 <div className="text-[11px] font-mono text-emerald-300/90 bg-slate-950/80 p-2 rounded border border-emerald-500/30">
-                  HTTPS Web GCS (Vercel) ➔ Cloud Relay (WSS) ➔ Local Connector (Outbound WSS) ➔ ESP32 (LAN ws://) ➔ Pixhawk
+                  HTTPS Web GCS (Netlify) ➔ Cloud Relay (WSS) ➔ Local Connector (Outbound WSS) ➔ ESP32 (LAN ws://) ➔ Pixhawk
                 </div>
               </div>
             ) : null}
@@ -1586,10 +1586,10 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
                 <div className="p-2.5 bg-slate-900/90 rounded-lg border border-emerald-500/30 space-y-1">
                   <div className="font-bold text-emerald-300 flex items-center space-x-1">
                     <Lock className="w-3.5 h-3.5" />
-                    <span>B. PRODUCTION DEPLOYED HTTPS (Vercel / Cloud)</span>
+                    <span>B. PRODUCTION DEPLOYED HTTPS (Netlify / Cloud)</span>
                   </div>
                   <div className="font-mono text-sky-400 text-[10px] p-2 bg-black/60 rounded">
-                    HTTPS Web Ground Station (https://my-app.vercel.app)<br/>
+                    HTTPS Web Ground Station (https://my-app.netlify.app)<br/>
                     &nbsp;&nbsp;&nbsp;&nbsp;↓ (Secure WSS over TLS)<br/>
                     wss://relay.yourdomain.com:8443 (Cloud / TLS Reverse Proxy)<br/>
                     &nbsp;&nbsp;&nbsp;&nbsp;↓ (Forwarded to LAN or VPN)<br/>

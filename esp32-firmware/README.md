@@ -5,7 +5,7 @@ This firmware allows your drone's **ESP32-S3** to connect **directly to your clo
 ### Why use this?
 - **Zero Laptop Required**: You don't need a computer in the field.
 - **Zero Local Connector**: You never have to run `npm run connector:start` again.
-- **Worldwide Access**: You can open `https://saeindia-umber.vercel.app` on your phone browser anywhere, and the drone connects automatically as soon as it's powered on!
+- **Worldwide Access**: You can open your Netlify web ground station URL on your phone browser anywhere, and the drone connects automatically as soon as it's powered on!
 
 ---
 

@@ -5,7 +5,7 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "build": "echo \"Backend relay server ready for deployment\"",
+    "build": "cd .. && npm run build",
     "start": "node server.js"
   },
   "dependencies": {

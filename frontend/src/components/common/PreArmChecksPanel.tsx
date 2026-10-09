@@ -112,6 +112,9 @@ export const PreArmChecksPanel: React.FC<PreArmChecksPanelProps> = ({
   const gpsFixType = telemetry.gps.fixType || 'NO_FIX';
   const hasGps3DFix = telemetry.gps.isLocked || (telemetry.gps.satellites >= 6 && gpsFixType !== 'NO_GPS' && gpsFixType !== 'NO_FIX');
   const fixDisplayName = gpsFixType === '3D_FIX' ? '3D' : gpsFixType.replace('_', ' ');
+  const gpsSourceTag = connectionState.gpsInstances
+    ? ` • Source: GPS ${connectionState.gpsInstances.activeInstance === 2 ? '2 (SERIAL4/5)' : '1'}`
+    : '';
 
   if (isPosDependent) {
     // Position-dependent mode (e.g. AUTO, LOITER, GUIDED) REQUIRES GPS
@@ -120,7 +123,7 @@ export const PreArmChecksPanel: React.FC<PreArmChecksPanelProps> = ({
         id: 'gps_mode_pass',
         category: 'NAVIGATION SENSORS',
         title: `GPS READY (${activeMode} Mode)`,
-        description: `Satellites: ${telemetry.gps.satellites} / 7 | Fix: ${fixDisplayName} (HDOP: ${telemetry.gps.hdop.toFixed(1)})`,
+        description: `Satellites: ${telemetry.gps.satellites} / 7 | Fix: ${fixDisplayName} (HDOP: ${telemetry.gps.hdop.toFixed(1)})${gpsSourceTag}`,
         status: 'PASS'
       });
     } else {
@@ -128,7 +131,7 @@ export const PreArmChecksPanel: React.FC<PreArmChecksPanelProps> = ({
         id: 'gps_mode_blocking',
         category: 'NAVIGATION SENSORS',
         title: `GPS 3D Fix Required for ${activeMode}`,
-        description: `Position estimate unavailable (Satellites: ${telemetry.gps.satellites} / 7, Fix: ${fixDisplayName}). ${activeMode} mode requires a valid 3D GPS position fix before arming.`,
+        description: `Position estimate unavailable (Satellites: ${telemetry.gps.satellites} / 7, Fix: ${fixDisplayName}). ${activeMode} requires a valid 3D GPS fix. Switch to STABILIZE or ALT_HOLD to arm/test without GPS.`,
         status: 'BLOCKING'
       });
     }
@@ -139,7 +142,7 @@ export const PreArmChecksPanel: React.FC<PreArmChecksPanelProps> = ({
         id: 'gps_althold_pass',
         category: 'NAVIGATION SENSORS',
         title: `GPS READY (Optional in ${activeMode})`,
-        description: `Satellites: ${telemetry.gps.satellites} / 7 | Fix: ${fixDisplayName}`,
+        description: `Satellites: ${telemetry.gps.satellites} / 7 | Fix: ${fixDisplayName}${gpsSourceTag}`,
         status: 'PASS'
       });
     } else {

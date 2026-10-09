@@ -181,6 +181,13 @@ export interface PixhawkConnectionState {
   esp32ErrorMessage?: string;
   esp32ConnectorOnline?: boolean;
   esp32DeviceOnline?: boolean;
+  pendingFlightMode?: string;
+  lastModeChangeError?: string;
+  gpsInstances?: {
+    gps1: { sats: number; fix: string; hdop: number; lastUpdated: number };
+    gps2: { sats: number; fix: string; hdop: number; lastUpdated: number };
+    activeInstance: 1 | 2;
+  };
   diagnostics: UsbDeviceDiagnostics;
 }
 

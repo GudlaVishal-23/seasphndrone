@@ -57,11 +57,11 @@ export const ManualControlDashboard: React.FC<ManualControlDashboardProps> = ({
     else { setIsDisarming(false); }
   }, [isArmed]);
 
-  const handleArm = async () => {
+  const handleArm = async (force: boolean = false) => {
     if (!pixhawkState.isConnected) { setArmFeedback('Not connected to flight controller.'); return; }
     setArmFeedback(null);
     setIsArming(true);
-    const sent = await mavlinkService.sendArmCommand();
+    const sent = await mavlinkService.sendArmCommand(force);
     if (!sent) { setIsArming(false); setArmFeedback('ARM FAILED: Check ESP32 connection.'); return; }
     const t0 = Date.now();
     const wd = setInterval(() => {
@@ -287,7 +287,7 @@ export const ManualControlDashboard: React.FC<ManualControlDashboardProps> = ({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={handleArm}
+                onClick={() => handleArm(false)}
                 disabled={isArmed || isArming || !pixhawkState.isConnected}
                 className={`py-4 rounded-xl font-black text-sm uppercase tracking-wide flex items-center justify-center space-x-2 transition ${
                   !isArmed && !isArming && pixhawkState.isConnected

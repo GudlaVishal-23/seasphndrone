@@ -119,11 +119,11 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
     else { setIsDisarming(false); }
   }, [isArmed]);
 
-  const handleDedicatedArmClick = async () => {
+  const handleDedicatedArmClick = async (force: boolean = false) => {
     if (!pixhawkState.isConnected) { setArmFeedback('Flight controller not connected. Connect first.'); return; }
     setArmFeedback(null);
     setIsArming(true);
-    const sent = await mavlinkService.sendArmCommand();
+    const sent = await mavlinkService.sendArmCommand(force);
     if (!sent) { setIsArming(false); setArmFeedback('ARM TRANSMISSION FAILED: Check WebSocket / ESP32 TX Link.'); return; }
     const startWait = Date.now();
     const watchdog = setInterval(() => {

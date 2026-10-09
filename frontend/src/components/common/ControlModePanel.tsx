@@ -22,7 +22,7 @@ import { DisarmSafetyConfirmModal } from './DisarmSafetyConfirmModal';
 interface ControlModePanelProps {
   telemetry: DroneTelemetry;
   connectionState: PixhawkConnectionState;
-  onArmClick: () => void;
+  onArmClick: (force?: boolean) => void;
   onDisarmClick: () => void;
   isArmingInProgress?: boolean;
   isDisarmingInProgress?: boolean;
@@ -39,8 +39,25 @@ export const ControlModePanel: React.FC<ControlModePanelProps> = ({
   const [activeDirection, setActiveDirection] = useState<string | null>(null);
   const [isSafetyModalOpen, setIsSafetyModalOpen] = useState<boolean>(false);
   const [isCutoffRequested, setIsCutoffRequested] = useState<boolean>(false);
+  const [isChangingMode, setIsChangingMode] = useState<string | null>(null);
+  const [modeFeedback, setModeFeedback] = useState<{ mode: string; success: boolean; msg: string } | null>(null);
+  const [forceBenchArmActive, setForceBenchArmActive] = useState<boolean>(false);
 
   const isArmed = telemetry.isArmed;
+
+  const handleModeClick = async (mode: 'STABILIZE' | 'ALT_HOLD' | 'LOITER' | 'AUTO' | 'GUIDED' | 'RTL') => {
+    setIsChangingMode(mode);
+    setModeFeedback(null);
+    const ok = await mavlinkService.setFlightMode(mode);
+    setIsChangingMode(null);
+    if (ok) {
+      setModeFeedback({ mode, success: true, msg: `Flight mode set to ${mode} ✓` });
+      setTimeout(() => setModeFeedback(null), 3500);
+    } else {
+      const err = connectionState.lastModeChangeError || `Pixhawk rejected ${mode}. Requires 3D GPS fix.`;
+      setModeFeedback({ mode, success: false, msg: err });
+    }
+  };
 
   const handleSafeDisarmTrigger = (forceCutoff: boolean = false) => {
     // If airborne, prompt with critical warning popup stating exact altitude
@@ -124,7 +141,7 @@ export const ControlModePanel: React.FC<ControlModePanelProps> = ({
               {/* PRIMARY UNIFIED TOGGLE BUTTON: ARM when disarmed, DISARM when armed */}
               <button
                 type="button"
-                onClick={isArmed ? () => handleSafeDisarmTrigger(false) : onArmClick}
+                onClick={isArmed ? () => handleSafeDisarmTrigger(false) : () => onArmClick(forceBenchArmActive)}
                 disabled={isArmingInProgress || isDisarmingInProgress || (!connectionState.isConnected && !connectionState.isUsbConnected)}
                 className={`sm:col-span-3 py-4 px-4 rounded-xl font-black text-sm sm:text-base uppercase tracking-wider flex items-center justify-center space-x-2.5 border transition-all duration-150 shadow-lg cursor-pointer ${
                   !connectionState.isConnected && !connectionState.isUsbConnected
@@ -135,6 +152,8 @@ export const ControlModePanel: React.FC<ControlModePanelProps> = ({
                     ? 'bg-amber-700 border-amber-500 text-white animate-pulse cursor-wait'
                     : isArmed
                     ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-400 shadow-rose-950/60 ring-2 ring-rose-400/50 active:scale-[0.98]'
+                    : forceBenchArmActive
+                    ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-400 shadow-amber-950/60 ring-2 ring-amber-400/60 active:scale-[0.98]'
                     : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400 shadow-emerald-950/60 ring-2 ring-emerald-400/40 active:scale-[0.98]'
                 }`}
               >
@@ -146,7 +165,7 @@ export const ControlModePanel: React.FC<ControlModePanelProps> = ({
                 ) : (
                   <>
                     <ShieldCheck className="w-5 h-5 shrink-0" />
-                    <span>{isArmingInProgress ? 'ARMING MOTORS...' : 'ARM MOTORS (CLICK TO SPIN)'}</span>
+                    <span>{isArmingInProgress ? 'ARMING MOTORS...' : forceBenchArmActive ? 'FORCE ARM (BYPASS PRE-ARM)' : 'ARM MOTORS (CLICK TO SPIN)'}</span>
                   </>
                 )}
               </button>
@@ -163,6 +182,28 @@ export const ControlModePanel: React.FC<ControlModePanelProps> = ({
                 <span className="leading-tight text-center">FORCE<br className="hidden sm:inline" /> CUTOFF</span>
               </button>
             </div>
+
+            {/* Bench Force-Arm Bypass Checkbox (for testing motor spin when pre-arm checks fail on bench) */}
+            {!isArmed && (
+              <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-slate-950/70 border border-slate-800 text-[11px]">
+                <label className="flex items-center space-x-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={forceBenchArmActive}
+                    onChange={(e) => setForceBenchArmActive(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-slate-700 text-amber-500 focus:ring-amber-500/40 bg-slate-900"
+                  />
+                  <span className={forceBenchArmActive ? 'text-amber-300 font-bold' : 'text-slate-400'}>
+                    Force Arm Bypass (Bench Test Only — bypasses Pre-Arm &amp; GPS checks)
+                  </span>
+                </label>
+                {forceBenchArmActive && (
+                  <span className="text-[10px] text-amber-400 bg-amber-950/80 px-1.5 py-0.5 rounded border border-amber-600/50">
+                    PARAM2=21196 ACTIVE
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Real-time Pre-Arm Rejection / Safety Switch Status Banner */}
@@ -202,41 +243,98 @@ export const ControlModePanel: React.FC<ControlModePanelProps> = ({
                   )}
 
                   {lower.includes('switch') && (
-                    <div>• <strong>Physical Safety Switch:</strong> Press &amp; hold the Pixhawk safety button for 3 seconds until the LED turns solid red.</div>
+                    <div>• <strong>Physical Safety Switch:</strong> Press &amp; hold the Pixhawk safety button for 3 seconds until the LED turns solid red (or set <code>BRD_SAFETYENABLE = 0</code> in Mission Planner).</div>
                   )}
                   {lower.includes('compass') && (
-                    <div>• <strong>Compass / Mag:</strong> Keep away from indoor metal objects or perform compass calibration in Mission Planner.</div>
+                    <div className="bg-amber-950/60 p-2 rounded-lg border border-amber-600/40 text-amber-200">
+                      <div>• <strong>Compass / Port Alert:</strong> If GPS was moved to <code>SERIAL4/5</code>, note that <code>SERIAL4/5</code> has <strong>NO I2C pins</strong>! The GPS puck's 4-pin compass cable <strong>MUST be plugged into the Pixhawk I2C port</strong>, not SERIAL4/5. Then perform Compass Calibration in Mission Planner.</div>
+                    </div>
                   )}
-                  {(lower.includes('fix') || lower.includes('gps')) && (
-                    <div>• <strong>GPS Fix:</strong> Selected mode requires 3D GPS fix. For indoor/bench testing, switch mode to <strong className="text-emerald-300 underline font-bold">ALT_HOLD</strong> or <strong className="text-emerald-300 underline font-bold">STABILIZE</strong> below (no GPS required).</div>
+                  {(lower.includes('fix') || lower.includes('gps') || lower.includes('nav')) && (
+                    <div className="bg-amber-950/60 p-2 rounded-lg border border-amber-600/40 text-amber-200 space-y-1">
+                      <div>• <strong>GPS Port Parameters:</strong> If GPS is on <code>SERIAL4/5</code>, set <code>SERIAL4_PROTOCOL = 5</code> (GPS) and <code>SERIAL3_PROTOCOL = 0</code> (disables empty old GPS port so SERIAL4 becomes GPS 1).</div>
+                      <div>• <strong>Bench Arming Without GPS:</strong> Switch mode to <strong className="text-emerald-300 underline font-bold">ALT_HOLD</strong> or <strong className="text-emerald-300 underline font-bold">STABILIZE</strong> below (no GPS required to arm).</div>
+                    </div>
                   )}
                 </div>
               </div>
             );
           })()}
 
-          {/* Flight Mode Quick Selector */}
-          <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800 space-y-1.5">
-            <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-400">
-              <span>Flight Mode: <span className="text-emerald-300 font-mono text-xs">{telemetry.flightMode || 'STABILIZE'}</span></span>
-              <span>Select Mode to Arm:</span>
+          {/* Mode Switch Feedback / Failure Banner */}
+          {(modeFeedback || connectionState.lastModeChangeError) && (
+            <div className={`p-3 rounded-xl text-xs flex items-center justify-between border ${
+              modeFeedback?.success
+                ? 'bg-emerald-950/90 border-emerald-500/70 text-emerald-200'
+                : 'bg-amber-950/90 border-amber-500/70 text-amber-200'
+            }`}>
+              <div className="flex items-start space-x-2">
+                {modeFeedback?.success ? (
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <div className="font-bold">
+                    {modeFeedback?.success ? 'Flight Mode Confirmed' : 'Flight Mode Rejection'}
+                  </div>
+                  <div className="text-[11px] mt-0.5">
+                    {modeFeedback?.msg || connectionState.lastModeChangeError}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModeFeedback(null)}
+                className="text-slate-400 hover:text-white text-xs px-1.5 py-0.5 rounded cursor-pointer"
+              >
+                ✕
+              </button>
             </div>
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 text-xs font-bold">
-              {(['STABILIZE', 'ALT_HOLD', 'LOITER', 'AUTO', 'GUIDED', 'RTL'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => mavlinkService.setFlightMode(mode)}
-                  disabled={!connectionState.isConnected && !connectionState.isUsbConnected}
-                  className={`py-1.5 px-1 rounded-lg text-[10px] transition cursor-pointer font-bold ${
-                    (telemetry.flightMode || '').toUpperCase() === mode
-                      ? 'bg-emerald-600 text-white shadow ring-2 ring-emerald-400'
-                      : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700'
-                  }`}
-                >
-                  {mode}
-                </button>
-              ))}
+          )}
+
+          {/* Flight Mode Quick Selector */}
+          <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-400">
+              <span>
+                Current Mode: <span className="text-emerald-300 font-mono text-xs">{telemetry.flightMode || 'STABILIZE'}</span>
+                {connectionState.pendingFlightMode && (
+                  <span className="ml-2 text-amber-400 animate-pulse font-normal">
+                    (Switching to {connectionState.pendingFlightMode}...)
+                  </span>
+                )}
+              </span>
+              <span className="text-slate-500">Select Mode:</span>
+            </div>
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-xs font-bold">
+              {(['STABILIZE', 'ALT_HOLD', 'LOITER', 'AUTO', 'GUIDED', 'RTL'] as const).map((mode) => {
+                const isActive = (telemetry.flightMode || '').toUpperCase() === mode;
+                const isPending = isChangingMode === mode || connectionState.pendingFlightMode === mode;
+                const requiresGps = mode !== 'STABILIZE' && mode !== 'ALT_HOLD';
+
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => handleModeClick(mode)}
+                    disabled={(!connectionState.isConnected && !connectionState.isUsbConnected) || isChangingMode !== null}
+                    className={`py-2 px-1 rounded-xl text-[10px] transition cursor-pointer font-bold flex flex-col items-center justify-center space-y-0.5 ${
+                      isPending
+                        ? 'bg-amber-600 text-white animate-pulse ring-2 ring-amber-400'
+                        : isActive
+                        ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-950/60 ring-2 ring-emerald-400'
+                        : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700/80 active:scale-[0.97]'
+                    }`}
+                  >
+                    <span className="tracking-wider">{mode}</span>
+                    <span className={`text-[8px] font-mono font-normal ${
+                      isActive ? 'text-emerald-100' : requiresGps ? 'text-amber-400/80' : 'text-emerald-400/80'
+                    }`}>
+                      {isPending ? 'SWITCHING' : isActive ? 'ACTIVE' : requiresGps ? 'GPS REQ' : 'NO GPS'}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 

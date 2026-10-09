@@ -255,6 +255,33 @@ class MAVLinkService {
   private gcsHeartbeatTimer: any = null;
   private heartbeatWaitStartTime: number = 0;
 
+  // Multi-Instance GPS tracking (Arbitrate between GPS 1 on SERIAL3 and GPS 2 on SERIAL4/5)
+  private gps1Data = {
+    fixType: 'NO_GPS' as GPSLocation['fixType'],
+    rawFixType: 0,
+    satellites: 0,
+    hdop: 99.9,
+    lat: 0,
+    lon: 0,
+    alt: 0,
+    lastUpdated: 0
+  };
+
+  private gps2Data = {
+    fixType: 'NO_GPS' as GPSLocation['fixType'],
+    rawFixType: 0,
+    satellites: 0,
+    hdop: 99.9,
+    lat: 0,
+    lon: 0,
+    alt: 0,
+    lastUpdated: 0
+  };
+
+  private modeChangeResolver: ((res: { success: boolean; message: string }) => void) | null = null;
+  private modeChangeTimer: any = null;
+  private downloadItemRetryTimer: any = null;
+
   // Simulator Interval (Only active when in SIMULATED mode)
   private simInterval: any = null;
   private simWaypoints: Array<{ lat: number; lon: number; alt: number }> = [];
@@ -692,11 +719,14 @@ class MAVLinkService {
    */
   public explainPreArmFailure(raw: string): string {
     const lower = (raw || '').toLowerCase();
-    if (lower.includes('compass') && (lower.includes('calibrat') || lower.includes('health') || lower.includes('variance') || lower.includes('offset'))) {
-      return 'Compass Error: Move drone away from metal structures, or perform compass calibration in Mission Planner.';
+    if (lower.includes('mode change') || (lower.includes('requires position') && (lower.includes('mode') || lower.includes('failed')))) {
+      return 'Flight Mode Rejected: Pixhawk requires a 3D GPS position fix with EKF convergence before entering LOITER, GUIDED, or AUTO. Switch to STABILIZE or ALT_HOLD to arm/fly without GPS.';
     }
-    if (lower.includes('gps') || lower.includes('3d fix') || lower.includes('hdop') || lower.includes('pos hold') || lower.includes('bad gps') || lower.includes('need 3d')) {
-      return 'GPS Not Ready: Requires 3D GPS fix with ≥ 6 satellites and HDOP < 2.0 before arming in GUIDED / autonomous modes.';
+    if (lower.includes('compass') && (lower.includes('calibrat') || lower.includes('health') || lower.includes('variance') || lower.includes('offset') || lower.includes('bad'))) {
+      return 'Compass Error: Verify external compass 4-pin cable is plugged into the Pixhawk I2C port (SERIAL4/5 has no I2C pins), move away from metal, or perform compass calibration in Mission Planner.';
+    }
+    if (lower.includes('gps') || lower.includes('3d fix') || lower.includes('hdop') || lower.includes('pos hold') || lower.includes('bad gps') || lower.includes('need 3d') || lower.includes('nav checks')) {
+      return 'GPS Not Ready: Requires 3D GPS fix with ≥ 6 satellites and HDOP < 2.0 before arming in GUIDED/LOITER. If GPS is plugged into SERIAL4/5, set SERIAL4_PROTOCOL = 5 and SERIAL3_PROTOCOL = 0 in Mission Planner.';
     }
     if (lower.includes('safety switch') || (lower.includes('safety') && lower.includes('switch'))) {
       return 'Safety Switch Locked: Press and hold the physical red safety switch on Pixhawk until solid.';
@@ -1147,6 +1177,18 @@ class MAVLinkService {
           this.connectionState.vehicleState = isArmed ? 'ARMED' : 'DISARMED';
           this.telemetry.vehicleState = isArmed ? 'ARMED' : 'DISARMED';
 
+          // Clear pending flight mode if confirmed by Pixhawk HEARTBEAT
+          if (this.connectionState.pendingFlightMode && this.connectionState.pendingFlightMode === flightModeName) {
+            this.connectionState.pendingFlightMode = undefined;
+            this.connectionState.lastModeChangeError = undefined;
+            if (this.modeChangeResolver) {
+              const res = this.modeChangeResolver;
+              this.modeChangeResolver = null;
+              if (this.modeChangeTimer) clearTimeout(this.modeChangeTimer);
+              res({ success: true, message: `Mode confirmed: ${flightModeName}` });
+            }
+          }
+
           // Clear preArmFailReason when vehicle is armed
           if (isArmed && this.connectionState.preArmFailReason) {
             this.connectionState.preArmFailReason = undefined;
@@ -1290,9 +1332,13 @@ class MAVLinkService {
             this.sendMissionAck(0);
             const res = this.missionDownloadResolver;
             this.missionDownloadResolver = null;
+            if (this.downloadItemRetryTimer) {
+              clearTimeout(this.downloadItemRetryTimer);
+              this.downloadItemRetryTimer = null;
+            }
             res({ success: true, items: [], message: 'Pixhawk reports 0 mission items in storage' });
           } else {
-            this.sendMissionRequestInt(0);
+            this.requestDownloadItem(0);
           }
         }
         break;
@@ -1338,8 +1384,12 @@ class MAVLinkService {
 
           const nextSeq = this.downloadedMissionItems.length;
           if (nextSeq < this.expectedDownloadCount) {
-            this.sendMissionRequestInt(nextSeq);
+            this.requestDownloadItem(nextSeq);
           } else {
+            if (this.downloadItemRetryTimer) {
+              clearTimeout(this.downloadItemRetryTimer);
+              this.downloadItemRetryTimer = null;
+            }
             this.sendMissionAck(0);
             const res = this.missionDownloadResolver;
             this.missionDownloadResolver = null;
@@ -1526,30 +1576,86 @@ class MAVLinkService {
             6: 'RTK_FIXED'
           };
 
-          const is3DFix = fixType >= 3;
-          this.telemetry.gps.fixType = fixMap[fixType] || (is3DFix ? '3D_FIX' : 'NO_FIX');
-          // Dedicated GPS READY rule: fixType >= 3 (3D Fix) and satellites >= 6 (e.g. 16 satellites)
-          this.telemetry.gps.isLocked = is3DFix && (satellitesVisible >= 6 || Math.abs(lat) > 0.001);
-          this.telemetry.gps.satellites = satellitesVisible;
-          this.telemetry.gps.hdop = eph;
+          const instanceFixType = fixMap[fixType] || (fixType >= 3 ? '3D_FIX' : 'NO_FIX');
+          const instanceEntry = {
+            fixType: instanceFixType,
+            rawFixType: fixType,
+            satellites: satellitesVisible,
+            hdop: eph,
+            lat,
+            lon,
+            alt,
+            lastUpdated: now
+          };
 
-          if (is3DFix && Math.abs(lat) > 0.001 && Math.abs(lon) > 0.001) {
-            this.telemetry.latitude = lat;
-            this.telemetry.longitude = lon;
-            this.telemetry.gps.latitude = lat;
-            this.telemetry.gps.longitude = lon;
-            this.telemetry.gps.altitude = alt;
+          if (msgId === 24) {
+            this.gps1Data = instanceEntry;
+          } else {
+            this.gps2Data = instanceEntry;
+          }
+
+          // Multi-GPS Arbitration:
+          // When GPS is on SERIAL4/5, Pixhawk outputs GPS 2 (msg 124) with 18 sats, while GPS 1 (msg 24) is 0 sats.
+          // We arbitrate so that an inactive/empty GPS instance never clobbers active GPS telemetry!
+          const isGps1Fresh = (now - this.gps1Data.lastUpdated) < 4000;
+          const isGps2Fresh = (now - this.gps2Data.lastUpdated) < 4000;
+
+          let bestGps = msgId === 24 ? this.gps1Data : this.gps2Data;
+          let activeInstance: 1 | 2 = msgId === 24 ? 1 : 2;
+
+          if (isGps1Fresh && isGps2Fresh) {
+            if (this.gps2Data.rawFixType > this.gps1Data.rawFixType) {
+              bestGps = this.gps2Data;
+              activeInstance = 2;
+            } else if (this.gps1Data.rawFixType > this.gps2Data.rawFixType) {
+              bestGps = this.gps1Data;
+              activeInstance = 1;
+            } else {
+              if (this.gps2Data.satellites > this.gps1Data.satellites) {
+                bestGps = this.gps2Data;
+                activeInstance = 2;
+              } else {
+                bestGps = this.gps1Data;
+                activeInstance = 1;
+              }
+            }
+          } else if (isGps2Fresh && !isGps1Fresh) {
+            bestGps = this.gps2Data;
+            activeInstance = 2;
+          } else if (isGps1Fresh && !isGps2Fresh) {
+            bestGps = this.gps1Data;
+            activeInstance = 1;
+          }
+
+          this.connectionState.gpsInstances = {
+            gps1: { sats: this.gps1Data.satellites, fix: this.gps1Data.fixType || 'NO_GPS', hdop: this.gps1Data.hdop, lastUpdated: this.gps1Data.lastUpdated },
+            gps2: { sats: this.gps2Data.satellites, fix: this.gps2Data.fixType || 'NO_GPS', hdop: this.gps2Data.hdop, lastUpdated: this.gps2Data.lastUpdated },
+            activeInstance
+          };
+
+          const is3DFix = bestGps.rawFixType >= 3;
+          this.telemetry.gps.fixType = bestGps.fixType;
+          this.telemetry.gps.isLocked = is3DFix && (bestGps.satellites >= 6 || Math.abs(bestGps.lat) > 0.001);
+          this.telemetry.gps.satellites = bestGps.satellites;
+          this.telemetry.gps.hdop = bestGps.hdop;
+
+          if (is3DFix && Math.abs(bestGps.lat) > 0.001 && Math.abs(bestGps.lon) > 0.001) {
+            this.telemetry.latitude = bestGps.lat;
+            this.telemetry.longitude = bestGps.lon;
+            this.telemetry.gps.latitude = bestGps.lat;
+            this.telemetry.gps.longitude = bestGps.lon;
+            this.telemetry.gps.altitude = bestGps.alt;
 
             // Auto-seed or refine initial Home if disarmed on ground and not manually locked
             const isHomeFarFromDrone = this.homePoint.isSet && (
-              Math.abs(lat - this.homePoint.latitude) > 0.0003 ||
-              Math.abs(lon - this.homePoint.longitude) > 0.0003
+              Math.abs(bestGps.lat - this.homePoint.latitude) > 0.0003 ||
+              Math.abs(bestGps.lon - this.homePoint.longitude) > 0.0003
             );
             if ((!this.homePoint.isSet || (isHomeFarFromDrone && !this.homePointManualLock)) && !this.telemetry.isArmed && this.telemetry.altitude <= 1.5) {
               this.homePoint = {
-                latitude: lat,
-                longitude: lon,
-                altitude: alt,
+                latitude: bestGps.lat,
+                longitude: bestGps.lon,
+                altitude: bestGps.alt,
                 timestamp: now,
                 isSet: true
               };
@@ -1579,6 +1685,15 @@ class MAVLinkService {
               this.telemetry.gps.isLocked = true;
               if (this.telemetry.gps.fixType === 'NO_GPS' || this.telemetry.gps.fixType === 'NO_FIX') {
                 this.telemetry.gps.fixType = '3D_FIX';
+              }
+            }
+          } else {
+            // EKF coordinate fallback: If EKF is not blended yet, keep the best raw GPS lat/lon
+            const activeBestGps = this.gps2Data.satellites >= 6 && Math.abs(this.gps2Data.lat) > 0.001 ? this.gps2Data : this.gps1Data;
+            if (Math.abs(activeBestGps.lat) > 0.001 && Math.abs(activeBestGps.lon) > 0.001) {
+              if (Math.abs(this.telemetry.latitude) < 0.001 || Math.abs(this.telemetry.longitude) < 0.001) {
+                this.telemetry.latitude = activeBestGps.lat;
+                this.telemetry.longitude = activeBestGps.lon;
               }
             }
           }
@@ -1660,6 +1775,18 @@ class MAVLinkService {
                 this.telemetry.vehicleState = 'DISARMED';
               }
             }
+            // Surface mode change rejections to UI
+            if (lower.includes('mode change') || (lower.includes('requires position') && (lower.includes('mode') || lower.includes('failed')))) {
+              this.connectionState.lastModeChangeError = explanation;
+              this.connectionState.pendingFlightMode = undefined;
+              if (this.modeChangeResolver) {
+                const res = this.modeChangeResolver;
+                this.modeChangeResolver = null;
+                if (this.modeChangeTimer) clearTimeout(this.modeChangeTimer);
+                res({ success: false, message: explanation });
+              }
+            }
+
             this.logDiagnostic('MAVLINK', `[STATUSTEXT] [${severity}] ${displayMsg}`, severityLevel <= 3 ? 'error' : severityLevel === 4 ? 'warn' : 'info');
             this.addStatusMessage(severity, severityLevel, displayMsg);
             this.notifyConnection();
@@ -1713,6 +1840,26 @@ class MAVLinkService {
               console.log('[ARM] PIXHAWK ACCEPTED COMMAND');
             } else {
               console.warn(`[ARM] PIXHAWK REJECTED COMMAND: ${resultName} (Code ${result})`);
+            }
+          } else if (command === 176) {
+            console.log(`[MAVLINK ACK]\ncommand = 176 (SET_MODE)\nresult = ${resultName} (${result})`);
+            if (result === 0) {
+              this.logDiagnostic('MAVLINK', `[SET_MODE ACK] Mode command accepted by Pixhawk ✓`, 'success');
+            } else {
+              const rejectReason = (result === 4 || result === 1)
+                ? 'Mode change rejected: Position lock required (3D GPS Fix & EKF needed). Switch to STABILIZE or ALT_HOLD to fly/arm without GPS.'
+                : `Mode change rejected (${resultName})`;
+              this.logDiagnostic('MAVLINK', `[SET_MODE ACK] ${rejectReason}`, 'warn');
+              this.addStatusMessage('WARNING', 4, rejectReason);
+              this.connectionState.lastModeChangeError = rejectReason;
+              this.connectionState.pendingFlightMode = undefined;
+              if (this.modeChangeResolver) {
+                const res = this.modeChangeResolver;
+                this.modeChangeResolver = null;
+                if (this.modeChangeTimer) clearTimeout(this.modeChangeTimer);
+                res({ success: false, message: rejectReason });
+              }
+              this.notifyConnection();
             }
           } else {
             console.log(`[MAVLINK ACK]\ncommand = ${command}\nresult = ${resultName} (${result})`);
@@ -1966,7 +2113,7 @@ class MAVLinkService {
     try {
       const payload = new Uint8Array(6);
       const view = new DataView(payload.buffer);
-      // MAVLink 1.0 Message #11 SET_MODE:
+      // MAVLink Message #11 SET_MODE:
       // uint32_t custom_mode (offset 0..3, little-endian)
       // uint8_t  target_system (offset 4)
       // uint8_t  base_mode (offset 5) -> MAV_MODE_FLAG_CUSTOM_MODE_ENABLED = 1
@@ -1975,7 +2122,7 @@ class MAVLinkService {
       view.setUint8(4, targetSys);
       view.setUint8(5, 1 /* MAV_MODE_FLAG_CUSTOM_MODE_ENABLED */);
 
-      const packet = this.buildMavlink1Frame(11 /* SET_MODE */, payload);
+      const packet = this.buildMavlinkFrame(11 /* SET_MODE */, payload);
       const hexDump = Array.from(packet).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
       console.log(`[SET_MODE TX] custom_mode=${customMode} target_sys=${targetSys} (Packet: ${packet.length} B: ${hexDump})`);
       this.logDiagnostic('MAVLINK', `[SET_MODE TX] Sending SET_MODE (11) custom_mode=${customMode} to SysID ${targetSys} (${packet.length} bytes)`, 'info');
@@ -2015,12 +2162,17 @@ class MAVLinkService {
     };
     const customMode = modeNumbers[modeName] ?? 0;
     this.addStatusMessage('NOTICE', 5, `Setting Flight Mode to ${modeName} (Custom Mode: ${customMode})...`);
+    this.connectionState.pendingFlightMode = modeName;
+    this.connectionState.lastModeChangeError = undefined;
+    this.notifyConnection();
 
     // In simulation / test mock mode, update telemetry immediately (AUD-11)
-    // On real hardware, telemetry.flightMode is updated when confirmed by HEARTBEAT
     if (!this.connectionState.isRealHardware) {
       this.telemetry.flightMode = modeName;
+      this.connectionState.pendingFlightMode = undefined;
       this.notifyTelemetry();
+      this.notifyConnection();
+      return true;
     }
 
     if (this.connectionState.isRealHardware || isConnected) {
@@ -2028,7 +2180,25 @@ class MAVLinkService {
       await this.sendSetModeMessage(customMode);
       // 2. Also send COMMAND_LONG 176 as redundant fallback
       await this.sendMavlinkCommandLong(176, 1 /* MAV_MODE_FLAG_CUSTOM_MODE_ENABLED */, customMode);
-      return true;
+
+      // Await confirmation or rejection from Pixhawk (up to 2500ms)
+      return new Promise<boolean>((resolve) => {
+        if (this.modeChangeTimer) clearTimeout(this.modeChangeTimer);
+        this.modeChangeResolver = (res) => {
+          this.modeChangeResolver = null;
+          if (this.modeChangeTimer) clearTimeout(this.modeChangeTimer);
+          resolve(res.success);
+        };
+        this.modeChangeTimer = setTimeout(() => {
+          if (this.modeChangeResolver) {
+            this.modeChangeResolver = null;
+            const matched = (this.telemetry.flightMode || '').toUpperCase() === modeName;
+            this.connectionState.pendingFlightMode = undefined;
+            this.notifyConnection();
+            resolve(matched);
+          }
+        }, 2500);
+      });
     } else {
       return true;
     }
@@ -2739,8 +2909,25 @@ class MAVLinkService {
     return new Promise<{ success: boolean; items: MavlinkMissionItem[]; message: string }>((resolve) => {
       this.downloadedMissionItems = [];
       this.expectedDownloadCount = 0;
+      if (this.downloadItemRetryTimer) {
+        clearTimeout(this.downloadItemRetryTimer);
+        this.downloadItemRetryTimer = null;
+      }
+
+      let reqListRetry: any = null;
+      const sendReqList = () => {
+        if (this.expectedDownloadCount === 0 && this.missionDownloadResolver) {
+          this.sendMissionRequestList();
+          reqListRetry = setTimeout(sendReqList, 800);
+        }
+      };
 
       const timer = setTimeout(() => {
+        if (reqListRetry) clearTimeout(reqListRetry);
+        if (this.downloadItemRetryTimer) {
+          clearTimeout(this.downloadItemRetryTimer);
+          this.downloadItemRetryTimer = null;
+        }
         this.missionDownloadResolver = null;
         resolve({
           success: false,
@@ -2750,12 +2937,31 @@ class MAVLinkService {
       }, timeoutMs);
 
       this.missionDownloadResolver = (res) => {
+        if (reqListRetry) clearTimeout(reqListRetry);
+        if (this.downloadItemRetryTimer) {
+          clearTimeout(this.downloadItemRetryTimer);
+          this.downloadItemRetryTimer = null;
+        }
         clearTimeout(timer);
         resolve(res);
       };
 
-      this.sendMissionRequestList();
+      sendReqList();
     });
+  }
+
+  public requestDownloadItem(seq: number) {
+    if (this.downloadItemRetryTimer) {
+      clearTimeout(this.downloadItemRetryTimer);
+      this.downloadItemRetryTimer = null;
+    }
+    this.sendMissionRequestInt(seq);
+    this.downloadItemRetryTimer = setTimeout(() => {
+      if (this.missionDownloadResolver && this.downloadedMissionItems.length === seq) {
+        this.logDiagnostic('MAVLINK', `[MISSION READBACK] Retrying request for seq #${seq}...`, 'info');
+        this.requestDownloadItem(seq);
+      }
+    }, 600);
   }
 
   public async sendMissionRequestList(): Promise<boolean> {
@@ -2900,7 +3106,7 @@ class MAVLinkService {
 
     this.connectionState.lastSentCommandId = command;
 
-    const packet = this.buildMavlink1Frame(76 /* COMMAND_LONG */, payload);
+    const packet = this.buildMavlinkFrame(76 /* COMMAND_LONG */, payload);
     const hexDump = Array.from(packet).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
 
     const prefix = command === 400 ? (param1 === 1.0 ? '[ARM]' : '[DISARM]') : `[CMD_${command}]`;

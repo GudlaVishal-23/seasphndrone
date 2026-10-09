@@ -797,7 +797,8 @@ class CircleTestService {
 
     // If airborne, maintain position in LOITER or command LAND for safety
     const telem = mavlinkService.getTelemetry();
-    if (wasExecuting && telem.isArmed && telem.altitude > 0.8) {
+    const isAirborne = telem.altitude > 0.3 || ['CLIMBING', 'TRANSITING_TO_PERIMETER', 'ORBITING', 'RETURNING_TO_CENTER', 'DESCENDING'].includes(this.state.step);
+    if (wasExecuting && telem.isArmed && isAirborne) {
       mavlinkService.setFlightMode('LOITER');
     }
 

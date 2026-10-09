@@ -246,6 +246,8 @@ void connectToWiFi() {
 
   Serial.println();
   if (WiFi.status() == WL_CONNECTED) {
+    // Disable ESP32 802.11 modem sleep to eliminate DTIM jitter & keep latency <5ms
+    WiFi.setSleep(false);
     Serial.println("🟢 [WIFI] CONNECTED SUCCESSFULLY!");
     Serial.printf("📍 [WIFI] IP Address:    %s\n", WiFi.localIP().toString().c_str());
     Serial.printf("📶 [WIFI] Signal (RSSI):  %d dBm\n", WiFi.RSSI());

@@ -282,22 +282,28 @@ server.on('upgrade', (request, socket, head) => {
   const pathname = parsedUrl.pathname;
   const token = parsedUrl.query.token || request.headers['x-relay-token'];
 
-  // Route: /connector (for ESP32 and local connector agent)
-  if (pathname === '/connector') {
-    const allowedTokens = new Set([
-      RELAY_TOKEN ? RELAY_TOKEN.trim() : '',
-      'saeindia_secret_token_2026',
-      'saeindia_sec_99348a7b1c0e'
-    ].filter(Boolean));
+  const allowedTokens = new Set([
+    RELAY_TOKEN ? RELAY_TOKEN.trim() : '',
+    'saeindia_secret_token_2026',
+    'saeindia_sec_99348a7b1c0e'
+  ].filter(Boolean));
 
-    if (allowedTokens.size > 0 && token) {
-      if (!allowedTokens.has(token.trim())) {
-        console.warn(`[AUTH FAILED] Unauthorized ESP32/connector attempt from ${request.socket.remoteAddress} (provided: "${token}")`);
+  const validateAuth = (routeLabel) => {
+    if (allowedTokens.size > 0) {
+      if (!token || !allowedTokens.has(token.trim())) {
+        const masked = token ? `${token.trim().slice(0, 3)}***` : 'none';
+        console.warn(`[AUTH FAILED] Unauthorized ${routeLabel} attempt from ${request.socket.remoteAddress} (provided: "${masked}")`);
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
-        return;
+        return false;
       }
     }
+    return true;
+  };
+
+  // Route: /connector (for ESP32 and local connector agent)
+  if (pathname === '/connector') {
+    if (!validateAuth('ESP32/connector')) return;
 
     wss.handleUpgrade(request, socket, head, (ws) => {
       // Re-assert TCP_NODELAY on the underlying upgraded socket
@@ -312,6 +318,8 @@ server.on('upgrade', (request, socket, head) => {
 
   // Route: /ws or / (for frontend browser client)
   if (pathname === '/ws' || pathname === '/') {
+    if (!validateAuth('browser client')) return;
+
     wss.handleUpgrade(request, socket, head, (ws) => {
       if (ws._socket) {
         ws._socket.setNoDelay(true);

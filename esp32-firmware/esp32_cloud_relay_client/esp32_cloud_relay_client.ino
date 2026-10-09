@@ -10,12 +10,17 @@
  * EXACT WIRING:
  *   PIXHAWK TELEM2                     ESP32-S3
  *   -----------------                  -----------------
- *   Pin 1  +5V        ───────────────  NC (Powered externally or via USB)
+ *   Pin 1  +5V        ───────────────  5V / VIN pin (Supported! Safe when drone LiPo battery is connected)
  *   Pin 2  TX         ───────────────  GPIO 18 (RX on ESP32-S3)
  *   Pin 3  RX         ───────────────  GPIO 17 (TX on ESP32-S3)
- *   Pin 4  CTS        ───────────────  NC
- *   Pin 5  RTS        ───────────────  NC
+ *   Pin 4  CTS        ───────────────  NC (Not connected)
+ *   Pin 5  RTS        ───────────────  NC (Not connected)
  *   Pin 6  GND        ───────────────  GND (Common Ground)
+ *
+ * POWER NOTE:
+ *   - TELEM2 Pin 1 (+5V) can power the ESP32-S3 directly via the 5V/VIN pin.
+ *   - When running on Pixhawk Battery (Power Module / LiPo), TELEM2 delivers 2.5A-3A.
+ *   - If Pixhawk is powered ONLY by PC USB without battery, current is limited to ~500mA total.
  *
  * ARDUINO IDE SETTINGS (CRITICAL FOR ESP32-S3 SERIAL MONITOR):
  *   1. Tools -> Board -> "ESP32S3 Dev Module"
@@ -165,6 +170,7 @@ void onMessageCallback(WebsocketsMessage message) {
     const uint8_t* payload = (const uint8_t*)message.c_str();
     size_t length = message.length();
     PixhawkSerial.write(payload, length);
+    PixhawkSerial.flush(); // Flush hardware FIFO immediately so bytes reach TELEM2 with 0ms buffering delay
 
     totalTxBytesToPixhawk += length;
     totalCommandsReceived++;
@@ -240,6 +246,8 @@ void connectToWiFi() {
 
   Serial.println();
   if (WiFi.status() == WL_CONNECTED) {
+    // Disable ESP32 802.11 modem sleep to eliminate DTIM jitter & keep latency <5ms
+    WiFi.setSleep(false);
     Serial.println("🟢 [WIFI] CONNECTED SUCCESSFULLY!");
     Serial.printf("📍 [WIFI] IP Address:    %s\n", WiFi.localIP().toString().c_str());
     Serial.printf("📶 [WIFI] Signal (RSSI):  %d dBm\n", WiFi.RSSI());
@@ -321,8 +329,11 @@ void setup() {
   // Initialize Pixhawk Hardware UART1:
   // RX = GPIO 18 (connects to Pixhawk TELEM2 Pin 2 TX)
   // TX = GPIO 17 (connects to Pixhawk TELEM2 Pin 3 RX)
+  PixhawkSerial.setRxBufferSize(2048); // Expand hardware FIFO to prevent buffer overflow on burst telemetry
+  PixhawkSerial.setTxBufferSize(2048); // Expand hardware FIFO for smooth outbound MAVLink commands
   PixhawkSerial.begin(PIXHAWK_BAUD, SERIAL_8N1, PIXHAWK_RX_PIN, PIXHAWK_TX_PIN);
-  Serial.println("✅ [UART] Hardware Serial1 initialized on GPIO 18 (RX) and GPIO 17 (TX).");
+  PixhawkSerial.setTimeout(5); // Non-blocking 5ms timeout for ultra-low-latency UART reads
+  Serial.println("✅ [UART] Hardware Serial1 initialized on GPIO 18 (RX) and GPIO 17 (TX) with 2048-byte FIFO buffers.");
 
   // Configure WebSocket Client callbacks and SSL mode
   wsClient.setInsecure();

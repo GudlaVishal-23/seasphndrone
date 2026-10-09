@@ -104,6 +104,48 @@ const SEVERITY_NAMES: Array<PixhawkStatusMessage['severity']> = [
   'DEBUG'
 ];
 
+export const MAVLINK_CRC_EXTRAS: Record<number, number> = {
+  0: 50,   // HEARTBEAT
+  1: 124,  // SYS_STATUS
+  2: 137,  // SYSTEM_TIME
+  4: 237,  // PING
+  11: 89,  // SET_MODE
+  20: 214, // PARAM_REQUEST_READ
+  21: 159, // PARAM_REQUEST_LIST
+  22: 220, // PARAM_VALUE
+  23: 168, // PARAM_SET
+  24: 24,  // GPS_RAW_INT
+  29: 115, // SCALED_PRESSURE
+  30: 39,  // ATTITUDE
+  32: 185, // LOCAL_POSITION_NED
+  33: 104, // GLOBAL_POSITION_INT
+  36: 222, // SERVO_OUTPUT_RAW
+  39: 254, // MISSION_ITEM
+  40: 230, // MISSION_REQUEST
+  42: 28,  // MISSION_SET_CURRENT
+  43: 132, // MISSION_REQUEST_LIST
+  44: 221, // MISSION_COUNT
+  45: 232, // MISSION_CLEAR_ALL
+  46: 11,  // MISSION_ITEM_REACHED
+  47: 153, // MISSION_ACK
+  51: 196, // MISSION_REQUEST_INT
+  62: 183, // NAV_CONTROLLER_OUTPUT
+  65: 118, // RC_CHANNELS
+  66: 148, // REQUEST_DATA_STREAM
+  73: 38,  // MISSION_ITEM_INT
+  74: 20,  // VFR_HUD (AUD-05)
+  75: 158, // COMMAND_INT
+  76: 152, // COMMAND_LONG
+  77: 143, // COMMAND_ACK
+  124: 87, // GPS2_RAW
+  125: 203, // POWER_STATUS
+  147: 154, // BATTERY_STATUS
+  163: 187, // AHRS2
+  168: 21,  // WIND
+  242: 104, // HOME_POSITION
+  253: 83  // STATUSTEXT
+};
+
 class MAVLinkService {
   private listeners: Set<TelemetryListener> = new Set();
   private packetListeners: Set<MAVLinkPacketListener> = new Set();
@@ -904,6 +946,10 @@ class MAVLinkService {
   /**
    * MAVLink Byte Stream Parser (Sliding Window Ring Buffer for MAVLink 1.0 & 2.0)
    */
+  public parseMavlinkStream(chunk: Uint8Array): void {
+    this.processIncomingSerialBytes(chunk);
+  }
+
   private processIncomingSerialBytes(chunk: Uint8Array) {
     if (chunk.length === 0) return;
 
@@ -949,6 +995,16 @@ class MAVLinkService {
         if (remaining < packetLen) break;
 
         const frame = this.rxBuffer.subarray(offset, offset + packetLen);
+        const msgId = frame[5];
+        if (MAVLINK_CRC_EXTRAS[msgId] !== undefined) {
+          const rxCrc = frame[6 + payloadLen] | (frame[6 + payloadLen + 1] << 8);
+          const expectedCrc = this.calculateMavlinkCrc(frame.subarray(1, 6 + payloadLen), msgId);
+          if (rxCrc !== expectedCrc) {
+            // Checksum failure: false sync or corrupted frame. Step 1 byte and rescan.
+            offset++;
+            continue;
+          }
+        }
         this.decodeMavlink1Packet(frame);
         offset += packetLen;
         continue;
@@ -964,6 +1020,16 @@ class MAVLinkService {
         if (remaining < packetLen) break;
 
         const frame = this.rxBuffer.subarray(offset, offset + packetLen);
+        const msgId = frame[7] | (frame[8] << 8) | (frame[9] << 16);
+        if (MAVLINK_CRC_EXTRAS[msgId] !== undefined) {
+          const rxCrc = frame[10 + payloadLen] | (frame[10 + payloadLen + 1] << 8);
+          const expectedCrc = this.calculateMavlinkCrc(frame.subarray(1, 10 + payloadLen), msgId);
+          if (rxCrc !== expectedCrc) {
+            // Checksum failure: step 1 byte and rescan.
+            offset++;
+            continue;
+          }
+        }
         this.decodeMavlink2Packet(frame);
         offset += packetLen;
         continue;
@@ -1740,8 +1806,8 @@ class MAVLinkService {
     if (now - this.lastStreamRequestTime < 2500) return; // Throttled: at most once every 2.5s
     this.lastStreamRequestTime = now;
 
-    // 1. Legacy MAVLink 1 stream requests (0: ALL, 2: EXTENDED_STATUS, 6: POSITION, 11: EXTRA2)
-    await this.sendRequestDataStream(0 /* ALL */, 4 /* 4 Hz */);
+    // 1. Legacy MAVLink 1 stream requests (2: EXTENDED_STATUS, 6: POSITION, 11: EXTRA2)
+    // STREAM_ALL (stream 0) deliberately omitted to avoid flooding 57600 baud serial bandwidth
     await this.sendRequestDataStream(2 /* EXTENDED_STATUS: SYS_STATUS & BATTERY_STATUS */, 4 /* 4 Hz */);
     await this.sendRequestDataStream(6 /* POSITION */, 5 /* 5 Hz */);
     await this.sendRequestDataStream(11 /* EXTRA2: VFR_HUD */, 4 /* 4 Hz */);
@@ -1950,9 +2016,12 @@ class MAVLinkService {
     const customMode = modeNumbers[modeName] ?? 0;
     this.addStatusMessage('NOTICE', 5, `Setting Flight Mode to ${modeName} (Custom Mode: ${customMode})...`);
 
-    // Immediately update UI telemetry optimistically
-    this.telemetry.flightMode = modeName;
-    this.notifyTelemetry();
+    // In simulation / test mock mode, update telemetry immediately (AUD-11)
+    // On real hardware, telemetry.flightMode is updated when confirmed by HEARTBEAT
+    if (!this.connectionState.isRealHardware) {
+      this.telemetry.flightMode = modeName;
+      this.notifyTelemetry();
+    }
 
     if (this.connectionState.isRealHardware || isConnected) {
       // 1. Send native MAVLink message #11 (SET_MODE) - Required by ArduPilot Copter
@@ -1977,6 +2046,8 @@ class MAVLinkService {
       // ArduPilot requires GUIDED flight mode to accept MAV_CMD_NAV_TAKEOFF (22)
       await this.setFlightMode('GUIDED');
       await this.sendMavlinkCommandInt(22 /* MAV_CMD_NAV_TAKEOFF */, 0, 0, 0, 0, 0, 0, targetAltMeters, 6 /* MAV_FRAME_GLOBAL_RELATIVE_ALT_INT */);
+      // Small 50ms stagger before COMMAND_LONG to avoid serial buffer collision & duplicate ACK race (AUD-03)
+      await new Promise((r) => setTimeout(r, 50));
       await this.sendMavlinkCommandLong(22 /* MAV_CMD_NAV_TAKEOFF */, 0, 0, 0, 0, 0, 0, targetAltMeters);
       this.notifyTelemetry();
       return true;
@@ -2299,6 +2370,9 @@ class MAVLinkService {
     if (!items || items.length === 0) {
       return { success: false, message: 'Cannot upload empty mission (0 items).' };
     }
+    if (items.length > 150) {
+      return { success: false, message: `Mission item count (${items.length}) exceeds Pixhawk EEPROM safe limit (150 waypoints).` };
+    }
 
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
@@ -2383,6 +2457,34 @@ class MAVLinkService {
                   resolve({ success: false, message: mismatchErr, upload_id });
                   return;
                 }
+
+                // Complete item-by-item verification (AUD-02)
+                for (let i = 0; i < items.length; i++) {
+                  const sent = items[i];
+                  const recv = readback.items[i];
+                  if (!recv) {
+                    const mismatchErr = `Readback verification error: Item index ${i} missing from flight controller response.`;
+                    this.logDiagnostic('ERROR', mismatchErr, 'error');
+                    resolve({ success: false, message: mismatchErr, upload_id });
+                    return;
+                  }
+                  if (sent.command && recv.command && sent.command !== recv.command) {
+                    const mismatchErr = `Readback command mismatch at waypoint #${i}: expected ${sent.command}, FC stored ${recv.command}.`;
+                    this.logDiagnostic('ERROR', mismatchErr, 'error');
+                    resolve({ success: false, message: mismatchErr, upload_id });
+                    return;
+                  }
+                  const latDiff = Math.abs(sent.lat - recv.lat);
+                  const lonDiff = Math.abs(sent.lon - recv.lon);
+                  const altDiff = Math.abs(sent.alt - recv.alt);
+                  if (latDiff > 0.0005 || lonDiff > 0.0005 || altDiff > 2.0) {
+                    const mismatchErr = `Readback waypoint data mismatch at #${i}: coords (${recv.lat.toFixed(6)}, ${recv.lon.toFixed(6)}, ${recv.alt}m) do not match expected (${sent.lat.toFixed(6)}, ${sent.lon.toFixed(6)}, ${sent.alt}m).`;
+                    this.logDiagnostic('ERROR', mismatchErr, 'error');
+                    resolve({ success: false, message: mismatchErr, upload_id });
+                    return;
+                  }
+                }
+
                 const duration = ((Date.now() - startTime) / 1000).toFixed(2);
                 this.logDiagnostic('MAVLINK', `[MISSION] upload_id=${upload_id} SUCCESS duration=${duration}s (Readback verified)`, 'success');
                 onProgress?.('Mission verified and accepted ✓', items.length, items.length);
@@ -2393,20 +2495,25 @@ class MAVLinkService {
                 });
                 return;
               } else {
-                this.logDiagnostic('MAVLINK', `[MISSION READBACK] Readback note: ${readback.message} (FC ACK was ACCEPTED)`, 'warn');
+                const failMsg = `Mission upload readback verification failed: ${readback.message}`;
+                this.logDiagnostic('ERROR', `[MISSION READBACK] ${failMsg}`, 'error');
+                resolve({
+                  success: false,
+                  message: failMsg,
+                  upload_id
+                });
+                return;
               }
             } catch (rbErr: any) {
-              this.logDiagnostic('MAVLINK', `[MISSION READBACK] Readback note: ${rbErr?.message || rbErr}`, 'warn');
+              const failMsg = `Mission upload readback verification error: ${rbErr?.message || rbErr}`;
+              this.logDiagnostic('ERROR', `[MISSION READBACK] ${failMsg}`, 'error');
+              resolve({
+                success: false,
+                message: failMsg,
+                upload_id
+              });
+              return;
             }
-
-            const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-            this.logDiagnostic('MAVLINK', `[MISSION] upload_id=${upload_id} SUCCESS duration=${duration}s`, 'success');
-            onProgress?.('Mission accepted by Pixhawk ✓', items.length, items.length);
-            resolve({
-              success: true,
-              message: `Mission uploaded and verified by Pixhawk (${items.length} waypoints) ✓`,
-              upload_id
-            });
           } else {
             // Automatic retry if transient sequence desync
             if (result.message.includes('INVALID_SEQUENCE') && allowRetry) {
@@ -2887,46 +2994,13 @@ class MAVLinkService {
   }
 
   private calculateMavlinkCrc(buffer: Uint8Array, msgId: number): number {
-    const CRC_EXTRAS: Record<number, number> = {
-      0: 50,   // HEARTBEAT
-      1: 124,  // SYS_STATUS
-      2: 137,  // SYSTEM_TIME
-      4: 237,  // PING
-      11: 89,  // SET_MODE
-      20: 214, // PARAM_REQUEST_READ
-      21: 159, // PARAM_REQUEST_LIST
-      22: 220, // PARAM_VALUE
-      23: 168, // PARAM_SET
-      24: 24,  // GPS_RAW_INT
-      30: 39,  // ATTITUDE
-      33: 104, // GLOBAL_POSITION_INT
-      39: 254, // MISSION_ITEM
-      40: 230, // MISSION_REQUEST
-      42: 28,  // MISSION_SET_CURRENT
-      43: 132, // MISSION_REQUEST_LIST
-      44: 221, // MISSION_COUNT
-      45: 232, // MISSION_CLEAR_ALL
-      46: 11,  // MISSION_ITEM_REACHED
-      47: 153, // MISSION_ACK
-      51: 196, // MISSION_REQUEST_INT
-      62: 183, // NAV_CONTROLLER_OUTPUT
-      66: 148, // REQUEST_DATA_STREAM
-      73: 38,  // MISSION_ITEM_INT
-      76: 152, // COMMAND_LONG
-      77: 143, // COMMAND_ACK
-      124: 87, // GPS2_RAW
-      147: 154, // BATTERY_STATUS
-      242: 104, // HOME_POSITION
-      253: 83  // STATUSTEXT
-    };
-
     let crc = 0xFFFF;
     for (let i = 0; i < buffer.length; i++) {
       let b = buffer[i] ^ (crc & 0xFF);
       b ^= (b << 4) & 0xFF;
       crc = (crc >> 8) ^ (b << 8) ^ (b << 3) ^ (b >> 4);
     }
-    const extraCrc = CRC_EXTRAS[msgId] ?? 152;
+    const extraCrc = MAVLINK_CRC_EXTRAS[msgId] ?? 152;
     let b = extraCrc ^ (crc & 0xFF);
     b ^= (b << 4) & 0xFF;
     crc = (crc >> 8) ^ (b << 8) ^ (b << 3) ^ (b >> 4);

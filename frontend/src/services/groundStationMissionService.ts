@@ -515,7 +515,9 @@ export class GroundStationMissionService {
     }
 
     // Fallback if shape is too thin: use vertices
-    const routePoints = surveyPoints.length >= 2 ? surveyPoints : polygonCoords;
+    const rawRoutePoints = surveyPoints.length >= 2 ? surveyPoints : polygonCoords;
+    // Cap at 145 waypoints to strictly guarantee <150 total items including takeoff and RTL (AUD-13)
+    const routePoints = rawRoutePoints.length > 145 ? rawRoutePoints.slice(0, 145) : rawRoutePoints;
 
     const waypoints: GroundStationWaypoint[] = [];
     let cumulativeDistance = 0;

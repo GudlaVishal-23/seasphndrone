@@ -72,6 +72,8 @@ class VisionService {
   private photosAnalyzedCount: number = 0;
   private photosPurgedCount: number = 0;
   private latestCaptureEvent: PhotoCaptureEvent | null = null;
+  private lastQrAlertTime: number = 0;
+  private lastQrNotifyTime: number = 0;
 
   constructor() {
     if (typeof document !== 'undefined') {
@@ -519,12 +521,18 @@ class VisionService {
           corners
         };
 
+        const now = Date.now();
+        const prevCode = this.latestResult?.code;
         this.latestResult = data;
-        if (isValid) {
+        if (isValid && (now - this.lastQrAlertTime > 1500 || prevCode !== data.code)) {
+          this.lastQrAlertTime = now;
           audioService.playQrDetected();
           audioService.triggerHaptic('success');
         }
-        this.notifyListeners(data);
+        if (now - this.lastQrNotifyTime > 200 || prevCode !== data.code) {
+          this.lastQrNotifyTime = now;
+          this.notifyListeners(data);
+        }
       }
     } catch (e) {
       // scan error
@@ -750,8 +758,9 @@ class VisionService {
   }
 
   public validateTwoDigitCode(text: string): boolean {
+    if (!text || typeof text !== 'string') return false;
     const trimmed = text.trim();
-    return /^\d{2}$/.test(trimmed);
+    return /^[0-9]{2}$/.test(trimmed);
   }
 
   private generateSyntheticTargetSnapshot(code: string): string {

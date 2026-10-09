@@ -1450,13 +1450,11 @@ class MAVLinkService {
             const item = this.pendingMissionItems[requestedSeq];
 
             // Critical ArduPilot compliance:
-            // - If Pixhawk sends msg 40 (MISSION_REQUEST) -> Respond with msg 39 (MISSION_ITEM) with float coordinates
-            // - If Pixhawk sends msg 51 (MISSION_REQUEST_INT) -> Respond with msg 73 (MISSION_ITEM_INT) with int32 degE7 coordinates
-            if (msgId === 40) {
-              this.sendMissionItem(requestedSeq, item);
-            } else {
-              this.sendMissionItemInt(requestedSeq, item);
-            }
+            // ArduPilot requires MISSION_ITEM_INT (msg 73).
+            // When sent legacy MISSION_ITEM (msg 39), ArduPilot firmware explicitly rejects with:
+            // "got MISSION_ITEM; GCS should send MISSION_ITEM_INT" and aborts with MAV_MISSION_ERROR.
+            // Therefore, ALWAYS respond with MISSION_ITEM_INT (msg 73).
+            this.sendMissionItemInt(requestedSeq, item);
 
             // Item retransmission watchdog (retry up to 5 times if FC drops the packet)
             if (this.missionItemRetryTimer) {
@@ -1469,11 +1467,7 @@ class MAVLinkService {
                 if (this.missionUploadResolver && this.lastRequestedSeq === requestedSeq && itemRetries < 5) {
                   itemRetries++;
                   this.logDiagnostic('MAVLINK', `[MAVLINK] Retrying waypoint seq ${requestedSeq} (attempt ${itemRetries}/5)...`, 'warn');
-                  if (msgId === 40) {
-                    this.sendMissionItem(requestedSeq, item);
-                  } else {
-                    this.sendMissionItemInt(requestedSeq, item);
-                  }
+                  this.sendMissionItemInt(requestedSeq, item);
                   scheduleItemRetry();
                 }
               }, 1500);

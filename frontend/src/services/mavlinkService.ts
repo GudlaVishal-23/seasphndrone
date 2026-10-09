@@ -1972,12 +1972,13 @@ class MAVLinkService {
     if (now - this.lastStreamRequestTime < 2000) return; // Throttled: at most once every 2.0s
     this.lastStreamRequestTime = now;
 
-    // 1. Universal MAVLink Stream Requests (Required for ArduPilot TELEM1/TELEM2 when SRx rates are 0)
+    // 1. Universal MAVLink Stream Requests (Required for ArduPilot TELEM2 when SR2 rates are 0)
     // Stream 0 (ALL) signals Pixhawk that a GCS has connected and prompts the flight controller to start streaming
     await this.sendRequestDataStream(0 /* ALL streams */, 4 /* 4 Hz */);
     await this.sendRequestDataStream(1 /* RAW_SENSORS */, 2 /* 2 Hz */);
     await this.sendRequestDataStream(2 /* EXTENDED_STATUS: SYS_STATUS & BATTERY_STATUS */, 4 /* 4 Hz */);
-    await this.sendRequestDataStream(6 /* POSITION: GPS_RAW_INT & GLOBAL_POSITION_INT */, 5 /* 5 Hz */);
+    await this.sendRequestDataStream(3 /* RC_CHANNELS from TELEM1 receiver */, 4 /* 4 Hz */);
+    await this.sendRequestDataStream(6 /* POSITION: GPS 1 & GPS 2 (GPS_RAW_INT & GLOBAL_POSITION_INT) */, 5 /* 5 Hz */);
     await this.sendRequestDataStream(10 /* EXTRA1: ATTITUDE */, 5 /* 5 Hz */);
     await this.sendRequestDataStream(11 /* EXTRA2: VFR_HUD */, 4 /* 4 Hz */);
     await this.sendRequestDataStream(12 /* EXTRA3: BATTERY, AHRS */, 2 /* 2 Hz */);
@@ -1988,10 +1989,11 @@ class MAVLinkService {
       await this.sendMavlinkCommandLong(511, 1 /* SYS_STATUS: battery voltage/current/percentage */, 250000 /* 4 Hz */);
       await this.sendMavlinkCommandLong(511, 147 /* BATTERY_STATUS: multi-cell voltages */, 500000 /* 2 Hz */);
       await this.sendMavlinkCommandLong(511, 74 /* VFR_HUD: altitude, airspeed, heading */, 250000 /* 4 Hz */);
-      await this.sendMavlinkCommandLong(511, 33 /* GLOBAL_POSITION_INT */, 200000 /* 5 Hz */);
-      await this.sendMavlinkCommandLong(511, 30 /* ATTITUDE */, 100000 /* 10 Hz */);
-      await this.sendMavlinkCommandLong(511, 24 /* GPS_RAW_INT */, 200000 /* 5 Hz */);
-      await this.sendMavlinkCommandLong(511, 124 /* GPS2_RAW (for dual GPS / SERIAL4/5) */, 200000 /* 5 Hz */);
+      await this.sendMavlinkCommandLong(511, 33 /* GLOBAL_POSITION_INT: EKF fused position */, 200000 /* 5 Hz */);
+      await this.sendMavlinkCommandLong(511, 30 /* ATTITUDE: roll, pitch, yaw */, 100000 /* 10 Hz */);
+      await this.sendMavlinkCommandLong(511, 24 /* GPS_RAW_INT: Primary GPS 1 */, 200000 /* 5 Hz */);
+      await this.sendMavlinkCommandLong(511, 124 /* GPS2_RAW: Secondary GPS 2 */, 200000 /* 5 Hz */);
+      await this.sendMavlinkCommandLong(511, 65 /* RC_CHANNELS: TELEM1 receiver sticks */, 250000 /* 4 Hz */);
     } catch (e) {
       console.warn('Failed to send MAV_CMD_SET_MESSAGE_INTERVAL', e);
     }

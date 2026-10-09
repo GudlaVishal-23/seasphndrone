@@ -110,7 +110,13 @@ const char GLOBALSIGN_ROOT_CA[] PROGMEM =
 // =====================================================================================
 #define PIXHAWK_RX_PIN    18     // ESP32-S3 GPIO 18 connects to Pixhawk TELEM2 Pin 2 (TX)
 #define PIXHAWK_TX_PIN    17     // ESP32-S3 GPIO 17 connects to Pixhawk TELEM2 Pin 3 (RX)
-#define PIXHAWK_BAUD      57600  // Standard Pixhawk TELEM2 baud (SERIAL2_BAUD = 57)
+
+// Auto-Baud Detection: Automatically syncs whether TELEM2 is configured for 57600 or 115200 baud!
+const uint32_t TELEM2_BAUDS[] = {57600, 115200};
+uint8_t currentBaudIdx = 0;
+uint32_t activePixhawkBaud = 57600;
+bool isBaudLocked = false;
+unsigned long lastBaudSwitchTime = 0;
 
 // Status LED (GPIO 2, set to -1 if your S3 board has no onboard LED)
 #define STATUS_LED_PIN    2
@@ -318,9 +324,9 @@ void setup() {
   // TX = GPIO 17 (connects to Pixhawk TELEM2 Pin 3 RX)
   PixhawkSerial.setRxBufferSize(2048); // Expand hardware FIFO to prevent buffer overflow on burst telemetry
   PixhawkSerial.setTxBufferSize(2048); // Expand hardware FIFO for smooth outbound MAVLink commands
-  PixhawkSerial.begin(PIXHAWK_BAUD, SERIAL_8N1, PIXHAWK_RX_PIN, PIXHAWK_TX_PIN);
+  PixhawkSerial.begin(activePixhawkBaud, SERIAL_8N1, PIXHAWK_RX_PIN, PIXHAWK_TX_PIN);
   PixhawkSerial.setTimeout(5); // Non-blocking 5ms timeout for ultra-low-latency UART reads
-  Serial.println("✅ [UART] Hardware Serial1 initialized on GPIO 18 (RX) and GPIO 17 (TX) with 2048-byte FIFO buffers.");
+  Serial.printf("✅ [TELEM2 UART] Hardware Serial1 ready on GPIO 18 (RX) and GPIO 17 (TX) @ %lu baud.\n", (unsigned long)activePixhawkBaud);
 
   // Configure WebSocket Client callbacks and SSL mode
   wsClient.setInsecure();
@@ -366,11 +372,26 @@ void loop() {
   // 5. Read binary MAVLink telemetry from Pixhawk TELEM2 -> Forward to Cloud Relay
   // ULTRA-LOW-LATENCY INTELLIGENT BATCHING:
   // Collect bytes from UART until either 256 bytes accumulate OR UART line goes idle for 12ms.
-  // This eliminates sending 1-byte SSL frames that cause high CPU load and 2-second web lag!
   while (PixhawkSerial.available() > 0 && uartBatchLen < UART_BUFFER_SIZE) {
-    uartBuffer[uartBatchLen++] = (uint8_t)PixhawkSerial.read();
+    uint8_t b = (uint8_t)PixhawkSerial.read();
+    if (b == 0xFE || b == 0xFD) {
+      if (!isBaudLocked) {
+        isBaudLocked = true;
+        Serial.printf("\n🎯 [TELEM2 LOCKED] Valid MAVLink framing (0x%02X) confirmed at %lu baud!\n", b, (unsigned long)activePixhawkBaud);
+      }
+    }
+    uartBuffer[uartBatchLen++] = b;
     lastUartByteTime = millis();
     totalRxBytesFromPixhawk++;
+  }
+
+  // Auto-baud switcher: If no valid MAVLink header seen after 7s, test alternate baud (57600 <-> 115200)
+  if (!isBaudLocked && (millis() - lastBaudSwitchTime > 7000)) {
+    lastBaudSwitchTime = millis();
+    currentBaudIdx = (currentBaudIdx + 1) % 2;
+    activePixhawkBaud = TELEM2_BAUDS[currentBaudIdx];
+    PixhawkSerial.begin(activePixhawkBaud, SERIAL_8N1, PIXHAWK_RX_PIN, PIXHAWK_TX_PIN);
+    Serial.printf("🔄 [TELEM2 AUTO-BAUD] Testing %lu baud on TELEM2...\n", (unsigned long)activePixhawkBaud);
   }
 
   bool shouldFlush = (uartBatchLen >= 256) || (uartBatchLen > 0 && (millis() - lastUartByteTime >= 12));
@@ -381,15 +402,17 @@ void loop() {
     uartBatchLen = 0;
   }
 
-  // 6. Periodic 3-Second Live Status Heartbeat (Guarantees Serial Monitor is clean and CPU is not blocked)
+  // 6. Periodic 3-Second Live Status Heartbeat
   if (millis() - lastDiagnosticPrint > DIAGNOSTIC_INTERVAL_MS) {
     lastDiagnosticPrint = millis();
 
-    Serial.printf("📊 [MONITOR] Wi-Fi: %s | Cloud WSS: %s | Pixhawk RX: %lu bytes | Forwarded: %lu pkts | TX to Drone: %lu bytes\n",
+    Serial.printf("📊 [MONITOR] Wi-Fi: %s | Cloud: %s | TELEM2 (%lu baud): %s | Pixhawk RX: %lu B | TX: %lu B\n",
                   WiFi.status() == WL_CONNECTED ? "ONLINE ✓" : "OFFLINE ✗",
-                  wsClient.available() ? "STREAMING TO PHONE ✓" : "CONNECTING...",
+                  wsClient.available() ? "STREAMING ✓" : "CONNECTING...",
+                  (unsigned long)activePixhawkBaud,
+                  isBaudLocked ? "LOCKED ✓" : (totalRxBytesFromPixhawk == 0 ? "NO SIGNAL (Check Pin 18)" : "SYNCING..."),
                   totalRxBytesFromPixhawk,
-                  totalMavlinkPacketsSent,
                   totalTxBytesToPixhawk);
   }
 }
+

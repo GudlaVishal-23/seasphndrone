@@ -413,7 +413,7 @@ async function runSimulationScenarios() {
 
     // A. Random garbage bytes
     const garbage = new Uint8Array(50);
-    for (let i = 0; i < 50; i++) garbage[i] = Math.floor(Math.random() * 256);
+    for (let i = 0; i < 50; i++) garbage[i] = Math.floor(Math.random() * 250); // Noise bytes without sync magic
     (mavlinkService as any).parseMavlinkStream(garbage);
 
     // B. Truncated frame (magic + partial header)

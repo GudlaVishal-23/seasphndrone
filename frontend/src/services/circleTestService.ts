@@ -430,13 +430,26 @@ class CircleTestService {
     // Upload MAVLink mission containing takeoff, circular perimeter waypoints, return to center, and land
     try {
       const missionPayload = [
-        { lat: centerLat, lon: centerLon, alt: 0, command: 16 /* Seq 0: Home point (ArduPilot standard) */ },
-        { lat: centerLat, lon: centerLon, alt: targetAlt, command: 22 /* Seq 1: MAV_CMD_NAV_TAKEOFF */ },
-        ...waypoints.map((wp) => ({ lat: wp.lat, lon: wp.lon, alt: wp.alt, command: 16 /* MAV_CMD_NAV_WAYPOINT */ })),
-        { lat: centerLat, lon: centerLon, alt: targetAlt, command: 16 /* MAV_CMD_NAV_WAYPOINT */ },
-        { lat: centerLat, lon: centerLon, alt: 0, command: 21 /* MAV_CMD_NAV_LAND */ }
+        { seq: 0, lat: centerLat, lon: centerLon, alt: 0, command: 16 /* Home */, frame: 0, autocontinue: 1, current: 0 },
+        { seq: 1, lat: centerLat, lon: centerLon, alt: targetAlt, command: 22 /* Takeoff */, frame: 6, autocontinue: 1, current: 0 },
+        ...waypoints.map((wp, idx) => ({
+          seq: 2 + idx,
+          lat: wp.lat,
+          lon: wp.lon,
+          alt: wp.alt,
+          command: 16 /* Waypoint */,
+          frame: 6,
+          param2: 1.0,
+          autocontinue: 1,
+          current: 0
+        })),
+        { seq: 2 + waypoints.length, lat: centerLat, lon: centerLon, alt: targetAlt, command: 16, frame: 6, autocontinue: 1, current: 0 },
+        { seq: 3 + waypoints.length, lat: centerLat, lon: centerLon, alt: 0, command: 21 /* Land */, frame: 0, autocontinue: 1, current: 0 }
       ];
-      await mavlinkService.uploadMissionWaypoints(missionPayload);
+      const uploadRes = await mavlinkService.uploadMissionWaypoints(missionPayload);
+      if (!uploadRes.success) {
+        console.warn('[CIRCLE_TEST] MAVLink mission upload warning:', uploadRes.message);
+      }
     } catch (e) {
       console.warn('[CIRCLE_TEST] MAVLink mission upload notice:', e);
     }

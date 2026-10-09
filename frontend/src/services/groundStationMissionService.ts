@@ -681,6 +681,10 @@ export class GroundStationMissionService {
         } else if (wp.action === 'LOITER') {
           cmd = 19; // MAV_CMD_NAV_LOITER_TIME
           p1 = p1 || 5; // Default 5s loiter
+        } else if (wp.action === 'ORBIT') {
+          cmd = 16; // MAV_CMD_NAV_WAYPOINT
+          frame = 6; // MAV_FRAME_GLOBAL_RELATIVE_ALT_INT
+          p2 = (wp as any).param2 || 1.0; // 1m acceptance radius for tight circle tracking
         }
 
         missionPayload.push({

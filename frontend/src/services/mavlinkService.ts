@@ -738,7 +738,7 @@ class MAVLinkService {
       return 'Battery Failsafe: Voltage is below safe arming threshold. Replace or charge LiPo battery.';
     }
     if (lower.includes('rc') || lower.includes('radio') || lower.includes('throttle')) {
-      return 'RC / Radio Check: Ensure RC transmitter is powered ON and throttle stick is centered or zeroed.';
+      return 'Radio Failsafe (RC / Radio Check: Ensure RC transmitter is powered ON and throttle stick centered. If testing autonomous GCS/bench without RC, set FS_THR_ENABLE = 0 and ARMING_CHECK = 0 in Mission Planner).';
     }
     if (lower.includes('accel') || lower.includes('ahrs') || lower.includes('inertial')) {
       return 'IMU / Accel Check: Keep vehicle completely stationary on level ground.';
@@ -1366,7 +1366,7 @@ class MAVLinkService {
           const frame = view.getUint8(34);
           const autocontinue = view.getUint8(36);
 
-          this.downloadedMissionItems.push({
+          const newItem: MavlinkMissionItem = {
             seq,
             command: cmd,
             frame,
@@ -1378,7 +1378,15 @@ class MAVLinkService {
             lon,
             alt,
             autocontinue
-          });
+          };
+
+          const existingIdx = this.downloadedMissionItems.findIndex((it) => it.seq === seq);
+          if (existingIdx >= 0) {
+            this.downloadedMissionItems[existingIdx] = newItem;
+          } else {
+            this.downloadedMissionItems.push(newItem);
+            this.downloadedMissionItems.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+          }
 
           this.logDiagnostic('MAVLINK', `[MAVLINK] RX ${msgId === 73 ? 'MISSION_ITEM_INT' : 'MISSION_ITEM'} seq=${seq} cmd=${cmd} lat=${lat.toFixed(6)} lon=${lon.toFixed(6)} alt=${alt.toFixed(1)}m`, 'info');
 
@@ -2619,7 +2627,8 @@ class MAVLinkService {
             onProgress?.('Verifying mission readback from Pixhawk...', items.length, items.length);
             this.logDiagnostic('MAVLINK', `[MISSION READBACK] Starting verification readback for ${items.length} items...`, 'info');
             try {
-              const readback = await this.downloadMissionWaypoints(6000);
+              const readbackTimeout = Math.max(8000, items.length * 600);
+              const readback = await this.downloadMissionWaypoints(readbackTimeout);
               if (readback.success) {
                 if (readback.items.length !== items.length) {
                   const mismatchErr = `Readback count mismatch: Pixhawk stored ${readback.items.length} items, expected ${items.length}.`;
@@ -2638,20 +2647,29 @@ class MAVLinkService {
                     resolve({ success: false, message: mismatchErr, upload_id });
                     return;
                   }
-                  if (sent.command && recv.command && sent.command !== recv.command) {
+
+                  // Command verification (Seq 0 may be reported as 16 or 0 by ArduPilot Home)
+                  if (i > 0 && sent.command && recv.command && sent.command !== recv.command) {
                     const mismatchErr = `Readback command mismatch at waypoint #${i}: expected ${sent.command}, FC stored ${recv.command}.`;
                     this.logDiagnostic('ERROR', mismatchErr, 'error');
                     resolve({ success: false, message: mismatchErr, upload_id });
                     return;
                   }
-                  const latDiff = Math.abs(sent.lat - recv.lat);
-                  const lonDiff = Math.abs(sent.lon - recv.lon);
-                  const altDiff = Math.abs(sent.alt - recv.alt);
-                  if (latDiff > 0.0005 || lonDiff > 0.0005 || altDiff > 2.0) {
-                    const mismatchErr = `Readback waypoint data mismatch at #${i}: coords (${recv.lat.toFixed(6)}, ${recv.lon.toFixed(6)}, ${recv.alt}m) do not match expected (${sent.lat.toFixed(6)}, ${sent.lon.toFixed(6)}, ${sent.alt}m).`;
-                    this.logDiagnostic('ERROR', mismatchErr, 'error');
-                    resolve({ success: false, message: mismatchErr, upload_id });
-                    return;
+
+                  // Coordinate & altitude verification:
+                  // 1. Seq 0: ArduPilot stores the Home position with absolute AMSL altitude (not relative alt). Skip alt check for Seq 0.
+                  // 2. RTL (cmd 20): ArduPilot returns to home and may report (0, 0) coordinates.
+                  // 3. Navigation waypoints (i > 0 and cmd !== 20): Enforce strict coordinates (< 0.0005 deg) and altitude (< 2.0m).
+                  if (i > 0 && sent.command !== 20) {
+                    const latDiff = Math.abs(sent.lat - recv.lat);
+                    const lonDiff = Math.abs(sent.lon - recv.lon);
+                    const altDiff = Math.abs(sent.alt - recv.alt);
+                    if (latDiff > 0.0005 || lonDiff > 0.0005 || altDiff > 2.0) {
+                      const mismatchErr = `Readback waypoint data mismatch at #${i}: coords (${recv.lat.toFixed(6)}, ${recv.lon.toFixed(6)}, ${recv.alt}m) do not match expected (${sent.lat.toFixed(6)}, ${sent.lon.toFixed(6)}, ${sent.alt}m).`;
+                      this.logDiagnostic('ERROR', mismatchErr, 'error');
+                      resolve({ success: false, message: mismatchErr, upload_id });
+                      return;
+                    }
                   }
                 }
 

@@ -239,6 +239,35 @@ export const PreArmChecksPanel: React.FC<PreArmChecksPanelProps> = ({
     });
   }
 
+  // 6. RC Radio / Failsafe Status
+  const isRadioFailsafe = (connectionState.preArmFailReason || '').toLowerCase().includes('radio failsafe') ||
+                          (connectionState.preArmFailReason || '').toLowerCase().includes('rc / radio');
+  if (isRadioFailsafe) {
+    items.push({
+      id: 'rc_failsafe_blocking',
+      category: 'RC / RADIO LINK',
+      title: 'Radio Failsafe Active (Pixhawk Disarmed)',
+      description: 'Pixhawk detected no RC signal. If using RC controller: turn transmitter ON and calibrate sticks. If flying autonomous GCS/bench without RC: set FS_THR_ENABLE = 0 and ARMING_CHECK = 0 in Mission Planner.',
+      status: 'BLOCKING'
+    });
+  } else if (connectionState.rcSignalDetected) {
+    items.push({
+      id: 'rc_ok',
+      category: 'RC / RADIO LINK',
+      title: 'RC Signal Detected',
+      description: `RC transmitter communication active (RSSI: ${telemetry.rcRssi || 'OK'}).`,
+      status: 'PASS'
+    });
+  } else {
+    items.push({
+      id: 'rc_info',
+      category: 'RC / RADIO LINK',
+      title: 'RC Controller / GCS Mode',
+      description: 'If operating without physical RC controller, ensure FS_THR_ENABLE = 0 and ARMING_CHECK = 0 are configured in Mission Planner.',
+      status: 'INFO'
+    });
+  }
+
   // Exact Counter Metrics (Replaces misleading "0 errors" with transparent telemetry stats)
   const preArmFailuresCount = preArmMessages.length + (connectionState.preArmFailReason ? 1 : 0);
   const totalPixhawkMessages = connectionState.statusHistory?.length || 0;

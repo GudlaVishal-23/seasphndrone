@@ -2509,7 +2509,7 @@ class MAVLinkService {
 
         const isMav2 = this.connectionState.mavlinkVersion === 'MAVLink 2.0';
         const targetSys = this.connectionState.systemId || 1;
-        const targetComp = this.connectionState.componentId || 1;
+        const targetComp = 0; // Target component 0 (MAV_COMP_ID_ALL) ensures autopilot always accepts
 
         const payload = new Uint8Array(isMav2 ? 3 : 2);
         payload[0] = targetSys;
@@ -2522,10 +2522,18 @@ class MAVLinkService {
           ? this.buildMavlink2Frame(45 /* MISSION_CLEAR_ALL */, payload)
           : this.buildMavlink1Frame(45 /* MISSION_CLEAR_ALL */, payload);
 
-        usbHostService.sendBytes(packet).then((ok) => {
+        usbHostService.sendBytes(packet).then(async (ok) => {
           if (ok) {
             this.connectionState.bytesSent += packet.length;
             this.logDiagnostic('MAVLINK', `[MAVLINK] TX MISSION_CLEAR_ALL target=${targetSys}/${targetComp} type=MISSION`, 'info');
+            // Dual frame redundancy: also send MAVLink 1 frame
+            if (isMav2) {
+              const m1Payload = new Uint8Array(2);
+              m1Payload[0] = targetSys;
+              m1Payload[1] = 0;
+              const m1Packet = this.buildMavlink1Frame(45 /* MISSION_CLEAR_ALL */, m1Payload);
+              await usbHostService.sendBytes(m1Packet);
+            }
           }
         }).catch((err) => {
           console.error('[MISSION_CLEAR_ALL TX Error]', err);
@@ -2742,13 +2750,13 @@ class MAVLinkService {
           }
         }, overallTimeout);
 
-        // Broadcaster for MISSION_COUNT with retry (1200ms per attempt up to 5 attempts)
+        // Broadcaster for MISSION_COUNT with retry (1200ms per attempt up to 7 attempts)
         const isMav2 = this.connectionState.mavlinkVersion === 'MAVLink 2.0';
         const targetSys = this.connectionState.systemId || 1;
-        const targetComp = this.connectionState.componentId || 1;
+        const targetComp = 0; // Target component 0 (MAV_COMP_ID_ALL) ensures autopilot always accepts
 
         let countAttempts = 0;
-        const maxCountAttempts = 5;
+        const maxCountAttempts = 7;
 
         const sendCountPacket = async () => {
           if (this.missionTransferActive || !this.missionUploadResolver) {
@@ -2771,6 +2779,19 @@ class MAVLinkService {
 
             await usbHostService.sendBytes(packet);
             this.connectionState.bytesSent += packet.length;
+
+            // Dual frame redundancy: also dispatch MAVLink 1 frame (count, sys, comp = 4 bytes)
+            // Pixhawk on any firmware version (MAVLink 1 or 2) accepts standard MAVLink 1 MISSION_COUNT
+            if (isMav2) {
+              const m1Payload = new Uint8Array(4);
+              const m1View = new DataView(m1Payload.buffer);
+              m1View.setUint16(0, items.length, true);
+              m1View.setUint8(2, targetSys);
+              m1View.setUint8(3, 0);
+              const m1Packet = this.buildMavlink1Frame(44 /* MISSION_COUNT */, m1Payload);
+              await usbHostService.sendBytes(m1Packet);
+            }
+
             this.logDiagnostic(
               'MAVLINK',
               `[MAVLINK] TX MISSION_COUNT count=${items.length} target=${targetSys}/${targetComp} type=MISSION (Attempt ${countAttempts}/${maxCountAttempts})`,
@@ -2794,7 +2815,7 @@ class MAVLinkService {
                   const age = ((Date.now() - this.connectionState.lastHeartbeat) / 1000).toFixed(1);
                   res({
                     success: false,
-                    message: `Upload failed: Pixhawk did not respond to MISSION_COUNT after ${maxCountAttempts} attempts (last RX heartbeat: ${age}s ago).`
+                    message: `Upload failed: Pixhawk did not respond to MISSION_COUNT after ${maxCountAttempts} attempts (last RX heartbeat: ${age}s ago). Verify ESP32 TX pin is wired to Pixhawk TELEM1 RX (Pin 3), set BRD_SER1_RTSCTS=0, and disconnect Mission Planner USB.`
                   });
                 }
               }, 1800);

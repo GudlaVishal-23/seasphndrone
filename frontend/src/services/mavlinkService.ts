@@ -2525,7 +2525,7 @@ class MAVLinkService {
 
         const isMav2 = this.connectionState.mavlinkVersion === 'MAVLink 2.0';
         const targetSys = this.connectionState.systemId || 1;
-        const targetComp = 0; // Target component 0 (MAV_COMP_ID_ALL) ensures autopilot always accepts
+        const targetComp = this.connectionState.componentId || 1; // Target autopilot component (MAV_COMP_ID_AUTOPILOT1)
 
         const payload = new Uint8Array(isMav2 ? 3 : 2);
         payload[0] = targetSys;
@@ -2542,14 +2542,6 @@ class MAVLinkService {
           if (ok) {
             this.connectionState.bytesSent += packet.length;
             this.logDiagnostic('MAVLINK', `[MAVLINK] TX MISSION_CLEAR_ALL target=${targetSys}/${targetComp} type=MISSION`, 'info');
-            // Dual frame redundancy: also send MAVLink 1 frame
-            if (isMav2) {
-              const m1Payload = new Uint8Array(2);
-              m1Payload[0] = targetSys;
-              m1Payload[1] = 0;
-              const m1Packet = this.buildMavlink1Frame(45 /* MISSION_CLEAR_ALL */, m1Payload);
-              await usbHostService.sendBytes(m1Packet);
-            }
           }
         }).catch((err) => {
           console.error('[MISSION_CLEAR_ALL TX Error]', err);
@@ -2638,12 +2630,8 @@ class MAVLinkService {
     this.clearMissionUploadTimers();
 
     if (this.connectionState.isRealHardware) {
-      // 4. Pre-Upload Wipe: Clear old mission state with MISSION_CLEAR_ALL
-      onProgress?.('Clearing flight controller mission table...', 0, items.length);
-      this.addStatusMessage('NOTICE', 5, 'Clearing existing Pixhawk mission table...');
-      this.logDiagnostic('MAVLINK', `[MISSION UPLOAD] Sending MISSION_CLEAR_ALL (upload_id=${upload_id})...`, 'info');
-      await this.clearMissionWaypoints();
-      await new Promise((r) => setTimeout(r, 200));
+      onProgress?.('Initiating mission upload to Pixhawk...', 0, items.length);
+      this.logDiagnostic('MAVLINK', `[MISSION UPLOAD] Initiating upload of ${items.length} waypoints (upload_id=${upload_id})...`, 'info');
 
       this.pendingMissionItems = items;
       this.lastRequestedSeq = -1;
@@ -2766,10 +2754,9 @@ class MAVLinkService {
           }
         }, overallTimeout);
 
-        // Broadcaster for MISSION_COUNT with retry (1200ms per attempt up to 7 attempts)
         const isMav2 = this.connectionState.mavlinkVersion === 'MAVLink 2.0';
         const targetSys = this.connectionState.systemId || 1;
-        const targetComp = 0; // Target component 0 (MAV_COMP_ID_ALL) ensures autopilot always accepts
+        const targetComp = this.connectionState.componentId || 1; // Target autopilot component (MAV_COMP_ID_AUTOPILOT1)
 
         let countAttempts = 0;
         const maxCountAttempts = 7;
@@ -2795,18 +2782,6 @@ class MAVLinkService {
 
             await usbHostService.sendBytes(packet);
             this.connectionState.bytesSent += packet.length;
-
-            // Dual frame redundancy: also dispatch MAVLink 1 frame (count, sys, comp = 4 bytes)
-            // Pixhawk on any firmware version (MAVLink 1 or 2) accepts standard MAVLink 1 MISSION_COUNT
-            if (isMav2) {
-              const m1Payload = new Uint8Array(4);
-              const m1View = new DataView(m1Payload.buffer);
-              m1View.setUint16(0, items.length, true);
-              m1View.setUint8(2, targetSys);
-              m1View.setUint8(3, 0);
-              const m1Packet = this.buildMavlink1Frame(44 /* MISSION_COUNT */, m1Payload);
-              await usbHostService.sendBytes(m1Packet);
-            }
 
             this.logDiagnostic(
               'MAVLINK',
@@ -2880,8 +2855,12 @@ class MAVLinkService {
     view.setUint8(33, this.connectionState.componentId || 1);
 
     // Frame: Seq 0 is Home (MAV_FRAME_GLOBAL = 0), waypoints are MAV_FRAME_GLOBAL_RELATIVE_ALT = 3
-    const defaultFrame = (seq === 0) ? 0 /* MAV_FRAME_GLOBAL */ : 3 /* MAV_FRAME_GLOBAL_RELATIVE_ALT */;
-    const frame = item.frame !== undefined ? item.frame : defaultFrame;
+    let frame = item.frame !== undefined ? item.frame : (seq === 0 ? 0 /* MAV_FRAME_GLOBAL */ : 3 /* MAV_FRAME_GLOBAL_RELATIVE_ALT */);
+    if (frame === 6 /* MAV_FRAME_GLOBAL_RELATIVE_ALT_INT */) {
+      frame = 3 /* MAV_FRAME_GLOBAL_RELATIVE_ALT */;
+    } else if (frame === 5 /* MAV_FRAME_GLOBAL_INT */) {
+      frame = 0 /* MAV_FRAME_GLOBAL */;
+    }
     view.setUint8(34, frame);
     view.setUint8(35, item.current || 0 /* current: 0 during upload */);
     view.setUint8(36, item.autocontinue !== undefined ? item.autocontinue : 1);
@@ -2933,8 +2912,10 @@ class MAVLinkService {
     view.setUint8(33, this.connectionState.componentId || 1);
 
     // Frame: Seq 0 is Home (MAV_FRAME_GLOBAL = 0), waypoints are MAV_FRAME_GLOBAL_RELATIVE_ALT_INT = 6
-    const defaultFrame = (seq === 0) ? 0 /* MAV_FRAME_GLOBAL */ : 6 /* MAV_FRAME_GLOBAL_RELATIVE_ALT_INT */;
-    const frame = item.frame !== undefined ? item.frame : defaultFrame;
+    let frame = item.frame !== undefined ? item.frame : (seq === 0 ? 0 /* MAV_FRAME_GLOBAL */ : 6 /* MAV_FRAME_GLOBAL_RELATIVE_ALT_INT */);
+    if (frame === 3 /* MAV_FRAME_GLOBAL_RELATIVE_ALT */) {
+      frame = 6 /* MAV_FRAME_GLOBAL_RELATIVE_ALT_INT */;
+    }
     view.setUint8(34, frame);
     view.setUint8(35, item.current || 0);
     view.setUint8(36, item.autocontinue !== undefined ? item.autocontinue : 1);

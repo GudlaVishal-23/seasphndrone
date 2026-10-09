@@ -2,7 +2,7 @@
  * =====================================================================================
  * SAE INDIA — Autonomous Drone Rescue System
  * ESP32-S3 Cloud Relay Direct WSS Client (Standalone / Zero-Laptop Mode)
- * With Comprehensive Live Serial Monitor Diagnostics
+ * With Comprehensive Live Serial Monitor Diagnostics & Auto-Baud Detection
  * =====================================================================================
  *
  * HARDWARE: ESP32-S3
@@ -10,7 +10,7 @@
  * EXACT WIRING:
  *   PIXHAWK TELEM2                     ESP32-S3
  *   -----------------                  -----------------
- *   Pin 1  +5V        ───────────────  5V / VIN pin (Supported! Safe when drone LiPo battery is connected)
+ *   Pin 1  +5V        ───────────────  5V / VIN pin (Safe when drone LiPo battery is connected)
  *   Pin 2  TX         ───────────────  GPIO 18 (RX on ESP32-S3)
  *   Pin 3  RX         ───────────────  GPIO 17 (TX on ESP32-S3)
  *   Pin 4  CTS        ───────────────  NC (Not connected)
@@ -30,22 +30,24 @@
  *
  * MISSION PLANNER PARAMETERS (TELEM2):
  *   SERIAL2_PROTOCOL = 2   (MAVLink 2)
- *   SERIAL2_BAUD     = 57  (57600 baud)
+ *   SERIAL2_BAUD     = 57  (57600 baud) or 115 (115200 baud)
  * =====================================================================================
  */
 
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoWebsockets.h>
+#include <time.h>
+#include <sys/time.h>
 
 // =====================================================================================
 // 1. WI-FI CONFIGURATION (Phone Hotspot or Field Wi-Fi)
 // =====================================================================================
-// Change to your Phone's Personal Hotspot or home Wi-Fi credentials:
+// Primary Phone Hotspot / Wi-Fi credentials:
 const char* WIFI_SSID     = "drone123";      // <-- Enter your hotspot/Wi-Fi name
 const char* WIFI_PASSWORD = "drone@123";   // <-- Enter your Wi-Fi password
 
-// Optional Fallback Wi-Fi
+// Optional Fallback Wi-Fi (Home / Lab / Backup hotspot):
 const char* FALLBACK_SSID = "";
 const char* FALLBACK_PASS = "";
 
@@ -56,9 +58,12 @@ const char* RELAY_HOST    = "seasphndrone-backend.onrender.com";
 const uint16_t RELAY_PORT = 443;
 const char* RELAY_PATH    = "/connector?token=saeindia_sec_99348a7b1c0e";
 const char* RELAY_WSS_URL = "wss://seasphndrone-backend.onrender.com/connector?token=saeindia_sec_99348a7b1c0e";
+const char* RELAY_TOKEN   = "saeindia_sec_99348a7b1c0e";
 
-// Google Trust Services (GTS Root R4) Root CA used by Render.com
-const char RENDER_CA_CERT[] PROGMEM = 
+// Combined Root CA Certificate Bundle trusted by Render.com & Cloudflare:
+// 1. Google Trust Services (GTS Root R4) - Cross-signed by GlobalSign
+// 2. GlobalSign Root CA
+const char RENDER_CA_BUNDLE[] PROGMEM = 
 "-----BEGIN CERTIFICATE-----\n"
 "MIIDejCCAmKgAwIBAgIQf+UwvzMTQ77dghYQST2KGzANBgkqhkiG9w0BAQsFADBX\n"
 "MQswCQYDVQQGEwJCRTEZMBcGA1UEChMQR2xvYmFsU2lnbiBudi1zYTEQMA4GA1UE\n"
@@ -79,10 +84,7 @@ const char RENDER_CA_CERT[] PROGMEM =
 "kGN+hr/W5GvT1tMBjgWKZ1i4//emhA1JG1BbPzoLJQvyEotc03lXjTaCzv8mEbep\n"
 "8RqZ7a2CPsgRbuvTPBwcOMBBmuFeU88+FSBX6+7iP0il8b4Z0QFqIwwMHfs/L6K1\n"
 "vepuoxtGzi4CZ68zJpiq1UvSqTbFJjtbD4seiMHl\n"
-"-----END CERTIFICATE-----\n";
-
-// GlobalSign Root CA fallback
-const char GLOBALSIGN_ROOT_CA[] PROGMEM =
+"-----END CERTIFICATE-----\n"
 "-----BEGIN CERTIFICATE-----\n"
 "MIIDdTCCAl2gAwIBAgILBAAAAAABFUtaw5QwDQYJKoZIhvcNAQEFBQAwVzELMAkG\n"
 "A1UEBhMCQkUxGTAXBgNVBAoTEEdsb2JhbFNpZ24gbnYtc2ExEDAOBgNVBAsTB1Jv\n"
@@ -106,7 +108,7 @@ const char GLOBALSIGN_ROOT_CA[] PROGMEM =
 "-----END CERTIFICATE-----\n";
 
 // =====================================================================================
-// 3. PIXHAWK TELEM2 UART CONFIGURATION (YOUR EXACT WIRING)
+// 3. PIXHAWK TELEM2 UART CONFIGURATION
 // =====================================================================================
 #define PIXHAWK_RX_PIN    18     // ESP32-S3 GPIO 18 connects to Pixhawk TELEM2 Pin 2 (TX)
 #define PIXHAWK_TX_PIN    17     // ESP32-S3 GPIO 17 connects to Pixhawk TELEM2 Pin 3 (RX)
@@ -137,8 +139,10 @@ const unsigned long PING_INTERVAL_MS = 15000;
 unsigned long lastReconnectAttempt = 0;
 const unsigned long RECONNECT_INTERVAL_MS = 3000;
 
-unsigned long lastWiFiReconnectAttempt = 0;
-const unsigned long WIFI_RECONNECT_INTERVAL_MS = 6000;
+// Wi-Fi Connection Management
+unsigned long wifiConnectionStartTime = 0;
+uint8_t wifiAttemptCount = 0;
+bool usingFallback = false;
 
 // Periodic 3-second live diagnostic print timer
 unsigned long lastDiagnosticPrint = 0;
@@ -167,6 +171,24 @@ void updateLED(int mode) {
     digitalWrite(STATUS_LED_PIN, LOW);  // OFF
   } else {
     digitalWrite(STATUS_LED_PIN, (millis() / 250) % 2); // Blinking (Connecting)
+  }
+}
+
+// =====================================================================================
+// BASELINE SYSTEM CLOCK INITIALIZATION (CRITICAL FOR SSL/TLS VALIDATION)
+// =====================================================================================
+// When ESP32 powers on, RTC clock is at Epoch 0 (1970). Any TLS certificate with
+// 'NotBefore' in 2023-2026 will immediately fail validation if system time is 1970!
+// This function sets a sane 2026 baseline timestamp so TLS works immediately even
+// if mobile hotspot blocks NTP UDP port 123.
+void ensureSaneSystemClock() {
+  time_t now = time(nullptr);
+  if (now < 1704067200) { // If before Jan 1, 2024
+    struct timeval tv;
+    tv.tv_sec = 1775730000; // Baseline epoch (Year 2026)
+    tv.tv_usec = 0;
+    settimeofday(&tv, nullptr);
+    Serial.println("🕒 [TIME] Initialized baseline system clock (Year 2026) for instant TLS validation.");
   }
 }
 
@@ -214,25 +236,55 @@ void onEventsCallback(WebsocketsEvent event, String data) {
 }
 
 // =====================================================================================
-// WI-FI CONNECTION HELPER (NON-BLOCKING)
+// WI-FI SCANNER DIAGNOSTIC HELPER
 // =====================================================================================
+void scanVisibleNetworks() {
+  Serial.println("\n🔍 [WIFI SCAN] Scanning visible 2.4 GHz networks in the air...");
+  int n = WiFi.scanNetworks(false, false, false, 300);
+  if (n <= 0) {
+    Serial.println("   ❌ No 2.4 GHz Wi-Fi networks found!");
+    Serial.println("   👉 iPhone Users: Turn ON 'Maximize Compatibility' in Personal Hotspot settings!");
+    Serial.println("   👉 Android Users: Set Hotspot band to '2.4 GHz' (ESP32 cannot see 5 GHz)!");
+  } else {
+    Serial.printf("   Found %d networks:\n", n);
+    for (int i = 0; i < n; ++i) {
+      Serial.printf("   %2d) '%s' (Signal: %d dBm) %s\n",
+                    i + 1,
+                    WiFi.SSID(i).c_str(),
+                    WiFi.RSSI(i),
+                    WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "[OPEN]" : "[SECURED]");
+    }
+  }
+  WiFi.scanDelete();
+  Serial.println("---------------------------------------------------------");
+}
+
+// =====================================================================================
+// WI-FI CONNECTION HELPER (ROBUST & NON-BLOCKING)
+// =====================================================================================
+void startWiFiConnection(const char* ssid, const char* pass) {
+  Serial.println("---------------------------------------------------------");
+  Serial.printf("📡 [WIFI] Initiating connection to SSID: '%s' ...\n", ssid);
+  Serial.println("---------------------------------------------------------");
+  
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(ssid, pass);
+  wifiConnectionStartTime = millis();
+}
+
 void connectToWiFi(bool isInitialSetup = false) {
   if (WiFi.status() == WL_CONNECTED) return;
 
-  Serial.println("---------------------------------------------------------");
-  Serial.printf("📡 [WIFI] Connecting to SSID: '%s' ...\n", WIFI_SSID);
-  Serial.println("---------------------------------------------------------");
-  
-  WiFi.disconnect(true);
-  delay(50);
-  WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  const char* activeSSID = usingFallback ? FALLBACK_SSID : WIFI_SSID;
+  const char* activePass = usingFallback ? FALLBACK_PASS : WIFI_PASSWORD;
+
+  startWiFiConnection(activeSSID, activePass);
 
   if (isInitialSetup) {
-    // During boot, give up to 6 seconds for quick connection
+    // Give up to 8 seconds for initial fast connection
     unsigned long startAttempt = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 6000) {
+    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 8000) {
       delay(250);
       Serial.print(".");
       updateLED(1);
@@ -241,26 +293,65 @@ void connectToWiFi(bool isInitialSetup = false) {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    // CRITICAL: Disable ESP32 802.11 modem sleep to eliminate DTIM jitter & keep latency <5ms
+    // Disable ESP32 802.11 modem sleep to eliminate DTIM jitter & keep latency <5ms
     WiFi.setSleep(false);
     Serial.println("🟢 [WIFI] CONNECTED SUCCESSFULLY!");
     Serial.printf("📍 [WIFI] IP Address:    %s\n", WiFi.localIP().toString().c_str());
     Serial.printf("📶 [WIFI] Signal (RSSI):  %d dBm\n", WiFi.RSSI());
     Serial.printf("🚪 [WIFI] Gateway:        %s\n", WiFi.gatewayIP().toString().c_str());
     Serial.printf("🔍 [WIFI] DNS Server:    %s\n", WiFi.dnsIP().toString().c_str());
-    Serial.println("⏳ [NTP] Synchronizing network time for TLS certificate validation...");
+    
+    // Ensure system clock has valid timestamp for TLS
+    ensureSaneSystemClock();
+
+    Serial.println("⏳ [NTP] Synchronizing network time...");
     configTime(0, 0, "pool.ntp.org", "time.google.com");
     Serial.println("---------------------------------------------------------");
   } else if (isInitialSetup) {
-    Serial.println("⚠️ [WIFI PENDING] Phone hotspot not yet connected. Will auto-retry in background...");
-    Serial.println("   👉 Ensure Phone Personal Hotspot is ON with 2.4 GHz ('Maximize Compatibility').");
-    Serial.printf("   👉 SSID: '%s' | Password: '%s'\n", WIFI_SSID, WIFI_PASSWORD);
+    Serial.println("⚠️ [WIFI PENDING] Hotspot not yet connected. Will retry in background.");
+    Serial.println("   👉 iPhone: Ensure 'Maximize Compatibility' is enabled.");
+    Serial.println("   👉 Android: Ensure Hotspot band is set to 2.4 GHz.");
+    Serial.printf("   👉 Active SSID: '%s'\n", activeSSID);
     Serial.println("---------------------------------------------------------");
+    scanVisibleNetworks();
+  }
+}
+
+// Background Wi-Fi monitor called from loop()
+void handleWiFiMaintenance() {
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiAttemptCount = 0;
+    return;
+  }
+
+  updateLED(1);
+
+  // If disconnected for > 15 seconds, switch between primary and fallback, then retry
+  if (millis() - wifiConnectionStartTime > 15000) {
+    wifiAttemptCount++;
+    Serial.printf("⚠️ [WIFI RETRY] Re-attempting Wi-Fi connection (Attempt #%d)...\n", wifiAttemptCount);
+
+    if (strlen(FALLBACK_SSID) > 0) {
+      usingFallback = !usingFallback;
+    }
+
+    const char* targetSSID = usingFallback ? FALLBACK_SSID : WIFI_SSID;
+    const char* targetPass = usingFallback ? FALLBACK_PASS : WIFI_PASSWORD;
+
+    WiFi.disconnect(false); // Soft disconnect without resetting RF calibrations
+    delay(100);
+    startWiFiConnection(targetSSID, targetPass);
+
+    // If 3 failed attempts, scan the air to assist troubleshooting
+    if (wifiAttemptCount >= 3) {
+      wifiAttemptCount = 0;
+      scanVisibleNetworks();
+    }
   }
 }
 
 // =====================================================================================
-// CLOUD RELAY CONNECTION HELPER
+// CLOUD RELAY CONNECTION HELPER (BULLETPROOF SSL/TLS)
 // =====================================================================================
 void connectToCloudRelay() {
   if (WiFi.status() != WL_CONNECTED) return;
@@ -278,12 +369,25 @@ void connectToCloudRelay() {
   }
   Serial.printf("🌐 [DNS OK] %s -> %s\n", RELAY_HOST, relayIP.toString().c_str());
 
+  // 2. Ensure baseline clock is initialized so TLS certificate is not rejected as 'not yet valid'
+  ensureSaneSystemClock();
+
   Serial.println("☁️  [WSS] Connecting to Render Cloud Relay via SSL...");
   Serial.printf("🔗 [WSS] URL: %s\n", RELAY_WSS_URL);
   
-  // Enable Insecure TLS mode (bypasses mobile hotspot NTP time lag and GTS/Cloudflare CA date check)
-  wsClient.setInsecure();
+  // 3. Configure CA Certificate Bundle for Render.com (GTS Root R4 + GlobalSign Root CA)
+  wsClient.setCACert(RENDER_CA_BUNDLE);
+  wsClient.addHeader("x-relay-token", RELAY_TOKEN);
+
+  // 4. Attempt connection using full WSS URL
   bool connected = wsClient.connect(RELAY_WSS_URL);
+
+  // Fallback: If URL connect failed, attempt explicit host, port, path
+  if (!connected) {
+    Serial.println("⚠️  [WSS] URL connect failed, trying explicit host/port/path...");
+    connected = wsClient.connect(RELAY_HOST, RELAY_PORT, RELAY_PATH);
+  }
+
   if (!connected) {
     Serial.println("⚠️  [WSS] Connection attempt failed. Retrying in 3 seconds...");
   }
@@ -320,6 +424,9 @@ void setup() {
     digitalWrite(STATUS_LED_PIN, LOW);
   }
 
+  // Pre-seed baseline system clock for TLS certificate checks
+  ensureSaneSystemClock();
+
   // Initialize Pixhawk Hardware UART1:
   // RX = GPIO 18 (connects to Pixhawk TELEM2 Pin 2 TX)
   // TX = GPIO 17 (connects to Pixhawk TELEM2 Pin 3 RX)
@@ -329,8 +436,9 @@ void setup() {
   PixhawkSerial.setTimeout(5); // Non-blocking 5ms timeout for ultra-low-latency UART reads
   Serial.printf("✅ [TELEM2 UART] Hardware Serial1 ready on GPIO 18 (RX) and GPIO 17 (TX) @ %lu baud.\n", (unsigned long)activePixhawkBaud);
 
-  // Configure WebSocket Client callbacks and SSL mode
-  wsClient.setInsecure();
+  // Configure WebSocket Client callbacks, CA certificates, and headers
+  wsClient.setCACert(RENDER_CA_BUNDLE);
+  wsClient.addHeader("x-relay-token", RELAY_TOKEN);
   wsClient.onMessage(onMessageCallback);
   wsClient.onEvent(onEventsCallback);
 
@@ -342,15 +450,11 @@ void setup() {
 // MAIN LOOP
 // =====================================================================================
 void loop() {
-  // 1. Maintain Wi-Fi Connection (Non-blocking background retry)
-  if (WiFi.status() != WL_CONNECTED) {
-    updateLED(1);
-    if (millis() - lastWiFiReconnectAttempt > WIFI_RECONNECT_INTERVAL_MS) {
-      lastWiFiReconnectAttempt = millis();
-      connectToWiFi(false);
-    }
-  } else {
-    // 2. Maintain WebSocket Connection to Cloud Relay
+  // 1. Maintain Wi-Fi Connection (Non-blocking background monitor)
+  handleWiFiMaintenance();
+
+  // 2. Maintain WebSocket Connection to Cloud Relay
+  if (WiFi.status() == WL_CONNECTED) {
     if (!wsClient.available()) {
       updateLED(1);
       connectToCloudRelay();
@@ -416,4 +520,3 @@ void loop() {
                   totalTxBytesToPixhawk);
   }
 }
-

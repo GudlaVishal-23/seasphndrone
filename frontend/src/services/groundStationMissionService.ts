@@ -670,13 +670,23 @@ export class GroundStationMissionService {
         let p3 = (wp as any).param3 !== undefined ? (wp as any).param3 : 0;
         let p4 = (wp as any).param4 !== undefined ? (wp as any).param4 : 0;
 
+        let lat = wp.lat;
+        let lon = wp.lng;
+        let altVal = wp.altitude || alt;
+
         if (wp.action === 'RTL') {
           cmd = 20; // MAV_CMD_NAV_RETURN_TO_LAUNCH
           frame = 0;
+          lat = 0;
+          lon = 0;
+          altVal = 0;
           p1 = 0; p2 = 0; p3 = 0; p4 = 0;
         } else if (wp.action === 'LAND') {
           cmd = 21; // MAV_CMD_NAV_LAND
           frame = 0;
+          lat = 0;
+          lon = 0;
+          altVal = 0;
           p1 = 0; p2 = 0; p3 = 0; p4 = 0;
         } else if (wp.action === 'LOITER') {
           cmd = 19; // MAV_CMD_NAV_LOITER_TIME
@@ -689,9 +699,9 @@ export class GroundStationMissionService {
 
         missionPayload.push({
           seq: missionPayload.length,
-          lat: wp.lat,
-          lon: wp.lng,
-          alt: wp.altitude || alt,
+          lat,
+          lon,
+          alt: altVal,
           command: cmd,
           frame,
           param1: p1,
@@ -708,8 +718,8 @@ export class GroundStationMissionService {
       if (lastCmd !== 20 && lastCmd !== 21) {
         missionPayload.push({
           seq: missionPayload.length,
-          lat: homeLat,
-          lon: homeLon,
+          lat: 0,
+          lon: 0,
           alt: 0,
           command: 20 /* MAV_CMD_NAV_RETURN_TO_LAUNCH */,
           frame: 0,

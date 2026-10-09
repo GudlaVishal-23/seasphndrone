@@ -2577,7 +2577,8 @@ class MAVLinkService {
       if (typeof it.lat !== 'number' || isNaN(it.lat) || typeof it.lon !== 'number' || isNaN(it.lon) || typeof it.alt !== 'number' || isNaN(it.alt)) {
         return { success: false, message: `Invalid waypoint at index ${i}: Coordinates or altitude contain NaN or non-finite values.` };
       }
-      if (i > 0 && Math.abs(it.lat) < 0.001 && Math.abs(it.lon) < 0.001) {
+      const isZeroCoordAllowed = it.command === 20 /* MAV_CMD_NAV_RETURN_TO_LAUNCH */ || it.command === 21 /* MAV_CMD_NAV_LAND */;
+      if (i > 0 && !isZeroCoordAllowed && Math.abs(it.lat) < 0.001 && Math.abs(it.lon) < 0.001) {
         return { success: false, message: `Invalid waypoint at index ${i}: Latitude and Longitude cannot be (0, 0).` };
       }
       if (it.lat < -90 || it.lat > 90 || it.lon < -180 || it.lon > 180) {

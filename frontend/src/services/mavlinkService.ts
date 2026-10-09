@@ -1641,13 +1641,14 @@ class MAVLinkService {
             activeInstance
           };
 
-          const is3DFix = bestGps.rawFixType >= 3;
-          this.telemetry.gps.fixType = bestGps.fixType;
-          this.telemetry.gps.isLocked = is3DFix && (bestGps.satellites >= 6 || Math.abs(bestGps.lat) > 0.001);
+          const hasCoord = Math.abs(bestGps.lat) > 0.001 && Math.abs(bestGps.lon) > 0.001;
+          const is3DFix = bestGps.rawFixType >= 3 || (hasCoord && bestGps.satellites >= 6);
+          this.telemetry.gps.fixType = is3DFix ? (bestGps.fixType === 'NO_GPS' || bestGps.fixType === 'NO_FIX' ? '3D_FIX' : bestGps.fixType) : bestGps.fixType;
+          this.telemetry.gps.isLocked = (is3DFix || bestGps.rawFixType >= 2) && (bestGps.satellites >= 4 || hasCoord);
           this.telemetry.gps.satellites = bestGps.satellites;
           this.telemetry.gps.hdop = bestGps.hdop;
 
-          if (is3DFix && Math.abs(bestGps.lat) > 0.001 && Math.abs(bestGps.lon) > 0.001) {
+          if (hasCoord) {
             this.telemetry.latitude = bestGps.lat;
             this.telemetry.longitude = bestGps.lon;
             this.telemetry.gps.latitude = bestGps.lat;
@@ -1697,7 +1698,11 @@ class MAVLinkService {
             }
           } else {
             // EKF coordinate fallback: If EKF is not blended yet, keep the best raw GPS lat/lon
-            const activeBestGps = this.gps2Data.satellites >= 6 && Math.abs(this.gps2Data.lat) > 0.001 ? this.gps2Data : this.gps1Data;
+            const activeBestGps = (Math.abs(this.gps2Data.lat) > 0.001 && Math.abs(this.gps2Data.lon) > 0.001)
+              ? this.gps2Data
+              : (Math.abs(this.gps1Data.lat) > 0.001 && Math.abs(this.gps1Data.lon) > 0.001)
+                ? this.gps1Data
+                : (this.gps2Data.satellites > this.gps1Data.satellites ? this.gps2Data : this.gps1Data);
             if (Math.abs(activeBestGps.lat) > 0.001 && Math.abs(activeBestGps.lon) > 0.001) {
               if (Math.abs(this.telemetry.latitude) < 0.001 || Math.abs(this.telemetry.longitude) < 0.001) {
                 this.telemetry.latitude = activeBestGps.lat;
@@ -1944,7 +1949,7 @@ class MAVLinkService {
       view.setUint8(4, streamId);      // req_stream_id (0 = ALL)
       view.setUint8(5, 1);             // start_stop (1 = start)
 
-      const packet = this.buildMavlink1Frame(66 /* REQUEST_DATA_STREAM */, payload);
+      const packet = this.buildMavlinkFrame(66 /* REQUEST_DATA_STREAM */, payload);
       const success = await usbHostService.sendBytes(packet);
       if (success) {
         this.connectionState.bytesSent += packet.length;
@@ -1958,14 +1963,18 @@ class MAVLinkService {
   private lastStreamRequestTime = 0;
   public async requestMavlinkDataStreams() {
     const now = Date.now();
-    if (now - this.lastStreamRequestTime < 2500) return; // Throttled: at most once every 2.5s
+    if (now - this.lastStreamRequestTime < 2000) return; // Throttled: at most once every 2.0s
     this.lastStreamRequestTime = now;
 
-    // 1. Legacy MAVLink 1 stream requests (2: EXTENDED_STATUS, 6: POSITION, 11: EXTRA2)
-    // STREAM_ALL (stream 0) deliberately omitted to avoid flooding 57600 baud serial bandwidth
+    // 1. Universal MAVLink Stream Requests (Required for ArduPilot TELEM1/TELEM2 when SRx rates are 0)
+    // Stream 0 (ALL) signals Pixhawk that a GCS has connected and prompts the flight controller to start streaming
+    await this.sendRequestDataStream(0 /* ALL streams */, 4 /* 4 Hz */);
+    await this.sendRequestDataStream(1 /* RAW_SENSORS */, 2 /* 2 Hz */);
     await this.sendRequestDataStream(2 /* EXTENDED_STATUS: SYS_STATUS & BATTERY_STATUS */, 4 /* 4 Hz */);
-    await this.sendRequestDataStream(6 /* POSITION */, 5 /* 5 Hz */);
+    await this.sendRequestDataStream(6 /* POSITION: GPS_RAW_INT & GLOBAL_POSITION_INT */, 5 /* 5 Hz */);
+    await this.sendRequestDataStream(10 /* EXTRA1: ATTITUDE */, 5 /* 5 Hz */);
     await this.sendRequestDataStream(11 /* EXTRA2: VFR_HUD */, 4 /* 4 Hz */);
+    await this.sendRequestDataStream(12 /* EXTRA3: BATTERY, AHRS */, 2 /* 2 Hz */);
 
     // 2. Modern MAVLink 2 command: MAV_CMD_SET_MESSAGE_INTERVAL (cmd 511)
     // Param 1 = message ID, Param 2 = interval in microseconds
@@ -1976,6 +1985,7 @@ class MAVLinkService {
       await this.sendMavlinkCommandLong(511, 33 /* GLOBAL_POSITION_INT */, 200000 /* 5 Hz */);
       await this.sendMavlinkCommandLong(511, 30 /* ATTITUDE */, 100000 /* 10 Hz */);
       await this.sendMavlinkCommandLong(511, 24 /* GPS_RAW_INT */, 200000 /* 5 Hz */);
+      await this.sendMavlinkCommandLong(511, 124 /* GPS2_RAW (for dual GPS / SERIAL4/5) */, 200000 /* 5 Hz */);
     } catch (e) {
       console.warn('Failed to send MAV_CMD_SET_MESSAGE_INTERVAL', e);
     }

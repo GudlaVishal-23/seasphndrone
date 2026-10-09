@@ -146,12 +146,14 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
     telemetry.pixhawkConnected ||
     Boolean(telemetry.gps?.satellites && telemetry.gps.satellites > 0 && Math.abs(telemetry.latitude) > 0.0001);
 
+  const currentLat = telemetry.latitude || telemetry.gps?.latitude || 0;
+  const currentLon = telemetry.longitude || telemetry.gps?.longitude || 0;
+  const currentSats = telemetry.gps?.satellites || 0;
+
   const hasValidFcGps = Boolean(
-    telemetry.latitude &&
-    telemetry.longitude &&
-    Math.abs(telemetry.latitude) > 0.0001 &&
-    Math.abs(telemetry.longitude) > 0.0001 &&
-    (telemetry.gps?.isLocked || (telemetry.gps?.satellites >= 4 && telemetry.gps?.fixType !== 'NO_FIX' && telemetry.gps?.fixType !== 'NO_GPS'))
+    Math.abs(currentLat) > 0.0001 &&
+    Math.abs(currentLon) > 0.0001 &&
+    (telemetry.gps?.isLocked || (currentSats >= 4 && telemetry.gps?.fixType !== 'NO_FIX' && telemetry.gps?.fixType !== 'NO_GPS'))
   );
 
   // Live Distance between Drone and Home
@@ -1104,20 +1106,24 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
               FC: {isFcConnected ? 'CONNECTED' : 'WAITING FOR FC...'}
             </span>
             <span className="text-slate-600">•</span>
-            <span className={hasValidFcGps ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
-              GPS: {hasValidFcGps ? `${telemetry.gps?.fixType || 'FIXED'} (${telemetry.gps?.satellites || 0} SATS)` : 'WAITING FOR FIX'}
+            <span className={hasValidFcGps ? 'text-emerald-400 font-bold' : currentSats > 0 ? 'text-sky-400 font-bold' : 'text-amber-400 font-bold'}>
+              GPS: {hasValidFcGps
+                ? `${telemetry.gps?.fixType || 'FIXED'} (${currentSats} SATS)`
+                : (currentSats > 0
+                    ? `${telemetry.gps?.fixType || 'ACQUIRING'} (${currentSats} SATS)`
+                    : 'WAITING FOR FIX')}
             </span>
             <span className="text-slate-600">•</span>
             <span>
-              LAT: <span className="font-bold text-sky-300">{hasValidFcGps ? telemetry.latitude.toFixed(6) : '--'}</span>
+              LAT: <span className="font-bold text-sky-300">{Math.abs(currentLat) > 0.0001 ? currentLat.toFixed(6) : '--'}</span>
             </span>
             <span className="text-slate-600">•</span>
             <span>
-              LON: <span className="font-bold text-sky-300">{hasValidFcGps ? telemetry.longitude.toFixed(6) : '--'}</span>
+              LON: <span className="font-bold text-sky-300">{Math.abs(currentLon) > 0.0001 ? currentLon.toFixed(6) : '--'}</span>
             </span>
             <span className="text-slate-600">•</span>
             <span>
-              ALT: <span className="font-bold text-amber-300">{hasValidFcGps ? `${telemetry.altitude.toFixed(1)} m` : '--'}</span>
+              ALT: <span className="font-bold text-amber-300">{telemetry.altitude !== undefined && !isNaN(telemetry.altitude) ? `${telemetry.altitude.toFixed(1)} m` : '--'}</span>
             </span>
             <span className="text-slate-600">•</span>
             <span className="text-slate-300">
@@ -1596,8 +1602,10 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
                     <span>Drone GPS:</span>
                     <span className="font-bold text-sky-300 font-mono">
                       {hasValidFcGps
-                        ? `${telemetry.latitude.toFixed(6)}, ${telemetry.longitude.toFixed(6)}`
-                        : 'Waiting for Fix...'}
+                        ? `${currentLat.toFixed(6)}, ${currentLon.toFixed(6)}`
+                        : (currentSats > 0
+                            ? `Acquiring (${currentSats} Sats)...`
+                            : 'Waiting for Fix...')}
                     </span>
                   </div>
                   {homePoint.isSet && hasValidFcGps && (
@@ -1649,8 +1657,10 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
                     <span className="text-[10px] font-black text-sky-200 uppercase">Start From FC Location</span>
                     <span className="text-[9px] text-slate-400">
                       {hasValidFcGps
-                        ? `${telemetry.latitude.toFixed(5)}, ${telemetry.longitude.toFixed(5)}`
-                        : 'Waiting for FC GPS fix...'}
+                        ? `${currentLat.toFixed(5)}, ${currentLon.toFixed(5)}`
+                        : (currentSats > 0
+                            ? `Locking (${currentSats} Sats)...`
+                            : 'Waiting for FC GPS fix...')}
                     </span>
                   </div>
                 </div>

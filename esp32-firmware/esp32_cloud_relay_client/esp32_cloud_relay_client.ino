@@ -110,6 +110,7 @@ const char GLOBALSIGN_ROOT_CA[] PROGMEM =
 // =====================================================================================
 #define PIXHAWK_RX_PIN    18     // ESP32-S3 GPIO 18 connects to Pixhawk TELEM2 Pin 2 (TX)
 #define PIXHAWK_TX_PIN    17     // ESP32-S3 GPIO 17 connects to Pixhawk TELEM2 Pin 3 (RX)
+#define PIXHAWK_BAUD      57600  // Initial default baud (57600)
 
 // Auto-Baud Detection: Automatically syncs whether TELEM2 is configured for 57600 or 115200 baud!
 const uint32_t TELEM2_BAUDS[] = {57600, 115200};
@@ -310,7 +311,7 @@ void setup() {
   Serial.printf("📋 Hardware Target:     ESP32-S3\n");
   Serial.printf("🔌 Pixhawk TELEM2 RX:   GPIO %d (Connects to Pixhawk TX Pin 2)\n", PIXHAWK_RX_PIN);
   Serial.printf("🔌 Pixhawk TELEM2 TX:   GPIO %d (Connects to Pixhawk RX Pin 3)\n", PIXHAWK_TX_PIN);
-  Serial.printf("⚡ Pixhawk Baud Rate:   %d baud\n", PIXHAWK_BAUD);
+  Serial.printf("⚡ Pixhawk Baud Rate:   %lu baud (Auto-Sync: 57600 / 115200)\n", (unsigned long)activePixhawkBaud);
   Serial.printf("☁️  Cloud Relay Host:   %s\n", RELAY_HOST);
   Serial.println("=========================================================\n");
 

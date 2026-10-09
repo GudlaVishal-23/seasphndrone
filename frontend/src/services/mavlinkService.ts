@@ -1353,7 +1353,7 @@ class MAVLinkService {
       // MISSION_ITEM_INT (msgId = 73) & MISSION_ITEM (msgId = 39) - Received during download/readback
       case 73:
       case 39: {
-        if (this.missionDownloadResolver && payload.length >= 37) {
+        if (this.missionDownloadResolver && payload.length >= 32) {
           const p1 = view.getFloat32(0, true);
           const p2 = view.getFloat32(4, true);
           const p3 = view.getFloat32(8, true);
@@ -1369,8 +1369,8 @@ class MAVLinkService {
           const alt = view.getFloat32(24, true);
           const seq = view.getUint16(28, true);
           const cmd = view.getUint16(30, true);
-          const frame = view.getUint8(34);
-          const autocontinue = view.getUint8(36);
+          const frame = payload.length >= 35 ? view.getUint8(34) : (seq === 0 ? 0 : 6);
+          const autocontinue = payload.length >= 37 ? view.getUint8(36) : 1;
 
           const newItem: MavlinkMissionItem = {
             seq,
@@ -1482,8 +1482,11 @@ class MAVLinkService {
 
       // MISSION_ACK (msgId = 47)
       case 47: {
-        if (payload.length >= 3) {
-          const ackType = view.getUint8(2);
+        // MAVLink 2 zero-byte truncation:
+        // When type = 0 (MAV_MISSION_ACCEPTED) and mission_type = 0, trailing zero bytes are trimmed,
+        // resulting in a 2-byte payload: [target_system, target_component].
+        if (payload.length >= 1) {
+          const ackType = payload.length >= 3 ? view.getUint8(2) : 0;
 
           // Handle MISSION_CLEAR_ALL acknowledgement if pending
           if (this.missionClearResolver) {
@@ -1800,6 +1803,20 @@ class MAVLinkService {
               }
             }
 
+            // Pixhawk explicitly announces "Flight plan received" when all mission items are safely committed to EEPROM
+            if (lower.includes('flight plan received')) {
+              this.logDiagnostic('MAVLINK', `[STATUSTEXT] Pixhawk confirmed: "${text}" ✓`, 'success');
+              if (this.missionUploadResolver) {
+                this.clearMissionUploadTimers();
+                const resolve = this.missionUploadResolver;
+                this.missionUploadResolver = null;
+                resolve({
+                  success: true,
+                  message: `Mission uploaded and verified by Pixhawk (${this.pendingMissionItems?.length || 0} waypoints) ✓`
+                });
+              }
+            }
+
             this.logDiagnostic('MAVLINK', `[STATUSTEXT] [${severity}] ${displayMsg}`, severityLevel <= 3 ? 'error' : severityLevel === 4 ? 'warn' : 'info');
             this.addStatusMessage(severity, severityLevel, displayMsg);
             this.notifyConnection();
@@ -1830,9 +1847,9 @@ class MAVLinkService {
 
       // COMMAND_ACK (msgId = 77)
       case 77: {
-        if (payload.length >= 3) {
+        if (payload.length >= 2) {
           const command = view.getUint16(0, true);
-          const result = view.getUint8(2);
+          const result = payload.length >= 3 ? view.getUint8(2) : 0;
           const progress = payload.length >= 4 ? view.getUint8(3) : 0;
           const resultParam2 = payload.length >= 8 ? view.getInt32(4, true) : 0;
           const resultNames = [

@@ -137,6 +137,9 @@ export interface DroneTelemetry {
   groundSpeed: number;
   verticalSpeed: number;
   heading: number;
+  pitch?: number;
+  roll?: number;
+  satellitesVisible?: number;
   batteryPercent: number;
   batteryVoltage: number;
   batteryCurrent?: number;

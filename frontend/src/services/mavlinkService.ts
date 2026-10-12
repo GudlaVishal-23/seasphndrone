@@ -3136,7 +3136,7 @@ class MAVLinkService {
     }
   }
 
-  private async sendMavlinkCommandLong(
+  public async sendMavlinkCommandLong(
     command: number,
     param1: number = 0,
     param2: number = 0,

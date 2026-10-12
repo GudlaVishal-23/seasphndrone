@@ -145,7 +145,7 @@ export const App: React.FC = () => {
       />
 
       {/* Main Authenticated Dashboard Screen Based on Active Role */}
-      <main className="flex-1 pb-10">
+      <main className={`flex-1 ${currentRole === 'GROUND_STATION' ? 'overflow-hidden' : 'pb-10'}`}>
         {currentRole === 'GROUND_STATION' && (
           <GroundStationDashboard
             telemetry={telemetry}

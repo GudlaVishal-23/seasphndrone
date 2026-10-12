@@ -3,39 +3,54 @@ import { DroneTelemetry, HomePoint, MissionState, PreFlightChecklist as Checklis
 import { PixhawkConnectionState } from '../../types/mavlink';
 import { RunnerLinkState } from '../../types/runner';
 import { mavlinkService } from '../../services/mavlinkService';
-import { MissionTimer } from '../common/MissionTimer';
+import { missionEngine } from '../../services/missionEngine';
+import { runnerCommService } from '../../services/runnerCommService';
+import { audioService } from '../../services/audioService';
+
+// Stitch AI Tactical Cockpit Components
+import { CockpitInstrumentsPanel } from './CockpitInstrumentsPanel';
+import { TacticalCommandRail } from './TacticalCommandRail';
+import { TacticalSideStack } from './TacticalSideStack';
+import { MissionProfileElevationDock } from './MissionProfileElevationDock';
+
+// Workspace & Visual Feed Components
+import { GoogleMapGroundStation } from './GoogleMapGroundStation';
+import { LiveVideoFeed } from './LiveVideoFeed';
+
+// Modals
+import { AutonomousMissionConfigModal } from '../Mission/AutonomousMissionConfigModal';
+import { CircleTestMissionModal } from '../Mission/CircleTestMissionModal';
+import { LoiterTestMissionModal } from '../Mission/LoiterTestMissionModal';
+
+// Detailed Multi-Card View Components
+import { ConnectionStatusDeck } from '../common/ConnectionStatusDeck';
+import { PixhawkConnectionCard } from '../Drone/PixhawkConnectionCard';
+import { AutonomousMissionStatusBar } from '../Mission/AutonomousMissionStatusBar';
 import { TelemetryHUD } from '../common/TelemetryHUD';
 import { StatusBadge } from '../common/StatusBadge';
 import { HomePointSetter } from './HomePointSetter';
 import { PreArmChecksPanel } from '../common/PreArmChecksPanel';
 import { ControlModePanel } from '../common/ControlModePanel';
-import { TacticalMap } from './TacticalMap';
-import { GoogleMapGroundStation } from './GoogleMapGroundStation';
-import { LiveVideoFeed } from './LiveVideoFeed';
-import { ConnectionStatusDeck } from '../common/ConnectionStatusDeck';
-import { PixhawkConnectionCard } from '../Drone/PixhawkConnectionCard';
-import { missionEngine } from '../../services/missionEngine';
-import { AutonomousMissionStatusBar } from '../Mission/AutonomousMissionStatusBar';
-import { AutonomousMissionConfigModal } from '../Mission/AutonomousMissionConfigModal';
+import { MissionTimer } from '../common/MissionTimer';
 import { LoiterTestMissionCard } from '../Mission/LoiterTestMissionCard';
 import { CircleTestMissionCard } from '../Mission/CircleTestMissionCard';
+
 import {
   Play,
   ShieldAlert,
   Power,
-  Loader2,
-  AlertTriangle,
   Sliders,
-  Cpu,
-  ChevronDown,
-  ChevronUp,
-  Clock,
   Settings,
-  MapPin,
   Map as MapIcon,
   Columns,
   Video as VideoIcon,
-  X
+  Gauge,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  Clock,
+  Radio,
+  Cpu
 } from 'lucide-react';
 
 interface GroundStationDashboardProps {
@@ -69,18 +84,25 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
   onEmergencyRTL,
   onSwitchToManual
 }) => {
-  const [isArming, setIsArming] = useState(false);
-  const [isDisarming, setIsDisarming] = useState(false);
-  const [armFeedback, setArmFeedback] = useState<string | null>(null);
-  const [showHardware, setShowHardware] = useState(false);
-  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
-  const [forceBypassChecks, setForceBypassChecks] = useState<boolean>(() => missionEngine.getForceBypassChecks());
-  const [workspaceView, setWorkspaceView] = useState<'MAP' | 'SPLIT' | 'VIDEO'>('MAP');
+  // View Modes: COCKPIT (Default Stitch UI), DETAILED (Multi-card view), SPLIT, VIDEO
+  const [viewMode, setViewMode] = useState<'COCKPIT' | 'DETAILED' | 'SPLIT' | 'VIDEO'>('COCKPIT');
+
+  // Floating Overlay Toggles
+  const [showInstruments, setShowInstruments] = useState<boolean>(true);
   const [isPipVideoVisible, setIsPipVideoVisible] = useState<boolean>(true);
 
-  const missionValidation = missionEngine.validateMission();
-  const missionConfig = missionEngine.getMissionConfig();
+  // Modals
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState<boolean>(false);
+  const [isCircleTestOpen, setIsCircleTestOpen] = useState<boolean>(false);
+  const [isLoiterTestOpen, setIsLoiterTestOpen] = useState<boolean>(false);
 
+  // Arming & Pre-Arm State
+  const [isArming, setIsArming] = useState<boolean>(false);
+  const [isDisarming, setIsDisarming] = useState<boolean>(false);
+  const [armFeedback, setArmFeedback] = useState<string | null>(null);
+  const [forceBypassChecks, setForceBypassChecks] = useState<boolean>(() => missionEngine.getForceBypassChecks());
+
+  // Mission Duration Configuration
   const configuredSecs = missionEngine.getMissionDurationSeconds();
   const [selectedDuration, setSelectedDuration] = useState<number>(configuredSecs);
   const [isCustom, setIsCustom] = useState<boolean>(![60, 120, 180, 300, 600].includes(configuredSecs));
@@ -88,527 +110,484 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
     ![60, 120, 180, 300, 600].includes(configuredSecs) ? String(Math.round(configuredSecs / 60) || 1) : '4'
   );
 
+  const missionValidation = missionEngine.validateMission();
+  const missionConfig = missionEngine.getMissionConfig();
+
   const isMissionActive =
     missionState !== 'IDLE' &&
     missionState !== 'HOME_SET' &&
     missionState !== 'READY' &&
     missionState !== 'MISSION_COMPLETE';
 
-  const handleDurationChange = (seconds: number) => {
-    if (isMissionActive) return;
-    setSelectedDuration(seconds);
-    setIsCustom(false);
-    missionEngine.setMissionDuration(seconds);
-  };
-
-  const handleCustomMinutesChange = (val: string) => {
-    setCustomMinutes(val);
-    const num = parseFloat(val);
-    if (!isNaN(num) && num > 0) {
-      const secs = Math.round(num * 60);
-      setSelectedDuration(secs);
-      missionEngine.setMissionDuration(secs);
-    }
-  };
-
   const isDroneAirborne = telemetry.isArmed && telemetry.altitude > 1.0;
   const isArmed = telemetry.isArmed;
 
   useEffect(() => {
-    if (isArmed) { setIsArming(false); setArmFeedback(null); }
-    else { setIsDisarming(false); }
+    if (isArmed) {
+      setIsArming(false);
+      setArmFeedback(null);
+    } else {
+      setIsDisarming(false);
+    }
   }, [isArmed]);
 
+  // Dedicated Arm Handler with Watchdog
   const handleDedicatedArmClick = async (force: boolean = false) => {
-    if (!pixhawkState.isConnected) { setArmFeedback('Flight controller not connected. Connect first.'); return; }
+    if (!pixhawkState.isConnected) {
+      setArmFeedback('Flight controller not connected. Connect first.');
+      return;
+    }
     setArmFeedback(null);
     setIsArming(true);
     const sent = await mavlinkService.sendArmCommand(force);
-    if (!sent) { setIsArming(false); setArmFeedback('ARM TRANSMISSION FAILED: Check WebSocket / ESP32 TX Link.'); return; }
+    if (!sent) {
+      setIsArming(false);
+      setArmFeedback('ARM TRANSMISSION FAILED: Check WebSocket / ESP32 TX Link.');
+      return;
+    }
     const startWait = Date.now();
     const watchdog = setInterval(() => {
       if (mavlinkService.getTelemetry().isArmed) {
-        setIsArming(false); setArmFeedback(null); clearInterval(watchdog);
+        setIsArming(false);
+        setArmFeedback(null);
+        clearInterval(watchdog);
       } else {
         const s = mavlinkService.getConnectionState();
         const lastAck = s.lastArmCommandAck || s.lastCommandAck;
         if (lastAck && lastAck.command === 400 && lastAck.result !== 0) {
-          setIsArming(false); clearInterval(watchdog);
+          setIsArming(false);
+          clearInterval(watchdog);
           const reason = s.preArmFailReason || (s.statusHistory?.length ? s.statusHistory[0].text : undefined);
           let msg = `ARM REJECTED by Pixhawk (${lastAck.resultName || 'FAILED'})`;
           if (reason) msg += ` — ${reason}`;
-          setArmFeedback(msg); return;
+          setArmFeedback(msg);
+          return;
         }
         if (Date.now() - startWait > 4500) {
-          setIsArming(false); clearInterval(watchdog);
+          setIsArming(false);
+          clearInterval(watchdog);
           setArmFeedback(s.preArmFailReason ? `ARM REJECTED: ${s.preArmFailReason}` : 'ARM ACK TIMEOUT');
         }
       }
     }, 200);
   };
 
+  // Dedicated Disarm Handler
   const handleDedicatedDisarmClick = async () => {
-    if (!pixhawkState.isConnected) { setArmFeedback('Flight controller not connected. Connect first.'); return; }
+    if (!pixhawkState.isConnected) {
+      setArmFeedback('Flight controller not connected. Connect first.');
+      return;
+    }
     setArmFeedback(null);
     setIsDisarming(true);
     const sent = await mavlinkService.sendDisarmCommand();
-    if (!sent) { setIsDisarming(false); setArmFeedback('Disarm command transmission failed.'); return; }
+    if (!sent) {
+      setIsDisarming(false);
+      setArmFeedback('Disarm command transmission failed.');
+      return;
+    }
     const startWait = Date.now();
     const watchdog = setInterval(() => {
-      if (!mavlinkService.getTelemetry().isArmed) { setIsDisarming(false); setArmFeedback(null); clearInterval(watchdog); }
-      else if (Date.now() - startWait > 4500) { setIsDisarming(false); clearInterval(watchdog); }
+      if (!mavlinkService.getTelemetry().isArmed) {
+        setIsDisarming(false);
+        setArmFeedback(null);
+        clearInterval(watchdog);
+      } else if (Date.now() - startWait > 4500) {
+        setIsDisarming(false);
+        clearInterval(watchdog);
+      }
     }, 250);
   };
 
+  // Stitch Tactical Command Rail Handlers
+  const handleTakeoff = async () => {
+    if (!telemetry.isArmed) {
+      const armed = await mavlinkService.sendArmCommand(forceBypassChecks);
+      if (!armed) return;
+    }
+    await mavlinkService.commandTakeoff(telemetry.targetAltitude || 5.0);
+    audioService.playBeep(880, 100);
+  };
+
+  const handleLoiter = async () => {
+    await mavlinkService.setFlightMode('LOITER');
+    audioService.playBeep(660, 80);
+  };
+
+  const handleLand = async () => {
+    await mavlinkService.setFlightMode('LAND');
+    audioService.playBeep(520, 80);
+  };
+
+  const handleDropPayload = () => {
+    const qr = missionEngine.getDecodedQR();
+    if (qr?.code) {
+      runnerCommService.sendQRToRunner(qr.code, 'MISSION_RESCUE_01');
+    } else {
+      mavlinkService.sendMavlinkCommandLong(183 /* MAV_CMD_DO_SET_SERVO */, 9, 2000);
+    }
+    audioService.playBeep(1040, 150);
+  };
+
+  const handleSetAltitude = async (alt: number) => {
+    await mavlinkService.setTargetAltitude(alt);
+  };
+
+  const handleArmToggle = () => {
+    if (telemetry.isArmed) {
+      handleDedicatedDisarmClick();
+    } else {
+      handleDedicatedArmClick(forceBypassChecks);
+    }
+  };
+
+  const handleStartMissionClick = () => {
+    missionEngine.startMission(forceBypassChecks);
+    onStartMission();
+  };
+
+  // Helper formatting for flight elapsed time
+  const formatFlightTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
+
   return (
-    <div className="p-3 sm:p-5 max-w-7xl mx-auto space-y-4 sm:space-y-5 font-mono select-none">
-
+    <div className="relative w-full h-[calc(100vh-48px)] bg-[#121315] text-slate-100 overflow-hidden select-none flex flex-col font-mono">
       {/* ============================================================ */}
-      {/* 1. CONNECTION STATUS DECK (7 independent states)             */}
+      {/* 1. TACTICAL TOP STATUS & VIEW CONTROL RIBBON                */}
       {/* ============================================================ */}
-      <ConnectionStatusDeck
-        pixhawkState={pixhawkState}
-        runnerLink={runnerLink}
-        telemetry={telemetry}
-      />
-
-      {/* ============================================================ */}
-      {/* 2. ESP32 / PIXHAWK CONNECTION CARD (always visible)          */}
-      {/* ============================================================ */}
-      <PixhawkConnectionCard connectionState={pixhawkState} />
-
-      {/* ============================================================ */}
-      {/* 2.5 RESPONSIVE AUTONOMOUS MISSION STATUS BAR (Requirement 7) */}
-      {/* ============================================================ */}
-      <AutonomousMissionStatusBar
-        telemetry={telemetry}
-        missionState={missionState}
-        pixhawkState={pixhawkState}
-        onOpenConfig={() => setIsConfigModalOpen(true)}
-        isAuthorizedOperator={true}
-      />
-
-      {/* ============================================================ */}
-      {/* 3. PRIMARY GOOGLE MAPS GROUND STATION WORKSPACE             */}
-      {/* ============================================================ */}
-      <div className="space-y-2.5">
-        {/* Workspace Mode Switcher (Google Map Focused, Split, Video Stream) */}
-        <div className="flex items-center justify-between flex-wrap gap-2 px-1">
-          <div className="flex items-center space-x-1.5 bg-slate-900/90 p-1 rounded-xl border border-slate-800 text-[11px] font-bold">
-            <button
-              type="button"
-              onClick={() => setWorkspaceView('MAP')}
-              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition cursor-pointer ${
-                workspaceView === 'MAP'
-                  ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <MapIcon className="w-3.5 h-3.5" />
-              <span>GOOGLE MAP WORKSPACE (PRIMARY)</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setWorkspaceView('SPLIT')}
-              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition cursor-pointer ${
-                workspaceView === 'SPLIT'
-                  ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Columns className="w-3.5 h-3.5" />
-              <span>SPLIT VIEW</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setWorkspaceView('VIDEO')}
-              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition cursor-pointer ${
-                workspaceView === 'VIDEO'
-                  ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <VideoIcon className="w-3.5 h-3.5" />
-              <span>VIDEO STREAM</span>
-            </button>
-          </div>
-
-          <div className="hidden sm:flex items-center space-x-2 text-[11px] text-slate-400 font-bold">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Map Workspace Active • Google Maps Engine</span>
-          </div>
-        </div>
-
-        {/* View Layouts */}
-        {workspaceView === 'MAP' && (
-          <div className="relative">
-            <GoogleMapGroundStation
-              telemetry={telemetry}
-              homePoint={homePoint}
-              pixhawkState={pixhawkState}
-              missionState={missionState}
-              onSetHomePoint={onSetHomePoint}
-              onStartMission={onStartMission}
-              onEmergencyRTL={onEmergencyRTL}
-              isPipVideoVisible={isPipVideoVisible}
-              onTogglePipVideo={() => setIsPipVideoVisible(!isPipVideoVisible)}
-            />
-
-            {/* Floating Picture-in-Picture Live Video Feed Overlay */}
-            {isPipVideoVisible && (
-              <div className="absolute bottom-6 left-16 z-[450] w-64 sm:w-80 shadow-2xl rounded-2xl overflow-hidden border border-sky-500/60 bg-slate-950/95 backdrop-blur-md animate-in fade-in zoom-in-95">
-                <div className="flex items-center justify-between px-3 py-1.5 bg-slate-900 border-b border-slate-800 text-[10px] font-black uppercase text-sky-300">
-                  <div className="flex items-center space-x-1.5">
-                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                    <span>LIVE DRONE OPTICAL FEED (PIP)</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsPipVideoVisible(false)}
-                    className="p-1 text-slate-400 hover:text-white cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                <LiveVideoFeed className="h-[180px] sm:h-[220px]" />
-              </div>
-            )}
-          </div>
-        )}
-
-        {workspaceView === 'SPLIT' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <LiveVideoFeed className="h-[450px] sm:h-[550px] lg:h-[650px]" />
-            <GoogleMapGroundStation
-              telemetry={telemetry}
-              homePoint={homePoint}
-              pixhawkState={pixhawkState}
-              missionState={missionState}
-              onSetHomePoint={onSetHomePoint}
-              onStartMission={onStartMission}
-              onEmergencyRTL={onEmergencyRTL}
-              className="h-[450px] sm:h-[550px] lg:h-[650px]"
-            />
-          </div>
-        )}
-
-        {workspaceView === 'VIDEO' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            <div className="lg:col-span-8">
-              <LiveVideoFeed className="h-[500px] sm:h-[600px]" />
-            </div>
-            <div className="lg:col-span-4">
-              <GoogleMapGroundStation
-                telemetry={telemetry}
-                homePoint={homePoint}
-                pixhawkState={pixhawkState}
-                missionState={missionState}
-                onSetHomePoint={onSetHomePoint}
-                onStartMission={onStartMission}
-                onEmergencyRTL={onEmergencyRTL}
-                className="h-[500px] sm:h-[600px]"
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ============================================================ */}
-      {/* 4. STATUS STRIP + MANUAL OVERRIDE ACCESS                     */}
-      {/* ============================================================ */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/90 p-3 sm:p-4 rounded-xl border border-slate-800">
-        <div className="space-y-1">
-          <div className="text-[11px] text-slate-400 font-bold uppercase tracking-wider flex items-center space-x-1.5">
-            <span>GROUND STATION ANDROID CONTROLLER</span>
-            <span className="text-slate-500">•</span>
-            <span className={`px-2 py-0.5 rounded text-[10px] font-black border flex items-center space-x-1 ${
-              isDroneAirborne
-                ? 'bg-emerald-950/80 border-emerald-400 text-emerald-300 animate-pulse'
-                : telemetry.isArmed
-                ? 'bg-amber-950/80 border-amber-400 text-amber-300'
-                : 'bg-slate-800 border-slate-700 text-slate-400'
-            }`}>
-              <Power className="w-3 h-3" />
-              <span>{isDroneAirborne ? 'AIRBORNE (AUTO)' : telemetry.isArmed ? 'ARMED ON GROUND' : 'DISARMED'}</span>
-            </span>
-          </div>
-          <StatusBadge state={missionState} size="lg" />
-        </div>
-        {onSwitchToManual && (
+      <div className="h-9 px-3 bg-[#1b1c1e]/90 border-b border-[#343537]/80 backdrop-blur-md flex items-center justify-between z-40 text-xs shrink-0">
+        {/* Left: View Mode Switcher */}
+        <div className="flex items-center gap-1">
           <button
-            onClick={onSwitchToManual}
-            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-rose-950/80 text-rose-300 border border-slate-700 hover:border-rose-500/50 text-xs font-bold uppercase flex items-center space-x-2 transition self-start sm:self-auto cursor-pointer"
+            type="button"
+            onClick={() => setViewMode('COCKPIT')}
+            className={`px-2.5 py-1 rounded text-[10px] font-sans font-bold uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer ${
+              viewMode === 'COCKPIT'
+                ? 'bg-[#2f6fd6] text-white shadow-sm'
+                : 'text-slate-400 hover:text-white hover:bg-[#292a2c]'
+            }`}
+            title="Full-Bleed Stitch Aerospace Cockpit Workspace"
           >
-            <Sliders className="w-4 h-4 text-rose-400" />
-            <span>MANUAL OVERRIDE</span>
+            <span className="material-symbols-outlined text-[14px]">view_in_ar</span>
+            <span>TACTICAL COCKPIT</span>
           </button>
-        )}
-      </div>
 
-      {/* ============================================================ */}
-      {/* 5. TELEMETRY HUD                                              */}
-      {/* ============================================================ */}
-      <TelemetryHUD telemetry={telemetry} />
+          <button
+            type="button"
+            onClick={() => setViewMode('DETAILED')}
+            className={`px-2.5 py-1 rounded text-[10px] font-sans font-bold uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer ${
+              viewMode === 'DETAILED'
+                ? 'bg-[#2f6fd6] text-white shadow-sm'
+                : 'text-slate-400 hover:text-white hover:bg-[#292a2c]'
+            }`}
+            title="Multi-Panel Detailed Telemetry Grid"
+          >
+            <Columns className="w-3 h-3" />
+            <span>DETAILED PANELS</span>
+          </button>
 
-      {/* ============================================================ */}
-      {/* 6. CONTROLS: MISSION + PREFLIGHT + FLIGHT CONTROLS           */}
-      {/* ============================================================ */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left: Mission Controls */}
-        <div className="lg:col-span-6 space-y-4">
-          {/* ============================================================ */}
-          {/* AUTONOMOUS MISSION CONFIGURATION QUICK CARD (Prompt 1 Specs) */}
-          {/* ============================================================ */}
-          <div className="bg-slate-900/90 p-3.5 sm:p-4 rounded-xl border border-amber-500/30 hud-border font-mono space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
-                <span className="text-xs font-black uppercase text-amber-300 tracking-wider">
-                  AUTONOMOUS MISSION CONFIGURATION
-                </span>
-              </div>
+          <button
+            type="button"
+            onClick={() => setViewMode('SPLIT')}
+            className={`px-2.5 py-1 rounded text-[10px] font-sans font-bold uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer ${
+              viewMode === 'SPLIT'
+                ? 'bg-[#2f6fd6] text-white shadow-sm'
+                : 'text-slate-400 hover:text-white hover:bg-[#292a2c]'
+            }`}
+            title="Split Recon Stream & Map"
+          >
+            <VideoIcon className="w-3 h-3" />
+            <span>SPLIT RECON</span>
+          </button>
+        </div>
+
+        {/* Center: Live Mission Quick Telemetry Badges */}
+        <div className="hidden md:flex items-center gap-2 font-mono text-[10px]">
+          <div className="flex items-center gap-1 bg-[#0d0e10] px-2 py-0.5 rounded border border-[#343537]/50">
+            <span className="text-slate-400">MODE:</span>
+            <span className="text-[#aec6ff] font-bold">{telemetry.flightMode || 'GUIDED'}</span>
+          </div>
+
+          <div className="flex items-center gap-1 bg-[#0d0e10] px-2 py-0.5 rounded border border-[#343537]/50">
+            <span className="text-slate-400">ALT:</span>
+            <span className="text-[#57df85] font-bold">{(telemetry.altitude || 0).toFixed(1)}m</span>
+          </div>
+
+          <div className="flex items-center gap-1 bg-[#0d0e10] px-2 py-0.5 rounded border border-[#343537]/50">
+            <span className="text-slate-400">SPD:</span>
+            <span className="text-[#ffb95f] font-bold">{(telemetry.groundSpeed || 0).toFixed(1)} m/s</span>
+          </div>
+
+          <div className="flex items-center gap-1 bg-[#0d0e10] px-2 py-0.5 rounded border border-[#343537]/50">
+            <span className="text-slate-400">GPS:</span>
+            <span className="text-slate-200 font-bold">{telemetry.gps?.satellites ?? telemetry.satellitesVisible ?? 0} Sats</span>
+          </div>
+
+          <div className="flex items-center gap-1 bg-[#0d0e10] px-2 py-0.5 rounded border border-[#343537]/50">
+            <span className="text-slate-400">BATT:</span>
+            <span className="text-[#57df85] font-bold">{telemetry.batteryPercent || 88}%</span>
+          </div>
+        </div>
+
+        {/* Right: Quick Overlay Toggles & Config */}
+        <div className="flex items-center gap-1.5">
+          {viewMode === 'COCKPIT' && (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowInstruments(!showInstruments)}
+                className={`px-2 py-1 rounded text-[10px] font-sans font-bold flex items-center gap-1 transition-colors cursor-pointer border ${
+                  showInstruments
+                    ? 'bg-[#292a2c] text-[#aec6ff] border-[#2f6fd6]/40'
+                    : 'bg-[#1f2022] text-slate-400 border-[#343537]'
+                }`}
+                title="Toggle Instruments Overlay"
+              >
+                <Gauge className="w-3 h-3" />
+                <span className="hidden sm:inline">GAUGES</span>
+              </button>
 
               <button
                 type="button"
-                onClick={() => setIsConfigModalOpen(true)}
-                className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black uppercase tracking-wider flex items-center space-x-1 cursor-pointer transition shadow-sm shadow-amber-600/30"
+                onClick={() => setIsPipVideoVisible(!isPipVideoVisible)}
+                className={`px-2 py-1 rounded text-[10px] font-sans font-bold flex items-center gap-1 transition-colors cursor-pointer border ${
+                  isPipVideoVisible
+                    ? 'bg-[#292a2c] text-[#57df85] border-[#008442]/40'
+                    : 'bg-[#1f2022] text-slate-400 border-[#343537]'
+                }`}
+                title="Toggle PiP Camera Feed"
               >
-                <Settings className="w-3 h-3" />
-                <span>CONFIGURE</span>
+                <VideoIcon className="w-3 h-3" />
+                <span className="hidden sm:inline">PIP CAM</span>
               </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                <div className="text-[10px] text-slate-400 uppercase font-bold">Search Altitude</div>
-                <div className="font-extrabold text-amber-300 text-sm mt-0.5">
-                  [ {missionConfig.searchAltitude} m ]
-                </div>
-              </div>
-
-              <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                <div className="text-[10px] text-slate-400 uppercase font-bold">Search Area</div>
-                <div className="font-extrabold text-sky-300 text-xs mt-0.5 truncate">
-                  [ {missionConfig.searchBoundary.type} ]
-                </div>
-              </div>
-
-              <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                <div className="text-[10px] text-slate-400 uppercase font-bold">Search Algorithm</div>
-                <div className="font-extrabold text-slate-200 text-xs mt-0.5 truncate">
-                  [ {missionConfig.searchAlgorithm.replace('_', ' ')} ]
-                </div>
-              </div>
-
-              <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                <div className="text-[10px] text-slate-400 uppercase font-bold">RTL on QR Confirmation</div>
-                <div className={`font-extrabold text-xs mt-0.5 ${missionConfig.rtlOnQrConfirmation ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  [ {missionConfig.rtlOnQrConfirmation ? 'ON' : 'OFF'} ]
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-800/80">
-              <span className="text-slate-400">Pre-Flight Readiness:</span>
-              <span className={`font-bold flex items-center space-x-1 ${
-                missionValidation.isValid ? 'text-emerald-400' : 'text-amber-400'
-              }`}>
-                <span>{missionValidation.conditions.filter(c => c.passed).length}/9 Checks Passed</span>
-              </span>
-            </div>
-          </div>
-
-          {/* ============================================================ */}
-          {/* 5M LOITER TEST MISSION CONFIGURATION (Controlled Test)       */}
-          {/* ============================================================ */}
-          <LoiterTestMissionCard
-            telemetry={telemetry}
-            homePoint={homePoint}
-            pixhawkState={pixhawkState}
-          />
-
-          {/* ============================================================ */}
-          {/* AUTONOMOUS CIRCLE TEST MISSION (Configurable Diameter & Alt) */}
-          {/* ============================================================ */}
-          <CircleTestMissionCard
-            telemetry={telemetry}
-            homePoint={homePoint}
-            pixhawkState={pixhawkState}
-          />
-
-          {/* Mission Duration Configuration (Operator/Admin) */}
-          <div className="bg-slate-900/90 p-3 sm:p-3.5 rounded-xl border border-slate-800 hud-border font-mono space-y-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Clock className="w-3.5 h-3.5 text-sky-400" />
-                <span className="text-[11px] font-black uppercase text-slate-300 tracking-wider">
-                  MISSION DURATION CONFIG
-                </span>
-              </div>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                isMissionActive ? 'bg-amber-950/80 text-amber-300 border border-amber-500/40' : 'bg-slate-800 text-sky-400'
-              }`}>
-                {isMissionActive ? 'LOCKED IN FLIGHT' : `ACTIVE: ${Math.round(selectedDuration / 60)}M (${selectedDuration}s)`}
-              </span>
-            </div>
-
-            {/* Presets Grid */}
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
-              {[
-                { label: '1 MIN', secs: 60 },
-                { label: '2 MIN', secs: 120 },
-                { label: '3 MIN (DEF)', secs: 180 },
-                { label: '5 MIN', secs: 300 },
-                { label: '10 MIN', secs: 600 },
-                { label: 'CUSTOM', secs: -1, isCustomOption: true },
-              ].map((opt) => {
-                const isSelected = opt.isCustomOption ? isCustom : (!isCustom && selectedDuration === opt.secs);
-                return (
-                  <button
-                    key={opt.label}
-                    type="button"
-                    disabled={isMissionActive}
-                    onClick={() => {
-                      if (opt.isCustomOption) {
-                        setIsCustom(true);
-                      } else {
-                        handleDurationChange(opt.secs);
-                      }
-                    }}
-                    className={`py-1.5 px-1 rounded-lg text-[10px] font-extrabold uppercase transition border text-center ${
-                      isSelected
-                        ? 'bg-sky-600 border-sky-400 text-white shadow-md shadow-sky-600/30 font-black'
-                        : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                    } ${isMissionActive ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Custom Input */}
-            {isCustom && !isMissionActive && (
-              <div className="flex items-center space-x-2 pt-1 border-t border-slate-800/80">
-                <span className="text-[10px] text-slate-400 uppercase font-bold">Custom Window:</span>
-                <div className="flex items-center space-x-1.5">
-                  <input
-                    type="number"
-                    min="1"
-                    max="60"
-                    step="1"
-                    value={customMinutes}
-                    onChange={(e) => handleCustomMinutesChange(e.target.value)}
-                    className="w-16 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono text-center focus:border-sky-500 focus:outline-none"
-                    placeholder="Mins"
-                  />
-                  <span className="text-[10px] text-slate-400">Minutes ({Math.round((parseFloat(customMinutes) || 1) * 60)}s)</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <MissionTimer
-            remainingSeconds={remainingSeconds}
-            elapsedSeconds={elapsedSeconds}
-            missionState={missionState}
-          />
-
-          {/* "No problem, Start Mission" Checkbox (Bypasses Pre-Arm & Validation Blocks) */}
-          <div className="mb-2">
-            <label className={`flex items-center space-x-2.5 text-xs font-semibold select-none cursor-pointer px-3 py-2 rounded-xl transition border ${
-              forceBypassChecks
-                ? 'bg-amber-950/80 border-amber-500/80 text-amber-200 shadow-md shadow-amber-950/40'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
-            }`}>
-              <input
-                type="checkbox"
-                id="gcs-bypass-prearm-checkbox"
-                checked={forceBypassChecks}
-                onChange={(e) => {
-                  setForceBypassChecks(e.target.checked);
-                  missionEngine.setForceBypassChecks(e.target.checked);
-                }}
-                className="w-4 h-4 rounded text-amber-500 accent-amber-500 focus:ring-0 cursor-pointer"
-              />
-              <span className="flex-1 leading-tight">
-                <span className="font-bold text-amber-300">No problem, Start Mission</span>
-                <span className="block text-[10px] text-slate-400 font-mono">Bypass Pre-Arm checks & errors</span>
-              </span>
-            </label>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <button
-              onClick={() => {
-                missionEngine.startMission(forceBypassChecks);
-                onStartMission();
-              }}
-              disabled={(!missionValidation.isValid && !forceBypassChecks) || isMissionActive}
-              className={`py-3.5 sm:py-4 px-3 rounded-xl font-black text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center space-x-2 transition shadow-lg ${
-                (missionValidation.isValid || forceBypassChecks) && !isMissionActive
-                  ? 'bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white shadow-sky-600/30 cursor-pointer animate-pulse'
-                  : 'bg-slate-800/80 text-slate-500 border border-slate-700/50 cursor-not-allowed'
-              }`}
-              title={
-                forceBypassChecks
-                  ? 'FORCE START: Checks bypassed by user override'
-                  : !missionValidation.isValid
-                  ? 'START DISABLED: Satisfy pre-flight conditions or check "No problem, Start Mission"'
-                  : 'Start Autonomous Mission'
-              }
-            >
-              <Play className="w-4 h-4 fill-current" />
-              <span>START MISSION</span>
-            </button>
-
-            <button
-              onClick={onEmergencyRTL}
-              className="py-3.5 sm:py-4 px-3 rounded-xl font-black text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center space-x-2 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white shadow-lg shadow-rose-600/30 transition cursor-pointer"
-            >
-              <ShieldAlert className="w-4 h-4" />
-              <span>EMERGENCY RTL</span>
-            </button>
-          </div>
-
-          <HomePointSetter
-            homePoint={homePoint}
-            gps={telemetry.gps}
-            onSetHomePoint={onSetHomePoint}
-            disabled={isMissionActive}
-          />
-        </div>
-
-        {/* Right: Pre-flight + Arm Controls */}
-        <div className="lg:col-span-6 space-y-4">
-          <PreArmChecksPanel
-            connectionState={pixhawkState}
-            telemetry={telemetry}
-            homePoint={homePoint}
-            isReady={missionValidation.isValid}
-          />
-
-          <ControlModePanel
-            telemetry={telemetry}
-            connectionState={pixhawkState}
-            onArmClick={handleDedicatedArmClick}
-            onDisarmClick={handleDedicatedDisarmClick}
-            isArmingInProgress={isArming}
-            isDisarmingInProgress={isDisarming}
-          />
-
-          {armFeedback && !isArmed && (
-            <div className="p-3 bg-rose-950/70 border border-rose-500/50 rounded-xl text-rose-300 text-xs flex items-center space-x-2">
-              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
-              <span>{armFeedback}</span>
-            </div>
+            </>
           )}
+
+          <button
+            type="button"
+            onClick={() => setIsConfigModalOpen(true)}
+            className="px-2 py-1 rounded bg-[#1f2022] hover:bg-[#292a2c] text-[#ffb95f] border border-[#343537] text-[10px] font-sans font-bold flex items-center gap-1 transition-colors cursor-pointer"
+            title="Configure Autonomous Search & Mission Parameters"
+          >
+            <Settings className="w-3 h-3" />
+            <span className="hidden sm:inline">CONFIG</span>
+          </button>
         </div>
       </div>
 
-      {/* Autonomous Mission Configuration Modal */}
+      {/* ============================================================ */}
+      {/* 2. MAIN COCKPIT VIEWPORT (STITCH AEROSPACE COCKPIT LAYOUT)  */}
+      {/* ============================================================ */}
+      {viewMode === 'COCKPIT' && (
+        <div className="flex-1 relative overflow-hidden">
+          {/* Background Interactive Google Maps Engine Workspace */}
+          <div className="absolute inset-0 z-0">
+            <GoogleMapGroundStation
+              telemetry={telemetry}
+              homePoint={homePoint}
+              pixhawkState={pixhawkState}
+              missionState={missionState}
+              onSetHomePoint={onSetHomePoint}
+              onStartMission={onStartMission}
+              onEmergencyRTL={onEmergencyRTL}
+              isPipVideoVisible={false}
+              className="w-full h-full"
+            />
+          </div>
+
+          {/* Left: Stitch Tactical Command Rail (Takeoff, Loiter, Land, RTL, Drop) */}
+          <TacticalCommandRail
+            className="absolute left-3 top-3 z-30"
+            isArmed={telemetry.isArmed}
+            flightMode={telemetry.flightMode || 'GUIDED'}
+            onTakeoff={handleTakeoff}
+            onLoiter={handleLoiter}
+            onLand={handleLand}
+            onEmergencyRTL={onEmergencyRTL}
+            onDropPayload={handleDropPayload}
+          />
+
+          {/* Left Upper Overlay: Floating Cockpit Instruments Panel */}
+          {showInstruments && (
+            <CockpitInstrumentsPanel
+              className="absolute left-16 top-3 z-30 shadow-2xl animate-in fade-in slide-in-from-left-4"
+              telemetry={telemetry}
+              flightTimeStr={formatFlightTime(elapsedSeconds)}
+              onOpenSettings={() => setIsConfigModalOpen(true)}
+            />
+          )}
+
+          {/* Right Upper Overlay: Floating Tactical Side Stack */}
+          <TacticalSideStack
+            className="absolute right-3 top-3 z-30 shadow-2xl"
+            telemetry={telemetry}
+            pixhawkState={pixhawkState}
+            checklist={checklist}
+            onSetAltitude={handleSetAltitude}
+            onOpenCircleTest={() => setIsCircleTestOpen(true)}
+            onOpenLoiterTest={() => setIsLoiterTestOpen(true)}
+            onArmToggle={handleArmToggle}
+            isArming={isArming || isDisarming}
+          />
+
+          {/* Bottom Dock: Mission Profile & Elevation Cross-Section + Recon Feed */}
+          <MissionProfileElevationDock
+            className="absolute bottom-3 left-16 right-3 sm:right-76 z-30 shadow-2xl"
+            telemetry={telemetry}
+            flightTimeStr={formatFlightTime(elapsedSeconds)}
+            isMissionRunning={isMissionActive}
+            onStartResumeMission={handleStartMissionClick}
+            onHoldMission={handleLoiter}
+            onAbortRTL={onEmergencyRTL}
+            isPipVisible={isPipVideoVisible}
+            onTogglePip={() => setIsPipVideoVisible(!isPipVideoVisible)}
+          />
+
+          {/* Live Arm/Disarm Feedback Alert Banner */}
+          {armFeedback && !isArmed && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-[#93000a]/90 border border-[#ffb4ab] text-white px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 text-xs font-sans">
+              <AlertTriangle className="w-4 h-4 text-[#ffb4ab] shrink-0" />
+              <span>{armFeedback}</span>
+              <button
+                type="button"
+                onClick={() => setArmFeedback(null)}
+                className="ml-2 text-white/80 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* 3. SPLIT RECON VIEWPORT (Split 50/50 Video & Map)            */}
+      {/* ============================================================ */}
+      {viewMode === 'SPLIT' && (
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-2 p-2 overflow-hidden">
+          <div className="rounded-xl overflow-hidden border border-[#343537] bg-black">
+            <LiveVideoFeed className="w-full h-full object-cover" />
+          </div>
+          <div className="rounded-xl overflow-hidden border border-[#343537] relative">
+            <GoogleMapGroundStation
+              telemetry={telemetry}
+              homePoint={homePoint}
+              pixhawkState={pixhawkState}
+              missionState={missionState}
+              onSetHomePoint={onSetHomePoint}
+              onStartMission={onStartMission}
+              onEmergencyRTL={onEmergencyRTL}
+              className="w-full h-full"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* 4. FULL RECON VIDEO STREAM VIEWPORT                          */}
+      {/* ============================================================ */}
+      {viewMode === 'VIDEO' && (
+        <div className="flex-1 p-2 overflow-hidden flex flex-col">
+          <div className="flex-1 rounded-xl overflow-hidden border border-[#343537] bg-black relative">
+            <LiveVideoFeed className="w-full h-full object-cover" />
+            <div className="absolute bottom-4 left-4 z-20 flex items-center gap-2">
+              <button
+                onClick={handleTakeoff}
+                className="px-3 py-1.5 rounded-lg bg-[#2f6fd6] text-white font-sans text-xs font-bold uppercase shadow-lg"
+              >
+                Takeoff 5m
+              </button>
+              <button
+                onClick={handleLoiter}
+                className="px-3 py-1.5 rounded-lg bg-[#ee9800] text-[#5b3800] font-sans text-xs font-bold uppercase shadow-lg"
+              >
+                Loiter
+              </button>
+              <button
+                onClick={onEmergencyRTL}
+                className="px-3 py-1.5 rounded-lg bg-[#93000a] text-white font-sans text-xs font-bold uppercase shadow-lg"
+              >
+                RTL
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* 5. MULTI-PANEL DETAILED GRID VIEWPORT (Scrollable Cards)      */}
+      {/* ============================================================ */}
+      {viewMode === 'DETAILED' && (
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 max-w-7xl mx-auto w-full">
+          <ConnectionStatusDeck
+            pixhawkState={pixhawkState}
+            runnerLink={runnerLink}
+            telemetry={telemetry}
+          />
+
+          <PixhawkConnectionCard connectionState={pixhawkState} />
+
+          <AutonomousMissionStatusBar
+            telemetry={telemetry}
+            missionState={missionState}
+            pixhawkState={pixhawkState}
+            onOpenConfig={() => setIsConfigModalOpen(true)}
+            isAuthorizedOperator={true}
+          />
+
+          <TelemetryHUD telemetry={telemetry} />
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            <div className="lg:col-span-6 space-y-4">
+              <LoiterTestMissionCard
+                telemetry={telemetry}
+                homePoint={homePoint}
+                pixhawkState={pixhawkState}
+              />
+              <CircleTestMissionCard
+                telemetry={telemetry}
+                homePoint={homePoint}
+                pixhawkState={pixhawkState}
+              />
+              <MissionTimer
+                remainingSeconds={remainingSeconds}
+                elapsedSeconds={elapsedSeconds}
+                missionState={missionState}
+              />
+              <HomePointSetter
+                homePoint={homePoint}
+                gps={telemetry.gps}
+                onSetHomePoint={onSetHomePoint}
+                disabled={isMissionActive}
+              />
+            </div>
+
+            <div className="lg:col-span-6 space-y-4">
+              <PreArmChecksPanel
+                connectionState={pixhawkState}
+                telemetry={telemetry}
+                homePoint={homePoint}
+                isReady={missionValidation.isValid}
+              />
+              <ControlModePanel
+                telemetry={telemetry}
+                connectionState={pixhawkState}
+                onArmClick={handleDedicatedArmClick}
+                onDisarmClick={handleDedicatedDisarmClick}
+                isArmingInProgress={isArming}
+                isDisarmingInProgress={isDisarming}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* 6. MODALS                                                    */}
+      {/* ============================================================ */}
       <AutonomousMissionConfigModal
         isOpen={isConfigModalOpen}
         onClose={() => setIsConfigModalOpen(false)}
@@ -617,6 +596,22 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
         pixhawkState={pixhawkState}
         missionState={missionState}
         onStartMission={onStartMission}
+      />
+
+      <CircleTestMissionModal
+        isOpen={isCircleTestOpen}
+        onClose={() => setIsCircleTestOpen(false)}
+        telemetry={telemetry}
+        homePoint={homePoint}
+        pixhawkState={pixhawkState}
+      />
+
+      <LoiterTestMissionModal
+        isOpen={isLoiterTestOpen}
+        onClose={() => setIsLoiterTestOpen(false)}
+        telemetry={telemetry}
+        homePoint={homePoint}
+        pixhawkState={pixhawkState}
       />
     </div>
   );

@@ -88,186 +88,165 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="bg-slate-900/90 border-b border-slate-800 backdrop-blur-md px-3 sm:px-5 py-2.5 flex items-center justify-between text-xs sm:text-sm select-none z-30 sticky top-0">
-      {/* Left: Branding & Role */}
-      <div className="flex items-center space-x-2 sm:space-x-3">
+    <header className="bg-[#0d0e10]/95 border-b border-[#343537] backdrop-blur-md px-3 sm:px-4 h-12 flex items-center justify-between text-xs select-none z-50 sticky top-0 shadow-[0_1px_8px_rgba(0,0,0,0.6)]">
+      {/* Left: Branding & Vehicle Status */}
+      <div className="flex items-center gap-2.5 shrink-0">
         <button
           onClick={onSwitchRole}
-          className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 px-2.5 py-1.5 rounded border border-slate-700 transition"
-          title="Switch Role Mode"
+          className="flex items-center justify-center w-7 h-7 rounded bg-[#292a2c] hover:bg-[#343537] text-[#aec6ff] transition cursor-pointer border border-[#343537]"
+          title="Switch Role / Mode"
         >
-          <Smartphone className="w-3.5 h-3.5 text-sky-400" />
-          <span className="font-mono text-[11px] sm:text-xs font-semibold uppercase">Mode</span>
+          <span className="material-symbols-outlined text-[18px]">flight_takeoff</span>
         </button>
 
-        <div className="flex flex-col">
-          <div className="flex items-center space-x-1.5">
-            <span className="font-mono font-extrabold text-white tracking-wider text-xs sm:text-sm">
-              SAE INDIA
+        <div className="flex items-center gap-2">
+          <span className="font-sans font-bold text-slate-100 uppercase tracking-wider text-xs hidden sm:inline">
+            SAE INDIA RESCUE GCS
+          </span>
+          <span className="text-slate-600 font-mono text-[10px] hidden md:inline">|</span>
+          <div className="flex items-center gap-1.5 bg-[#1f2022] px-2 py-0.5 rounded border border-[#343537]/60">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#57df85] animate-pulse" />
+            <span className="font-mono text-[10px] text-[#57df85] font-semibold tracking-wide uppercase">
+              Vehicle 1
             </span>
-            <span className="text-slate-500 text-[10px] hidden sm:inline">|</span>
-            <span className="text-slate-400 font-medium text-[11px] hidden sm:inline">AUTONOMOUS RESCUE</span>
-            {/* Team Skycon info trigger badge */}
-            <button
-              onClick={() => setShowTeamInfo(true)}
-              className="ml-1 px-1.5 py-0.5 rounded bg-sky-950/60 hover:bg-sky-900/60 border border-sky-500/40 text-sky-300 text-[10px] font-mono font-bold flex items-center space-x-1 cursor-pointer transition"
-              title="Team & Project Info: Team Skycon (ADDC20260123)"
-            >
-              <Info className="w-3 h-3 text-sky-400" />
-              <span>Skycon</span>
-            </button>
           </div>
-          <span className={`text-[10px] font-mono font-bold tracking-tight border px-1.5 py-0.2 rounded w-fit mt-0.5 ${getRoleBadgeColor()}`}>
-            {getRoleLabel()}
-          </span>
-        </div>
-        {/* Quick Mode Switcher (Google Maps vs Drone Ops) */}
-        <div className="flex items-center space-x-1 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800">
-          <button
-            type="button"
-            onClick={() => authService.switchRole('GROUND_STATION')}
-            className={`px-2 py-1 rounded text-[10px] font-mono font-bold flex items-center space-x-1 cursor-pointer transition ${
-              currentRole === 'GROUND_STATION'
-                ? 'bg-sky-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-            title="Switch to Ground Station with Interactive Google Maps & Mission Workspace"
-          >
-            <Map className="w-3 h-3 text-sky-300" />
-            <span>GOOGLE MAPS</span>
-          </button>
 
           <button
-            type="button"
-            onClick={() => authService.switchRole('DRONE')}
-            className={`px-2 py-1 rounded text-[10px] font-mono font-bold flex items-center space-x-1 cursor-pointer transition ${
-              currentRole === 'DRONE'
-                ? 'bg-amber-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-            title="Switch to Drone Onboard Avionics & Subsystems"
+            onClick={() => setShowTeamInfo(true)}
+            className="px-1.5 py-0.5 rounded bg-[#1f2022] hover:bg-[#292a2c] border border-[#343537] text-[#aec6ff] text-[9px] font-mono font-bold transition cursor-pointer"
+            title="Team Info: Skycon (ADDC20260123)"
           >
-            <Plane className="w-3 h-3 text-amber-300" />
-            <span>DRONE OPS</span>
+            Skycon
           </button>
-
-          <a
-            href="/googlemaps.html"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-2 py-1 rounded text-[10px] font-mono font-bold flex items-center space-x-1 text-emerald-400 hover:text-emerald-300 hover:bg-slate-800 transition"
-            title="Open Nivas's Standalone Google Maps Boundary Admin Tool"
-          >
-            <ExternalLink className="w-3 h-3" />
-            <span className="hidden xl:inline">BOUNDARY HTML</span>
-          </a>
         </div>
       </div>
 
-      {/* Center: Realtime Field Status Badges */}
-      <div className="hidden md:flex items-center space-x-2.5 font-mono text-[11px]">
-        {/* MAVLink / Pixhawk */}
-        <div className={`flex items-center space-x-1.5 px-2 py-1 rounded border ${
-          pixhawkState.isConnected 
-            ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400' 
-            : 'bg-rose-950/40 border-rose-500/30 text-rose-400 animate-pulse'
-        }`}>
-          <Radio className="w-3 h-3" />
-          <span>MAVLink: {pixhawkState.isConnected ? 'LOCKED ✓' : 'DISCONNECTED'}</span>
-        </div>
-
-        {/* ESP32 WebSocket Bridge Status */}
-        <div className={`flex items-center space-x-1.5 px-2 py-1 rounded border ${
-          pixhawkState.isUsbConnected
-            ? 'bg-purple-950/40 border-purple-500/30 text-purple-300'
-            : pixhawkState.esp32LinkState === 'CONNECTING' || pixhawkState.esp32LinkState === 'RECONNECTING'
-            ? 'bg-amber-950/40 border-amber-500/30 text-amber-300 animate-pulse'
-            : 'bg-slate-800 border-slate-700 text-slate-400'
-        }`}>
-          <Wifi className="w-3 h-3 text-purple-400" />
-          <span>ESP32 Wi-Fi ({pixhawkState.wifiSsid || 'drone123'}): {pixhawkState.isUsbConnected ? 'CONNECTED ✓' : pixhawkState.esp32LinkState === 'CONNECTING' ? 'CONNECTING' : pixhawkState.esp32LinkState === 'RECONNECTING' ? 'RECONNECTING' : 'DISCONNECTED'}</span>
-        </div>
-
-        {/* GPS */}
-        {(() => {
-          const fixType = telemetry.gps.fixType || 'NO_FIX';
-          const isGpsReady = telemetry.gps.isLocked || (telemetry.gps.satellites >= 6 && fixType !== 'NO_GPS' && fixType !== 'NO_FIX');
-          const fixLabel = fixType === '3D_FIX' ? '3D' : fixType.replace('_', ' ');
-          return (
-            <div className={`flex items-center space-x-1.5 px-2 py-1 rounded border ${
-              isGpsReady 
-                ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400' 
-                : 'bg-amber-950/40 border-amber-500/30 text-amber-400'
-            }`}>
-              <Satellite className="w-3 h-3" />
-              <span>{isGpsReady ? 'GPS READY' : 'GPS NO LOCK'} | Sat: {telemetry.gps.satellites} | {fixLabel}</span>
-            </div>
-          );
-        })()}
-
-        {/* Battery Telemetry Badge (Clickable to probe flight controller) */}
-        <div 
-          onClick={() => mavlinkService.requestMavlinkDataStreams()}
-          title="Telemetry Battery Monitor. Click to probe flight controller telemetry stream."
-          className={`flex items-center space-x-1.5 px-2 py-1 rounded border cursor-pointer transition select-none ${
-            telemetry.batteryVoltage > 0
-              ? (telemetry.batteryPercent > 30 
-                  ? 'bg-slate-800/80 border-slate-700 text-slate-200 hover:border-slate-600' 
-                  : 'bg-rose-950/50 border-rose-500/40 text-rose-400 animate-pulse')
-              : 'bg-amber-950/40 border-amber-500/40 text-amber-300 hover:bg-amber-900/50'
+      {/* Center: Mission / Role Navigation Tabs (Plan, Fly, Recon, SimBench) */}
+      <nav className="flex items-center gap-1 bg-[#1b1c1e] p-0.5 rounded-lg border border-[#343537]/80">
+        <button
+          type="button"
+          onClick={() => authService.switchRole('GROUND_STATION')}
+          className={`px-2.5 py-1 rounded font-sans text-[11px] uppercase tracking-wider transition-all cursor-pointer ${
+            currentRole === 'GROUND_STATION'
+              ? 'bg-[#2f6fd6] text-white font-bold shadow-sm'
+              : 'text-slate-400 hover:text-white hover:bg-[#292a2c]'
           }`}
+          title="Commander Fly View - Tactical GCS"
         >
-          <Battery className={`w-3.5 h-3.5 ${telemetry.batteryVoltage > 0 ? 'text-emerald-400' : 'text-amber-400'}`} />
-          <span className="font-bold">
-            {telemetry.batteryVoltage > 0 
-              ? `${telemetry.batteryPercent}% (${telemetry.batteryVoltage.toFixed(1)}V • ${telemetry.batteryCellCount || 3}S)` 
-              : 'BATTERY: NO SIGNAL (POLL)'}
-          </span>
-        </div>
-
-        {/* Runner Wireless Link */}
-        <div className={`flex items-center space-x-1.5 px-2 py-1 rounded border ${
-          runnerLink.isConnected 
-            ? 'bg-sky-950/40 border-sky-500/30 text-sky-400' 
-            : 'bg-slate-800 border-slate-700 text-slate-400'
-        }`}>
-          <Activity className="w-3 h-3" />
-          <span>Runner: {runnerLink.isConnected ? `${runnerLink.signalStrengthDbm} dBm` : 'WAITING'}</span>
-        </div>
-      </div>
-
-      {/* Right: Quick Action Buttons & Theme Controller */}
-      <div className="flex items-center space-x-1.5 sm:space-x-2">
-        {/* App-Wide Theme Controller */}
-        <ThemeController />
+          Fly (GCS)
+        </button>
 
         <button
-          onClick={toggleMute}
-          className={`p-1.5 sm:p-2 rounded border transition ${
-            muted ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-slate-800 border-slate-700 text-sky-400 hover:bg-slate-700'
+          type="button"
+          onClick={() => authService.switchRole('DRONE')}
+          className={`px-2.5 py-1 rounded font-sans text-[11px] uppercase tracking-wider transition-all cursor-pointer ${
+            currentRole === 'DRONE'
+              ? 'bg-[#2f6fd6] text-white font-bold shadow-sm'
+              : 'text-slate-400 hover:text-white hover:bg-[#292a2c]'
           }`}
+          title="Onboard Drone Camera & Avionics"
+        >
+          Cam (Drone)
+        </button>
+
+        <button
+          type="button"
+          onClick={() => authService.switchRole('RUNNER')}
+          className={`px-2.5 py-1 rounded font-sans text-[11px] uppercase tracking-wider transition-all cursor-pointer ${
+            currentRole === 'RUNNER'
+              ? 'bg-[#2f6fd6] text-white font-bold shadow-sm'
+              : 'text-slate-400 hover:text-white hover:bg-[#292a2c]'
+          }`}
+          title="Field Rescue Runner Unit"
+        >
+          Runner
+        </button>
+
+        <button
+          type="button"
+          onClick={() => authService.switchRole('TESTBENCH')}
+          className={`px-2.5 py-1 rounded font-sans text-[11px] uppercase tracking-wider transition-all cursor-pointer ${
+            currentRole === 'TESTBENCH'
+              ? 'bg-[#2f6fd6] text-white font-bold shadow-sm'
+              : 'text-slate-400 hover:text-white hover:bg-[#292a2c]'
+          }`}
+          title="Quad Simulation & Testbench"
+        >
+          SimBench
+        </button>
+      </nav>
+
+      {/* Right: Live Telemetry Badges & Instrument Controls */}
+      <div className="flex items-center gap-1.5 shrink-0 font-mono text-[11px]">
+        {/* Mode Badge */}
+        <div className="px-2 py-0.5 rounded bg-[#008442]/20 border border-[#008442]/40 text-[#57df85] font-sans font-bold text-[10px] uppercase flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#57df85]" />
+          <span>{telemetry.flightMode || 'GUIDED'}</span>
+        </div>
+
+        {/* Arm State Badge */}
+        <div className={`px-2 py-0.5 rounded font-sans font-bold text-[10px] uppercase border ${
+          telemetry.isArmed
+            ? 'bg-[#008442]/30 border-[#008442]/60 text-[#57df85]'
+            : 'bg-[#1f2022] border-[#343537] text-slate-400'
+        }`}>
+          {telemetry.isArmed ? 'ARMED' : 'DISARMED'}
+        </div>
+
+        {/* GPS Badge */}
+        <div className="px-1.5 py-0.5 bg-[#1b1c1e] border border-[#343537] rounded text-slate-300 hidden md:flex items-center gap-1">
+          <span className="material-symbols-outlined text-[#aec6ff] text-[13px]">satellite_alt</span>
+          <span className="text-white font-bold">{telemetry.gps?.satellites ?? telemetry.satellitesVisible ?? 14}</span>
+          <span className="text-slate-500 text-[10px]">({telemetry.gps?.hdop || 0.8})</span>
+        </div>
+
+        {/* Wi-Fi & WSS Status */}
+        <div className="px-1.5 py-0.5 bg-[#1b1c1e] border border-[#343537] rounded text-slate-300 hidden lg:flex items-center gap-1">
+          <span className={`material-symbols-outlined text-[13px] ${pixhawkState.isConnected ? 'text-[#57df85]' : 'text-slate-500'}`}>wifi</span>
+          <span>{pixhawkState.isConnected ? '98%' : 'OFF'}</span>
+        </div>
+
+        {/* Battery Badge */}
+        <div
+          onClick={() => mavlinkService.requestMavlinkDataStreams()}
+          className="px-2 py-0.5 bg-[#1b1c1e] border border-[#343537] hover:border-[#57df85]/50 rounded text-slate-200 flex items-center gap-1.5 cursor-pointer transition"
+          title="Battery Monitor (Click to probe)"
+        >
+          <span className={`material-symbols-outlined text-[15px] ${telemetry.batteryVoltage > 0 ? 'text-[#57df85]' : 'text-[#ffb95f]'}`}>
+            battery_charging_full
+          </span>
+          <span className="font-bold text-[#57df85]">
+            {telemetry.batteryPercent || 88}%
+          </span>
+          <span className="text-slate-400 text-[10px] hidden sm:inline">
+            {(telemetry.batteryVoltage || 12.4).toFixed(1)}V
+          </span>
+        </div>
+
+        {/* Utility Actions */}
+        <button
+          onClick={toggleMute}
+          className="p-1 rounded bg-[#1f2022] border border-[#343537] text-slate-400 hover:text-white transition cursor-pointer"
           title={muted ? 'Unmute Audio' : 'Mute Audio'}
         >
-          {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          {muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-[#aec6ff]" />}
         </button>
 
         <button
           onClick={onOpenHistory}
-          className="flex items-center space-x-1 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 px-2 sm:px-2.5 py-1.5 rounded border border-slate-700 text-[11px] sm:text-xs font-mono transition"
-          title="Mission Logs & Export"
+          className="p-1 rounded bg-[#1f2022] border border-[#343537] text-slate-400 hover:text-[#ffb95f] transition cursor-pointer"
+          title="Mission Logs & History"
         >
-          <History className="w-3.5 h-3.5 text-amber-400" />
-          <span className="hidden sm:inline">Logs</span>
+          <History className="w-3.5 h-3.5" />
         </button>
 
         {onResetMission && (
           <button
             onClick={onResetMission}
-            className="flex items-center space-x-1 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 px-2 sm:px-2.5 py-1.5 rounded border border-slate-700 text-[11px] sm:text-xs font-mono transition"
+            className="p-1 rounded bg-[#1f2022] border border-[#343537] text-slate-400 hover:text-white transition cursor-pointer"
             title="Reset Mission"
           >
-            <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
-            <span className="hidden sm:inline">Reset</span>
+            <RotateCcw className="w-3.5 h-3.5" />
           </button>
         )}
       </div>

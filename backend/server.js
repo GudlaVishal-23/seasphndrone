@@ -337,98 +337,117 @@ server.on('upgrade', (request, socket, head) => {
 // Lightweight MAVLink Frame Inspector for Structured Logging (Section 3 requirement)
 function inspectMavlinkPacket(buf, direction) {
   if (!buf || buf.length < 8) return;
-  const magic = buf[0];
-  let msgId = -1;
-  let sysId = -1;
-  let compId = -1;
-  let payloadOffset = 0;
+  let offset = 0;
+  while (offset + 8 <= buf.length) {
+    const magic = buf[offset];
+    let msgId = -1;
+    let sysId = -1;
+    let compId = -1;
+    let payloadOffset = 0;
+    let packetLen = 0;
 
-  if (magic === 0xFE && buf.length >= 8) {
-    // MAVLink 1.0
-    sysId = buf[3];
-    compId = buf[4];
-    msgId = buf[5];
-    payloadOffset = 6;
-  } else if (magic === 0xFD && buf.length >= 12) {
-    // MAVLink 2.0
-    sysId = buf[5];
-    compId = buf[6];
-    msgId = buf[7] | (buf[8] << 8) | (buf[9] << 16);
-    payloadOffset = 10;
-  } else {
-    return;
-  }
+    if (magic === 0xFE && offset + 8 <= buf.length) {
+      // MAVLink 1.0: header 6 bytes, payload len at buf[offset + 1], checksum 2 bytes
+      const payloadLen = buf[offset + 1];
+      packetLen = payloadLen + 8;
+      if (offset + packetLen > buf.length) break;
+      sysId = buf[offset + 3];
+      compId = buf[offset + 4];
+      msgId = buf[offset + 5];
+      payloadOffset = offset + 6;
+    } else if (magic === 0xFD && offset + 12 <= buf.length) {
+      // MAVLink 2.0: header 10 bytes, payload len at buf[offset + 1], checksum 2 bytes + optional signature
+      const payloadLen = buf[offset + 1];
+      const flags = buf[offset + 2];
+      const sigLen = (flags & 0x01) ? 13 : 0;
+      packetLen = payloadLen + 12 + sigLen;
+      if (offset + packetLen > buf.length) break;
+      sysId = buf[offset + 5];
+      compId = buf[offset + 6];
+      msgId = buf[offset + 7] | (buf[offset + 8] << 8) | (buf[offset + 9] << 16);
+      payloadOffset = offset + 10;
+    } else {
+      offset++;
+      continue;
+    }
 
-  // Inspect mission-relevant frames
-  if (msgId === 0) {
-    // HEARTBEAT
-    if (direction === 'RX') {
-      const customMode = buf.readUInt32LE ? buf.readUInt32LE(payloadOffset) : 0;
-      // throttle logging to 1 every 5 seconds to prevent spamming
-      if (Date.now() - lastHeartbeatLogTime > 5000) {
-        lastHeartbeatLogTime = Date.now();
-        console.log(`[MAVLINK] RX HEARTBEAT sys=${sysId} comp=${compId} mode=${customMode}`);
+    // Inspect mission-relevant frames
+    if (msgId === 0) {
+      // HEARTBEAT
+      if (direction === 'RX') {
+        const customMode = buf.readUInt32LE ? buf.readUInt32LE(payloadOffset) : 0;
+        // throttle logging to 1 every 5 seconds to prevent spamming
+        if (Date.now() - lastHeartbeatLogTime > 5000) {
+          lastHeartbeatLogTime = Date.now();
+          console.log(`[MAVLINK] RX HEARTBEAT sys=${sysId} comp=${compId} mode=${customMode}`);
+        }
       }
-    }
-  } else if (msgId === 44) {
-    // MISSION_COUNT
-    const count = buf.readUInt16LE ? buf.readUInt16LE(payloadOffset) : 0;
-    const targetSys = buf[payloadOffset + 2] || 1;
-    const targetComp = buf[payloadOffset + 3] || 1;
-    console.log(`[MAVLINK] TX MISSION_COUNT count=${count} target=${targetSys}/${targetComp} type=MISSION`);
-    if (currentUploadJob.status === 'UPLOADING') {
-      currentUploadJob.itemCount = count;
-    }
-  } else if (msgId === 40 || msgId === 51) {
-    // MISSION_REQUEST (40) or MISSION_REQUEST_INT (51)
-    const reqSeq = buf.readUInt16LE ? buf.readUInt16LE(payloadOffset) : 0;
-    const name = msgId === 51 ? 'MISSION_REQUEST_INT' : 'MISSION_REQUEST';
-    console.log(`[MAVLINK] RX ${name} seq=${reqSeq}`);
-    if (currentUploadJob.status === 'UPLOADING') {
-      currentUploadJob.lastSeqRequested = reqSeq;
-    }
-  } else if (msgId === 39 || msgId === 73) {
-    // MISSION_ITEM (39) or MISSION_ITEM_INT (73)
-    const seq = buf.readUInt16LE ? buf.readUInt16LE(payloadOffset + 28) : 0;
-    const cmd = buf.readUInt16LE ? buf.readUInt16LE(payloadOffset + 30) : 0;
-    const frame = buf[payloadOffset + 34];
-    const name = msgId === 73 ? 'MISSION_ITEM_INT' : 'MISSION_ITEM';
-    console.log(`[MAVLINK] TX ${name} seq=${seq} cmd=${cmd} frame=${frame}`);
-  } else if (msgId === 47) {
-    // MISSION_ACK (47)
-    const ackResult = buf[payloadOffset + 2];
-    const ackNames = {
-      0: 'ACCEPTED(0)',
-      1: 'ERROR(1)',
-      2: 'UNSUPPORTED_FRAME(2)',
-      3: 'UNSUPPORTED(3)',
-      4: 'NO_SPACE(4)',
-      5: 'INVALID(5)',
-      6: 'INVALID_PARAM1(6)',
-      7: 'INVALID_PARAM2(7)',
-      8: 'INVALID_PARAM3(8)',
-      9: 'INVALID_PARAM4(9)',
-      10: 'INVALID_PARAM5(10)',
-      11: 'INVALID_PARAM6(11)',
-      12: 'INVALID_PARAM7(12)',
-      13: 'INVALID_SEQUENCE(13)',
-      14: 'DENIED(14)',
-      15: 'CANCELLED(15)'
-    };
-    const resStr = ackNames[ackResult] || `CODE_${ackResult}`;
-    console.log(`[MAVLINK] RX MISSION_ACK result=${resStr}`);
-    if (currentUploadJob.status === 'UPLOADING') {
-      currentUploadJob.lastAckResult = ackResult;
-      currentUploadJob.durationMs = Date.now() - currentUploadJob.startTime;
-      if (ackResult === 0) {
-        currentUploadJob.status = 'SUCCESS';
-        console.log(`[MISSION] upload_id=${currentUploadJob.upload_id} SUCCESS duration=${(currentUploadJob.durationMs / 1000).toFixed(2)}s`);
+    } else if (msgId === 44) {
+      // MISSION_COUNT
+      const count = buf.readUInt16LE ? buf.readUInt16LE(payloadOffset) : 0;
+      const targetSys = buf[payloadOffset + 2] || 1;
+      const targetComp = buf[payloadOffset + 3] || 1;
+      if (direction === 'TX') {
+        console.log(`[MAVLINK] TX MISSION_COUNT count=${count} target=${targetSys}/${targetComp} type=MISSION`);
+        if (currentUploadJob.status === 'UPLOADING') {
+          currentUploadJob.itemCount = count;
+        }
       } else {
-        currentUploadJob.status = 'FAILED';
-        currentUploadJob.errorMessage = `MISSION_ACK rejected: ${resStr}`;
-        console.warn(`[MISSION] upload_id=${currentUploadJob.upload_id} FAILED: ${resStr}`);
+        console.log(`[MAVLINK] RX MISSION_COUNT count=${count} sys=${sysId} comp=${compId}`);
+      }
+    } else if (msgId === 40 || msgId === 51) {
+      // MISSION_REQUEST (40) or MISSION_REQUEST_INT (51)
+      const reqSeq = buf.readUInt16LE ? buf.readUInt16LE(payloadOffset) : 0;
+      const name = msgId === 51 ? 'MISSION_REQUEST_INT' : 'MISSION_REQUEST';
+      console.log(`[MAVLINK] RX ${name} seq=${reqSeq}`);
+      if (currentUploadJob.status === 'UPLOADING') {
+        currentUploadJob.lastSeqRequested = reqSeq;
+      }
+    } else if (msgId === 39 || msgId === 73) {
+      // MISSION_ITEM (39) or MISSION_ITEM_INT (73)
+      const seq = buf.readUInt16LE ? buf.readUInt16LE(payloadOffset + 28) : 0;
+      const cmd = buf.readUInt16LE ? buf.readUInt16LE(payloadOffset + 30) : 0;
+      const frame = buf[payloadOffset + 34];
+      const name = msgId === 73 ? 'MISSION_ITEM_INT' : 'MISSION_ITEM';
+      console.log(`[MAVLINK] ${direction} ${name} seq=${seq} cmd=${cmd} frame=${frame}`);
+    } else if (msgId === 47) {
+      // MISSION_ACK (47)
+      const ackResult = buf[payloadOffset + 2];
+      const ackNames = {
+        0: 'ACCEPTED(0)',
+        1: 'ERROR(1)',
+        2: 'UNSUPPORTED_FRAME(2)',
+        3: 'UNSUPPORTED(3)',
+        4: 'NO_SPACE(4)',
+        5: 'INVALID(5)',
+        6: 'INVALID_PARAM1(6)',
+        7: 'INVALID_PARAM2(7)',
+        8: 'INVALID_PARAM3(8)',
+        9: 'INVALID_PARAM4(9)',
+        10: 'INVALID_PARAM5(10)',
+        11: 'INVALID_PARAM6(11)',
+        12: 'INVALID_PARAM7(12)',
+        13: 'INVALID_SEQUENCE(13)',
+        14: 'DENIED(14)',
+        15: 'CANCELLED(15)'
+      };
+      const resStr = ackNames[ackResult] || `CODE_${ackResult}`;
+      console.log(`[MAVLINK] ${direction} MISSION_ACK result=${resStr}`);
+      if (direction === 'RX' && currentUploadJob.status === 'UPLOADING') {
+        currentUploadJob.lastAckResult = ackResult;
+        currentUploadJob.durationMs = Date.now() - currentUploadJob.startTime;
+        if (ackResult === 0) {
+          currentUploadJob.status = 'SUCCESS';
+          console.log(`[MISSION] upload_id=${currentUploadJob.upload_id} SUCCESS duration=${(currentUploadJob.durationMs / 1000).toFixed(2)}s`);
+        } else {
+          currentUploadJob.status = 'FAILED';
+          currentUploadJob.errorMessage = `MISSION_ACK rejected: ${resStr}`;
+          console.warn(`[MISSION] upload_id=${currentUploadJob.upload_id} FAILED: ${resStr}`);
+        }
       }
     }
+
+    offset += packetLen;
   }
 }
 

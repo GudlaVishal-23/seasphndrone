@@ -240,6 +240,8 @@ class MAVLinkService {
   private lastSentSeq: number = -1;
   private lastSentTimeMs: number = 0;
   private missionTransferActive: boolean = false;
+  private lastRtlCommandTime: number = 0;
+  private activeRtlPromise: Promise<boolean> | null = null;
 
   // MAVLink Parser Buffers
   private rxBuffer: Uint8Array = new Uint8Array(4096);
@@ -1117,6 +1119,11 @@ class MAVLinkService {
     compId: number,
     mavVersion: string
   ) {
+    // Drop loopback/echo frames originating from GCS itself (sysId = 255)
+    if (sysId === 255) {
+      return;
+    }
+
     const now = Date.now();
     this.connectionState.diagnostics.totalPacketsReceived++;
 
@@ -1503,6 +1510,16 @@ class MAVLinkService {
           }
 
           if (ackType === 0) {
+            // Guard: Never resolve mission upload on premature or out-of-order ACK before all items are sent
+            if (this.pendingMissionItems && this.pendingMissionItems.length > 0 && this.lastSentSeq < this.pendingMissionItems.length - 1) {
+              this.logDiagnostic(
+                'MAVLINK',
+                `[MISSION_ACK RX] Ignored premature MISSION_ACK(0): sent seq ${this.lastSentSeq} of ${this.pendingMissionItems.length - 1}. Maintaining transfer session...`,
+                'warn'
+              );
+              break;
+            }
+
             this.clearMissionUploadTimers();
             this.logDiagnostic('MAVLINK', `[MISSION_ACK RX] Pixhawk accepted mission waypoints (${this.pendingMissionItems?.length || 0} items) ✓`, 'success');
             this.addStatusMessage('NOTICE', 5, 'Mission stored in Pixhawk');
@@ -1805,15 +1822,23 @@ class MAVLinkService {
 
             // Pixhawk explicitly announces "Flight plan received" when all mission items are safely committed to EEPROM
             if (lower.includes('flight plan received')) {
-              this.logDiagnostic('MAVLINK', `[STATUSTEXT] Pixhawk confirmed: "${text}" ✓`, 'success');
-              if (this.missionUploadResolver) {
-                this.clearMissionUploadTimers();
-                const resolve = this.missionUploadResolver;
-                this.missionUploadResolver = null;
-                resolve({
-                  success: true,
-                  message: `Mission uploaded and verified by Pixhawk (${this.pendingMissionItems?.length || 0} waypoints) ✓`
-                });
+              if (this.pendingMissionItems && this.pendingMissionItems.length > 0 && this.lastSentSeq < this.pendingMissionItems.length - 1) {
+                this.logDiagnostic(
+                  'MAVLINK',
+                  `[STATUSTEXT] Ignored premature "flight plan received": sent seq ${this.lastSentSeq} of ${this.pendingMissionItems.length - 1}.`,
+                  'warn'
+                );
+              } else {
+                this.logDiagnostic('MAVLINK', `[STATUSTEXT] Pixhawk confirmed: "${text}" ✓`, 'success');
+                if (this.missionUploadResolver) {
+                  this.clearMissionUploadTimers();
+                  const resolve = this.missionUploadResolver;
+                  this.missionUploadResolver = null;
+                  resolve({
+                    success: true,
+                    message: `Mission uploaded and verified by Pixhawk (${this.pendingMissionItems?.length || 0} waypoints) ✓`
+                  });
+                }
               }
             }
 
@@ -1875,6 +1900,12 @@ class MAVLinkService {
             console.log(`[MAVLINK ACK]\ncommand = 176 (SET_MODE)\nresult = ${resultName} (${result})`);
             if (result === 0) {
               this.logDiagnostic('MAVLINK', `[SET_MODE ACK] Mode command accepted by Pixhawk ✓`, 'success');
+              if (this.modeChangeResolver) {
+                const res = this.modeChangeResolver;
+                this.modeChangeResolver = null;
+                if (this.modeChangeTimer) clearTimeout(this.modeChangeTimer);
+                res({ success: true, message: 'Mode command accepted by Pixhawk ✓' });
+              }
             } else {
               const rejectReason = (result === 4 || result === 1)
                 ? 'Mode change rejected: Position lock required (3D GPS Fix & EKF needed). Switch to STABILIZE or ALT_HOLD to fly/arm without GPS.'
@@ -2416,11 +2447,37 @@ class MAVLinkService {
   }
 
   public async commandRTL(): Promise<boolean> {
+    const now = Date.now();
+    // 1. If drone is already in RTL, return immediately without blocking or resetting timers
+    if ((this.telemetry.flightMode || '').toUpperCase() === 'RTL') {
+      this.logDiagnostic('MAVLINK', '[RTL] Vehicle already operating in RTL flight mode ✓', 'info');
+      return true;
+    }
+
+    // 2. Debounce rapid repeat button presses within 400ms without delaying or blocking
+    if (this.activeRtlPromise && now - this.lastRtlCommandTime < 400) {
+      this.logDiagnostic('MAVLINK', '[RTL] Debounced duplicate Emergency RTL click - active command in progress', 'info');
+      return this.activeRtlPromise;
+    }
+
+    this.lastRtlCommandTime = now;
     this.addStatusMessage('WARNING', 4, 'Initiating Emergency Return-To-Launch (RTL)...');
     const isConnected = this.connectionState.isConnected || this.connectionState.isUsbConnected;
-    if (this.connectionState.isRealHardware || isConnected) {
-      await this.setFlightMode('RTL');
-      return true;
+
+    if (isConnected) {
+      this.activeRtlPromise = (async () => {
+        try {
+          const success = await this.setFlightMode('RTL');
+          if (success) {
+            this.telemetry.flightMode = 'RTL';
+            this.notifyTelemetry();
+          }
+          return success;
+        } finally {
+          this.activeRtlPromise = null;
+        }
+      })();
+      return this.activeRtlPromise;
     } else {
       this.telemetry.flightMode = 'RTL';
       this.telemetry.targetAltitude = 25;
@@ -2661,11 +2718,23 @@ class MAVLinkService {
             onProgress?.('Verifying mission readback from Pixhawk...', items.length, items.length);
             this.logDiagnostic('MAVLINK', `[MISSION READBACK] Starting verification readback for ${items.length} items...`, 'info');
             try {
+              // Allow 500ms for Pixhawk STM32 EEPROM/flash memory commit to complete
+              await new Promise((r) => setTimeout(r, 500));
               const readbackTimeout = Math.max(8000, items.length * 600);
-              const readback = await this.downloadMissionWaypoints(readbackTimeout);
+              let readback = await this.downloadMissionWaypoints(readbackTimeout);
+
+              // If initial readback caught storage mid-commit (0 items), retry up to 3 times with 800ms pauses
+              let readbackRetries = 1;
+              while (readback.success && readback.items.length === 0 && items.length > 0 && readbackRetries < 3) {
+                readbackRetries++;
+                this.logDiagnostic('MAVLINK', `[MISSION READBACK] Initial readback returned 0 items; retrying after flash write settle (attempt ${readbackRetries}/3)...`, 'warn');
+                await new Promise((r) => setTimeout(r, 800));
+                readback = await this.downloadMissionWaypoints(readbackTimeout);
+              }
+
               if (readback.success) {
                 if (readback.items.length !== items.length) {
-                  const mismatchErr = `Readback count mismatch: Pixhawk stored ${readback.items.length} items, expected ${items.length}.`;
+                  const mismatchErr = `Readback count mismatch: Pixhawk stored ${readback.items.length} items, expected ${items.length}. Check "Bypass checks" below to fly in GUIDED mode.`;
                   this.logDiagnostic('ERROR', mismatchErr, 'error');
                   resolve({ success: false, message: mismatchErr, upload_id });
                   return;
@@ -2837,6 +2906,10 @@ class MAVLinkService {
       onProgress?.('Mission saved to simulator ✓', items.length, items.length);
       return { success: true, message: `Simulator stored ${items.length} mission waypoints`, upload_id };
     }
+  }
+
+  public getPendingMissionItems(): MavlinkMissionItem[] {
+    return this.pendingMissionItems || [];
   }
 
   public async sendMissionItem(
@@ -3136,7 +3209,7 @@ class MAVLinkService {
     }
   }
 
-  private async sendMavlinkCommandLong(
+  public async sendMavlinkCommandLong(
     command: number,
     param1: number = 0,
     param2: number = 0,

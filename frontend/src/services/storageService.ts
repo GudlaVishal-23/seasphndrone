@@ -9,23 +9,39 @@ class StorageService {
     try {
       const data = localStorage.getItem(STORAGE_KEY);
       if (data) {
-        return JSON.parse(data);
+        const parsed: MissionLogEntry[] = JSON.parse(data);
+        if (Array.isArray(parsed)) {
+          return parsed.slice(0, 5);
+        }
       }
     } catch (e) {
       console.warn('Failed to parse mission logs', e);
     }
-    // Return sample mission logs if empty
-    return this.getSampleLogs();
+    return [];
   }
 
   public saveMissionLog(entry: MissionLogEntry) {
     if (typeof window === 'undefined') return;
     try {
       const current = this.getMissionLogs();
-      const updated = [entry, ...current.filter((item) => item.id !== entry.id)];
+      // Keep strictly the 5 most recent missions (auto-purging older records beyond 5)
+      const updated = [entry, ...current.filter((item) => item.id !== entry.id)].slice(0, 5);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
     } catch (e) {
       console.warn('Failed to save mission log', e);
+    }
+  }
+
+  public deleteMissionLog(id: string): MissionLogEntry[] {
+    if (typeof window === 'undefined') return [];
+    try {
+      const current = this.getMissionLogs();
+      const updated = current.filter((item) => item.id !== id).slice(0, 5);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      return updated;
+    } catch (e) {
+      console.warn('Failed to delete mission log', e);
+      return this.getMissionLogs();
     }
   }
 
@@ -62,7 +78,9 @@ class StorageService {
       'LandingStatus',
       'CompletionStatus',
       'HomeLat',
-      'HomeLon'
+      'HomeLon',
+      'WaypointsCount',
+      'FlightPathPoints'
     ];
 
     const rows = logs.map((log) => [
@@ -77,7 +95,9 @@ class StorageService {
       log.landingStatus,
       log.completionStatus,
       log.homePoint?.latitude || 0,
-      log.homePoint?.longitude || 0
+      log.homePoint?.longitude || 0,
+      log.waypoints?.length || 0,
+      log.flightPath?.length || 0
     ]);
 
     return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
@@ -94,45 +114,6 @@ class StorageService {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }
-
-  private getSampleLogs(): MissionLogEntry[] {
-    return [
-      {
-        id: 'SAE_MSN_001',
-        missionNumber: 1,
-        startTime: Date.now() - 3600000 * 2,
-        endTime: Date.now() - 3600000 * 2 + 161000,
-        durationSeconds: 161, // 02:41
-        homePoint: {
-          latitude: 12.971598,
-          longitude: 77.594562,
-          altitude: 920.0,
-          timestamp: Date.now() - 3600000 * 2,
-          isSet: true
-        },
-        qrResult: '27',
-        runnerAckReceived: true,
-        runnerAckLatencyMs: 142,
-        rtlStatus: 'COMPLETED',
-        landingStatus: 'COMPLETED',
-        completionStatus: 'SUCCESS',
-        stateTransitions: [
-          { state: 'IDLE', timestamp: Date.now() - 161000 },
-          { state: 'HOME_SET', timestamp: Date.now() - 158000 },
-          { state: 'TAKEOFF', timestamp: Date.now() - 150000 },
-          { state: 'SEARCHING', timestamp: Date.now() - 130000 },
-          { state: 'QR_DETECTED', timestamp: Date.now() - 85000 },
-          { state: 'QR_DECODED', timestamp: Date.now() - 80000, note: 'Code 27 Validated' },
-          { state: 'SEND_TO_RUNNER', timestamp: Date.now() - 78000 },
-          { state: 'RUNNER_CONFIRMED', timestamp: Date.now() - 76000, note: 'Runner ACK in 142ms' },
-          { state: 'RTL', timestamp: Date.now() - 74000 },
-          { state: 'RETURNING_HOME', timestamp: Date.now() - 70000 },
-          { state: 'LANDING', timestamp: Date.now() - 20000 },
-          { state: 'MISSION_COMPLETE', timestamp: Date.now() }
-        ]
-      }
-    ];
   }
 }
 

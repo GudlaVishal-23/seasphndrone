@@ -19,7 +19,29 @@ export default {
           warning: '#f59e0b',
           danger: '#ef4444',
           hud: '#00f0ff'
-        }
+        },
+        surface: {
+          DEFAULT: '#121315',
+          dim: '#121315',
+          bright: '#38393b',
+          'container-lowest': '#0d0e10',
+          'container-low': '#1b1c1e',
+          container: '#1f2022',
+          'container-high': '#292a2c',
+          'container-highest': '#343537',
+          variant: '#343537'
+        },
+        'primary-container': '#2f6fd6',
+        'on-primary-container': '#f8f8ff',
+        'secondary-container': '#ee9800',
+        'on-secondary-container': '#5b3800',
+        'tertiary-container': '#008442',
+        'on-tertiary-container': '#e8ffe8',
+        'error-container': '#93000a',
+        'on-error-container': '#ffdad6',
+        'on-surface': '#e3e2e4',
+        'on-surface-variant': '#c2c6d5',
+        'stitch-outline': '#8c909e'
       },
       fontFamily: {
         mono: ['JetBrains Mono', 'Menlo', 'Monaco', 'Courier New', 'monospace'],

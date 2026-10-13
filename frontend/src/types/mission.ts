@@ -137,6 +137,9 @@ export interface DroneTelemetry {
   groundSpeed: number;
   verticalSpeed: number;
   heading: number;
+  pitch?: number;
+  roll?: number;
+  satellitesVisible?: number;
   batteryPercent: number;
   batteryVoltage: number;
   batteryCurrent?: number;
@@ -255,14 +258,30 @@ export interface MissionLogEntry {
   endTime: number;
   durationSeconds: number;
   homePoint: HomePoint;
+  flightPath?: Array<{ lat: number; lng: number; alt?: number; timestamp?: number }>;
+  waypoints?: Array<{ seq: number; lat: number; lng: number; alt: number; command?: number; action?: string; param1?: number; param2?: number }>;
+  telemetrySnapshot?: {
+    maxAltitude?: number;
+    avgSpeed?: number;
+    batteryUsedPercent?: number;
+    batteryStartVoltage?: number;
+    batteryEndVoltage?: number;
+    satellites?: number;
+    flightMode?: string;
+  };
   qrResult: string;
+  qrData?: {
+    code: string;
+    detectedAt?: number;
+    confidence?: number;
+  };
   verifiedSnapshotUrl?: string;
   photosAnalyzedCount?: number;
   photosPurgedCount?: number;
   runnerAckReceived: boolean;
   runnerAckLatencyMs: number;
-  rtlStatus: 'COMPLETED' | 'FAILED' | 'EMERGENCY_RTL';
-  landingStatus: 'COMPLETED' | 'MANUAL_TAKEOVER' | 'FAILED';
-  completionStatus: 'SUCCESS' | 'TIMEOUT' | 'ABORTED';
+  rtlStatus: 'COMPLETED' | 'FAILED' | 'EMERGENCY_RTL' | string;
+  landingStatus: 'COMPLETED' | 'MANUAL_TAKEOVER' | 'FAILED' | string;
+  completionStatus: 'SUCCESS' | 'TIMEOUT' | 'ABORTED' | 'EMERGENCY_RTL' | string;
   stateTransitions: Array<{ state: MissionState; timestamp: number; note?: string }>;
 }

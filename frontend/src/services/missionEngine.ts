@@ -101,6 +101,14 @@ class MissionEngine {
   private rtlCommandSent: boolean = false;
   private forceBypassChecks: boolean = false;
 
+  // Real-time Flight Metrics & Breadcrumb Logging
+  private recordedFlightPath: Array<{ lat: number; lng: number; alt?: number; timestamp?: number }> = [];
+  private maxRecordedAltitude: number = 0;
+  private recordedSpeedSamples: number[] = [];
+  private startBatteryVoltage: number = 0;
+  private lastBreadcrumbTime: number = 0;
+  private lastRtlTriggerTime: number = 0;
+
   constructor() {
     this.currentMissionNumber = storageService.getNextMissionNumber();
     if (typeof window !== 'undefined') {
@@ -254,6 +262,42 @@ class MissionEngine {
 
     // 3. Subscribe to Pixhawk MAVLink Telemetry for Motor Spin & Altitude Transitions
     mavlinkService.subscribeTelemetry((telemetry) => {
+      // Track real flight telemetry metrics and GPS breadcrumb path
+      if (this.currentState !== 'IDLE' && this.currentState !== 'LANDED') {
+        const now = Date.now();
+        if (telemetry.altitude > this.maxRecordedAltitude) {
+          this.maxRecordedAltitude = +telemetry.altitude.toFixed(1);
+        }
+        if (telemetry.groundSpeed > 0.2) {
+          this.recordedSpeedSamples.push(telemetry.groundSpeed);
+        }
+        if (
+          telemetry.gps &&
+          telemetry.gps.isLocked &&
+          telemetry.gps.latitude !== 0 &&
+          telemetry.gps.longitude !== 0 &&
+          (now - this.lastBreadcrumbTime >= 1000)
+        ) {
+          this.lastBreadcrumbTime = now;
+          this.recordedFlightPath.push({
+            lat: telemetry.gps.latitude,
+            lng: telemetry.gps.longitude,
+            alt: telemetry.altitude,
+            timestamp: now
+          });
+        }
+      }
+
+      // Handle RTL state confirmation from FC telemetry
+      if ((this.commandAuthority === 'RTL' || this.currentState === 'RTL_REQUESTED') && (telemetry.flightMode || '').toUpperCase() === 'RTL') {
+        if (this.currentState === 'RTL_REQUESTED') {
+          this.transitionTo('RTL', 'MAVLink RTL Mode Confirmed by Pixhawk.');
+          if (telemetry.altitude > 1.0) {
+            this.transitionTo('RETURNING_HOME', 'Airborne RTL in progress.');
+          }
+        }
+      }
+
       // Strict FC Arming Gate: Only start takeoff and countdown timer when FC reports isArmed === true
       if (this.isAwaitingFcMotorStart && telemetry.isArmed) {
         this.onFcMotorsStartedConfirmed();
@@ -874,6 +918,10 @@ class MissionEngine {
     this.elapsedSeconds = 0;
     this.remainingSeconds = this.missionDurationLimitSec;
     this.rtlCommandSent = false;
+    this.recordedFlightPath = [];
+    this.maxRecordedAltitude = 0;
+    this.recordedSpeedSamples = [];
+    this.startBatteryVoltage = mavlinkService.getTelemetry().batteryVoltage;
 
     // Set Command Authority to AUTONOMOUS
     this.commandAuthority = 'AUTONOMOUS';
@@ -1026,8 +1074,16 @@ class MissionEngine {
   /**
    * Manual or Emergency RTL Trigger:
    * Transfers Command Authority to RTL and commands flight controller Return-To-Launch.
+   * Fast, reliable response even when clicked repeatedly.
    */
   public triggerEmergencyRTL(reason: string = 'Manual Operator Emergency RTL Command') {
+    const now = Date.now();
+    // Debounce repeated rapid presses within 400ms without blocking or delaying active operation
+    if (this.lastRtlTriggerTime && now - this.lastRtlTriggerTime < 400) {
+      return;
+    }
+    this.lastRtlTriggerTime = now;
+
     if (this.waitingForAckTimer) clearTimeout(this.waitingForAckTimer);
     searchEngine.stopSearch(reason);
 
@@ -1035,19 +1091,28 @@ class MissionEngine {
     this.notifyAuthority();
     this.rtlCommandSent = true;
 
-    this.transitionTo('RTL_REQUESTED', reason);
+    // Only transition if not already in RTL or RETURNING_HOME
+    if (this.currentState !== 'RTL' && this.currentState !== 'RETURNING_HOME') {
+      this.transitionTo('RTL_REQUESTED', reason);
+    }
+
     audioService.playRtlAlert();
     audioService.triggerHaptic('warning');
 
-    mavlinkService.commandRTL();
-    this.persistState();
+    // Send through MAVLink connection and confirm acceptance
+    mavlinkService.commandRTL().then((accepted) => {
+      if (accepted) {
+        if (this.currentState === 'RTL_REQUESTED') {
+          this.transitionTo('RTL', 'MAVLink RTL Mode Confirmed by Pixhawk.');
+          const alt = mavlinkService.getTelemetry().altitude;
+          if (alt > 1.0) {
+            this.transitionTo('RETURNING_HOME', 'Airborne RTL in progress.');
+          }
+        }
+      }
+    });
 
-    setTimeout(() => {
-      this.transitionTo('RTL', 'MAVLink RTL Active: Returning to Home.');
-      setTimeout(() => {
-        this.transitionTo('RETURNING_HOME', 'Airborne RTL in progress.');
-      }, 2000);
-    }, 1000);
+    this.persistState();
   }
 
   private handleMissionTimeout() {
@@ -1085,6 +1150,12 @@ class MissionEngine {
     if (this.timerInterval) clearInterval(this.timerInterval);
     if (this.waitingForAckTimer) clearTimeout(this.waitingForAckTimer);
 
+    const telem = mavlinkService.getTelemetry();
+    const plannedItems = mavlinkService.getPendingMissionItems();
+    const avgSpeed = this.recordedSpeedSamples.length > 0
+      ? +(this.recordedSpeedSamples.reduce((a, b) => a + b, 0) / this.recordedSpeedSamples.length).toFixed(2)
+      : undefined;
+
     const stats = visionService.getStats();
     const logEntry: MissionLogEntry = {
       id: this.currentMissionId || `SAE_MSN_${Date.now()}`,
@@ -1093,7 +1164,28 @@ class MissionEngine {
       endTime: Date.now(),
       durationSeconds: this.elapsedSeconds,
       homePoint: mavlinkService.getHomePoint(),
+      flightPath: this.recordedFlightPath.length > 0 ? [...this.recordedFlightPath] : undefined,
+      waypoints: plannedItems.length > 0 ? plannedItems.map((it) => ({
+        seq: it.seq ?? 0,
+        lat: it.lat,
+        lng: it.lon,
+        alt: it.alt,
+        command: it.command
+      })) : undefined,
+      telemetrySnapshot: {
+        maxAltitude: this.maxRecordedAltitude > 0 ? this.maxRecordedAltitude : undefined,
+        avgSpeed,
+        batteryStartVoltage: this.startBatteryVoltage > 0 ? this.startBatteryVoltage : undefined,
+        batteryEndVoltage: telem.batteryVoltage > 0 ? telem.batteryVoltage : undefined,
+        satellites: telem.gps?.satellites ?? telem.satellitesVisible,
+        flightMode: telem.flightMode
+      },
       qrResult: this.currentQRData?.code || 'NONE',
+      qrData: this.currentQRData ? {
+        code: this.currentQRData.code,
+        detectedAt: this.currentQRData.detectedAt,
+        confidence: this.currentQRData.confidence
+      } : undefined,
       verifiedSnapshotUrl: stats.latestVerifiedPhoto || undefined,
       photosAnalyzedCount: stats.photosAnalyzedCount,
       photosPurgedCount: stats.photosPurgedCount,

@@ -143,7 +143,68 @@ export const App: React.FC = () => {
 
   // Commander Fly Ground Station Dashboard (Exact reproduction of reference)
   if (currentRole === 'GROUND_STATION') {
-    return <DashboardPage onLogout={handleLogout} />;
+    return (
+      <DashboardPage
+        onLogout={handleLogout}
+        onSwitchRole={(role) => authService.switchRole(role)}
+        currentRole={currentRole}
+      />
+    );
+  }
+
+  // Dedicated Field Runner Experience (Completely separated from Ground Station)
+  if (currentRole === 'RUNNER') {
+    return (
+      <div className="min-h-screen bg-sae-dark text-slate-100 flex flex-col font-sans select-none">
+        {/* Dedicated Minimal Runner Top Bar */}
+        <header className="h-[52px] px-3 sm:px-6 bg-[#0c1322] border-b border-slate-800 flex items-center justify-between select-none z-40 shadow-lg">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-emerald-950/60 border border-emerald-500/50 flex items-center justify-center text-emerald-400 font-black">
+              🏃
+            </div>
+            <div>
+              <span className="font-orbitron font-extrabold text-[13px] tracking-wide text-white block leading-none">
+                FIELD RUNNER UNIT
+              </span>
+              <span className="text-[10px] text-slate-400 font-mono">
+                SAE INDIA ADDC 2026 • GROUND OPERATIVE
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => authService.switchRole('GROUND_STATION')}
+              className="px-3 py-1.5 rounded-lg bg-sky-950/60 hover:bg-sky-900/60 border border-sky-500/40 text-sky-300 hover:text-white text-[11px] font-sans font-bold flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-sm"
+              title="Switch to Ground Control Station (GCS) Cockpit"
+            >
+              <span>🛰️</span>
+              <span>SWITCH TO GROUND STATION</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-red-950/60 hover:text-red-300 border border-slate-800 text-slate-400 text-[11px] font-sans font-semibold transition cursor-pointer"
+              title="Log Out"
+            >
+              LOGOUT
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 p-2 sm:p-4 overflow-y-auto">
+          <RunnerDashboard
+            runnerLink={runnerLink}
+            missionState={missionState}
+            remainingSeconds={remainingSeconds}
+            elapsedSeconds={elapsedSeconds}
+            onSwitchToGroundStation={() => authService.switchRole('GROUND_STATION')}
+          />
+        </main>
+      </div>
+    );
   }
 
   return (
@@ -176,15 +237,6 @@ export const App: React.FC = () => {
             runnerAckLatencyMs={runnerAckLatencyMs}
             onQRDetected={handleQRDetected}
             onEmergencyRTL={handleEmergencyRTL}
-          />
-        )}
-
-        {currentRole === 'RUNNER' && (
-          <RunnerDashboard
-            runnerLink={runnerLink}
-            missionState={missionState}
-            remainingSeconds={remainingSeconds}
-            elapsedSeconds={elapsedSeconds}
           />
         )}
 

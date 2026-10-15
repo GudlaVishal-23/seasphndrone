@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { RunnerLinkState, DroneQRDispatchPayload } from '../../types/runner';
 import { MissionState } from '../../types/mission';
 import { runnerCommService } from '../../services/runnerCommService';
@@ -12,7 +12,8 @@ import {
   Wifi, 
   AlertTriangle,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Lock
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -22,6 +23,7 @@ interface RunnerDashboardProps {
   remainingSeconds: number;
   elapsedSeconds: number;
   className?: string;
+  onSwitchToGroundStation?: () => void;
 }
 
 export const RunnerDashboard: React.FC<RunnerDashboardProps> = ({
@@ -29,12 +31,24 @@ export const RunnerDashboard: React.FC<RunnerDashboardProps> = ({
   missionState,
   remainingSeconds,
   elapsedSeconds,
-  className = ''
+  className = '',
+  onSwitchToGroundStation,
 }) => {
   const [receivedCode, setReceivedCode] = useState<string | null>(runnerLink.latestReceivedQR || null);
   const [ackDispatched, setAckDispatched] = useState<boolean>(false);
   const [receiptTimestamp, setReceiptTimestamp] = useState<number | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
+
+  // ADDC 2026 Ground Operative Puzzle Digits (Rulebook Fig. 1 & Sec. 3.1.3)
+  const [puzzleDigit1, setPuzzleDigit1] = useState<string>('');
+  const [puzzleDigit2, setPuzzleDigit2] = useState<string>('');
+  const puzzleInput2Ref = useRef<HTMLInputElement>(null);
+
+  const droneD1 = receivedCode && receivedCode.length >= 1 ? receivedCode[0] : '-';
+  const droneD2 = receivedCode && receivedCode.length >= 2 ? receivedCode[1] : '-';
+  const puzD1 = puzzleDigit1 || '-';
+  const puzD2 = puzzleDigit2 || '-';
+  const isMasterCodeComplete = Boolean(receivedCode && receivedCode.length >= 2 && puzzleDigit1 && puzzleDigit2);
 
   useEffect(() => {
     // Subscribe to direct wireless packets from Drone Android
@@ -70,7 +84,7 @@ export const RunnerDashboard: React.FC<RunnerDashboardProps> = ({
     };
   }, []);
 
-  const totalDuration = missionEngine.getMissionDurationSeconds() || 180;
+  const totalDuration = missionEngine.getMissionDurationSeconds() || 300;
   const formatTime = (totalSecs: number) => {
     const mins = Math.floor(totalSecs / 60);
     const secs = totalSecs % 60;
@@ -99,7 +113,7 @@ export const RunnerDashboard: React.FC<RunnerDashboardProps> = ({
           </div>
         </div>
 
-        {/* Wireless Link Status */}
+        {/* Wireless Link Status & GCS Quick Return */}
         <div className="flex items-center space-x-2 text-xs self-start sm:self-auto">
           <div className="bg-slate-950 px-3 py-1 rounded-lg border border-slate-800 text-slate-300 flex items-center space-x-1.5">
             <Wifi className="w-3.5 h-3.5 text-sky-400" />
@@ -108,6 +122,17 @@ export const RunnerDashboard: React.FC<RunnerDashboardProps> = ({
           <div className="bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800 text-emerald-400 font-bold text-xs">
             ~12m Proximity
           </div>
+          {onSwitchToGroundStation && (
+            <button
+              type="button"
+              onClick={onSwitchToGroundStation}
+              className="px-2.5 py-1 rounded-lg bg-sky-950/80 hover:bg-sky-900 border border-sky-500/40 text-sky-300 hover:text-white font-sans text-xs font-bold transition cursor-pointer flex items-center space-x-1"
+              title="Return to Ground Station Cockpit"
+            >
+              <span>🛰️</span>
+              <span>GCS</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -257,6 +282,106 @@ export const RunnerDashboard: React.FC<RunnerDashboardProps> = ({
           </div>
         </div>
 
+      </div>
+
+      {/* ============================================================ */}
+      {/* 4-DIGIT COMBINATION STATION (ADDC 2026 RULEBOOK SECTION 3.1.3) */}
+      {/* [ UAV Digits 1 & 2 ] + [ Ground Puzzle Digits 3 & 4 ]         */}
+      {/* ============================================================ */}
+      <div className="bg-slate-900/90 p-4 sm:p-5 rounded-2xl border-2 border-slate-800 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 border-b border-slate-800 pb-2.5">
+          <div className="flex items-center space-x-2">
+            <Lock className="w-4 h-4 text-amber-400" />
+            <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-slate-200">
+              INTELLIGENCE CACHE 4-DIGIT COMBINATION LOCK (30 PTS)
+            </span>
+          </div>
+          <span className="text-[10px] text-slate-400 font-bold uppercase">
+            RULEBOOK FIG. 1: [UAV 2 DIGITS] + [RUNNER 2 DIGITS]
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
+          {/* Section A: UAV Sourced Digits 1 & 2 */}
+          <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80 flex flex-col items-center">
+            <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider mb-1 flex items-center space-x-1">
+              <span>AIRBORNE DRONE DIGITS (1 & 2)</span>
+            </span>
+            <div className="flex space-x-2 my-1">
+              <div className="w-12 h-14 bg-slate-900 border-2 border-sky-500 rounded-lg flex items-center justify-center text-3xl font-black text-sky-300 shadow-lg shadow-sky-500/20">
+                {droneD1}
+              </div>
+              <div className="w-12 h-14 bg-slate-900 border-2 border-sky-500 rounded-lg flex items-center justify-center text-3xl font-black text-sky-300 shadow-lg shadow-sky-500/20">
+                {droneD2}
+              </div>
+            </div>
+            <span className="text-[10px] text-slate-400 mt-1">
+              {receivedCode ? 'AUTO-DISPATCHED FROM UAV' : 'Awaiting drone scan...'}
+            </span>
+          </div>
+
+          {/* Section B: Ground Puzzle Digits 3 & 4 */}
+          <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80 flex flex-col items-center">
+            <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider mb-1 flex items-center space-x-1">
+              <span>GROUND PUZZLE DIGITS (3 & 4)</span>
+            </span>
+            <div className="flex space-x-2 my-1">
+              <input
+                type="text"
+                maxLength={1}
+                value={puzzleDigit1}
+                placeholder="P1"
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, '');
+                  setPuzzleDigit1(val);
+                  if (val && puzzleInput2Ref.current) puzzleInput2Ref.current.focus();
+                }}
+                className="w-12 h-14 bg-slate-900 border-2 border-amber-500/80 focus:border-amber-400 rounded-lg text-center text-3xl font-black text-amber-300 outline-none shadow-lg shadow-amber-500/20"
+              />
+              <input
+                ref={puzzleInput2Ref}
+                type="text"
+                maxLength={1}
+                value={puzzleDigit2}
+                placeholder="P2"
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, '');
+                  setPuzzleDigit2(val);
+                }}
+                className="w-12 h-14 bg-slate-900 border-2 border-amber-500/80 focus:border-amber-400 rounded-lg text-center text-3xl font-black text-amber-300 outline-none shadow-lg shadow-amber-500/20"
+              />
+            </div>
+            <span className="text-[10px] text-slate-400 mt-1">
+              Enter digits from Puzzle Stations 1 & 2
+            </span>
+          </div>
+
+          {/* Section C: Master 4-Digit Unlock Keypad Code */}
+          <div className={`p-3 rounded-xl border flex flex-col items-center justify-center transition-all ${
+            isMasterCodeComplete
+              ? 'bg-gradient-to-br from-emerald-950/80 to-slate-950 border-emerald-500 shadow-xl shadow-emerald-500/20'
+              : 'bg-slate-950/80 border-slate-800'
+          }`}>
+            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">
+              ELECTRONIC KEYPAD COMBINATION
+            </span>
+            <div className={`text-3xl sm:text-4xl font-black tracking-widest my-1 ${
+              isMasterCodeComplete ? 'text-emerald-400 animate-pulse' : 'text-slate-500'
+            }`}>
+              {droneD1} {droneD2} {puzD1} {puzD2}
+            </div>
+            <div className="text-[10px] font-bold mt-1">
+              {isMasterCodeComplete ? (
+                <span className="text-emerald-400 flex items-center space-x-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  <span>READY TO UNLOCK CACHE BOX</span>
+                </span>
+              ) : (
+                <span className="text-slate-400">Combine all 4 digits to unlock</span>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Diagnostics / Protocol Handshake (Collapsible for zero clutter) */}

@@ -1829,6 +1829,16 @@ class MAVLinkService {
           const vz = view.getInt16(24, true) / 100;
           const hdg = view.getUint16(26, true) / 100;
 
+          // Update vertical climb/descent speed from NED Z velocity (vz > 0 is down, vz < 0 is up)
+          if (Number.isFinite(vz)) {
+            this.telemetry.verticalSpeed = +(-vz).toFixed(2);
+          }
+          // Update ground speed from horizontal velocities vx and vy
+          const horizSpeed = +Math.hypot(vx, vy).toFixed(2);
+          if (Number.isFinite(horizSpeed)) {
+            this.telemetry.groundSpeed = horizSpeed;
+          }
+
           if (Math.abs(lat) > 0.001 && Math.abs(lon) > 0.001) {
             this.telemetry.latitude = lat;
             this.telemetry.longitude = lon;
@@ -2598,10 +2608,12 @@ class MAVLinkService {
       this.notifyTelemetry();
       return true;
     } else {
-      // Simulated drone response: update altitude and mode
+      // Simulated drone response: update altitude, vertical speed, and mode
       this.telemetry.flightMode = 'GUIDED';
       this.telemetry.targetAltitude = clampedAlt;
+      const prevAlt = this.telemetry.altitude || 0;
       this.telemetry.altitude = clampedAlt;
+      this.telemetry.verticalSpeed = clampedAlt > prevAlt ? 1.5 : clampedAlt < prevAlt ? -1.2 : 0.0;
       this.notifyTelemetry();
       return true;
     }

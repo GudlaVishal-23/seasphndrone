@@ -8,10 +8,12 @@ import {
   Gamepad2,
   Battery,
   Crosshair,
+  Smartphone,
   Settings,
   LogOut,
 } from 'lucide-react';
 import { DashboardTelemetryData } from '../../hooks/useDashboardTelemetry';
+import { AppRole } from '../../types/mission';
 
 interface HeaderProps {
   telemetry: DashboardTelemetryData;
@@ -22,6 +24,8 @@ interface HeaderProps {
   onArmClick?: () => void;
   onToggleRC?: () => void;
   rcOverrideEnabled?: boolean;
+  onSwitchRole?: (role: AppRole) => void;
+  currentRole?: AppRole;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -33,15 +37,17 @@ export const Header: React.FC<HeaderProps> = ({
   onArmClick,
   onToggleRC,
   rcOverrideEnabled = true,
+  onSwitchRole,
+  currentRole = 'GROUND_STATION',
 }) => {
   const isArmed = telemetry.isArmed;
 
   return (
     <header className="h-[65px] w-full px-3 bg-[var(--uav-header)] border-b border-[var(--uav-card-border)] flex items-center justify-between select-none shrink-0 z-40">
-      {/* 1. Left: Brand & Wordmark */}
+      {/* 1. Left: Brand & Wordmark + Role Mode Switcher */}
       <div className="flex items-center gap-3">
         {/* Custom Quadcopter Glyph */}
-        <div className="w-8 h-8 rounded-[8px] bg-[#162744] border border-[#233C66] flex items-center justify-center text-[var(--uav-icon-blue)]">
+        <div className="w-8 h-8 rounded-[8px] bg-[#161B22] border border-[#262C36] flex items-center justify-center text-emerald-400">
           <svg
             width="20"
             height="20"
@@ -65,21 +71,47 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         <div className="flex flex-col justify-center">
-          <span className="font-orbitron font-extrabold text-[15px] tracking-[0.08em] text-[var(--uav-text)] leading-none">
-            UAV CONTROL
-          </span>
-          <span className="text-[10px] font-sans text-[var(--uav-muted)] tracking-wide mt-0.5">
-            Autonomous Flight System
+          <div className="flex items-center gap-2">
+            <span className="font-orbitron font-black text-[17px] tracking-[0.14em] text-white leading-none text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-200 to-amber-300">
+              SKYCON
+            </span>
+            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-400/30 text-[9px] font-mono font-bold text-emerald-300 tracking-wider">
+              TACTICAL GCS
+            </span>
+          </div>
+          <span className="text-[10px] font-mono text-[var(--uav-muted)] tracking-wider mt-0.5">
+            SAE INDIA ADDC 2026 • AUTONOMOUS RESCUE SYSTEM
           </span>
         </div>
+
+        {/* Dedicated Operational Role Switcher (Separating Ground Station & Field Runner) */}
+        {onSwitchRole && (
+          <div className="hidden sm:flex items-center ml-2 rounded-[8px] border border-[var(--uav-card-border)] bg-[#0D1117] p-[2px] gap-[2px]">
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[11px] font-sans font-bold bg-[#10B981] text-black shadow-sm cursor-default"
+              title="Ground Station Cockpit Active"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-black animate-pulse" />
+              <span>GROUND STATION</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onSwitchRole('RUNNER')}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[11px] font-sans font-medium text-slate-400 hover:text-emerald-300 hover:bg-[#21262D] transition cursor-pointer"
+              title="Switch to Dedicated Field Runner Unit"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+              <span>FIELD RUNNER</span>
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* 2. Center: Segmented Navigation Group */}
-      <nav aria-label="Main Navigation" className="flex items-center rounded-[8px] border border-[var(--uav-card-border)] bg-[#0B1424] p-[2px] gap-[2px]">
+      {/* 2. Center: Segmented Navigation Group (Streamlined: Plan, Fly, Logs) */}
+      <nav aria-label="Main Navigation" className="flex items-center rounded-[8px] border border-[var(--uav-card-border)] bg-[#0D1117] p-[2px] gap-[2px]">
         {[
           { id: 'Plan', label: 'Plan', icon: <Calendar className="w-3.5 h-3.5" /> },
           { id: 'Fly', label: 'Fly', icon: <Send className="w-3.5 h-3.5" /> },
-          { id: 'Analyze', label: 'Analyze', icon: <BarChart3 className="w-3.5 h-3.5" /> },
           { id: 'Logs', label: 'Logs', icon: <FileText className="w-3.5 h-3.5" /> },
         ].map((tab) => {
           const isActive = tab.id === activeTab;
@@ -90,8 +122,8 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => onTabChange?.(tab.id)}
               className={`flex items-center gap-1.5 px-3 py-1 rounded-[6px] text-[12px] font-sans transition-all cursor-pointer ${
                 isActive
-                  ? 'bg-[var(--uav-primary-blue)] text-white font-semibold'
-                  : 'text-[var(--uav-muted)] hover:text-[var(--uav-text)] hover:bg-[#142036]'
+                  ? 'bg-[#10B981] text-black font-bold'
+                  : 'text-[var(--uav-muted)] hover:text-[var(--uav-text)] hover:bg-[#21262D]'
               }`}
             >
               <span>{tab.icon}</span>
@@ -123,7 +155,7 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         {/* Satellites & HDOP Pill */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border border-[var(--uav-card-border)] bg-[#0F1829] text-[11px] font-mono text-[var(--uav-text)]">
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border border-[var(--uav-card-border)] bg-[#161B22] text-[11px] font-mono text-[var(--uav-text)]">
           <Satellite className="w-3.5 h-3.5 text-[var(--uav-muted)]" />
           <span>
             {telemetry.isFixture
@@ -144,7 +176,7 @@ export const Header: React.FC<HeaderProps> = ({
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border text-[11px] font-mono transition-all active:scale-95 cursor-pointer ${
             rcOverrideEnabled
               ? 'border-[#1b4d36] bg-[#0c2419] text-[#22C55E] hover:bg-[#123826]'
-              : 'border-[var(--uav-card-border)] bg-[#0F1829] text-slate-400 hover:text-white hover:bg-[#162744]'
+              : 'border-[var(--uav-card-border)] bg-[#161B22] text-slate-400 hover:text-white hover:bg-[#21262D]'
           }`}
         >
           <Gamepad2
@@ -158,7 +190,7 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         {/* Battery Percent & Voltage Pill */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border border-[var(--uav-card-border)] bg-[#0F1829] text-[11px] font-mono">
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border border-[var(--uav-card-border)] bg-[#161B22] text-[11px] font-mono">
           <Battery className="w-3.5 h-3.5 text-[var(--uav-amber)]" />
           <span className="text-[var(--uav-amber)] font-bold">
             {telemetry.batteryPercent}%
@@ -180,7 +212,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={onOpenSettings}
           title="Open Settings"
           aria-label="Open Settings"
-          className="w-8 h-8 rounded-[8px] border border-[var(--uav-card-border)] bg-[#0F1829] hover:bg-[#162744] hover:text-white flex items-center justify-center text-[var(--uav-muted)] transition cursor-pointer"
+          className="w-8 h-8 rounded-[8px] border border-[var(--uav-card-border)] bg-[#161B22] hover:bg-[#21262D] hover:text-white flex items-center justify-center text-[var(--uav-muted)] transition cursor-pointer"
         >
           <Settings className="w-4 h-4" />
         </button>
@@ -192,7 +224,7 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={onLogout}
             title="Log Out / Switch Operator"
             aria-label="Log Out / Switch Operator"
-            className="w-8 h-8 rounded-[8px] border border-[var(--uav-card-border)] bg-[#0F1829] hover:bg-red-950/60 hover:text-red-400 hover:border-red-500/40 flex items-center justify-center text-[var(--uav-muted)] transition cursor-pointer"
+            className="w-8 h-8 rounded-[8px] border border-[var(--uav-card-border)] bg-[#161B22] hover:bg-red-950/60 hover:text-red-400 hover:border-red-500/40 flex items-center justify-center text-[var(--uav-muted)] transition cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
           </button>

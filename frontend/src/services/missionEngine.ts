@@ -15,6 +15,7 @@ import { visionService } from './visionService';
 import { audioService } from './audioService';
 import { storageService } from './storageService';
 import { searchEngine } from './searchEngine';
+import { boxDetectionService } from './boxDetectionService';
 
 type MissionStateListener = (state: MissionState, elapsedSec: number, remainingSec: number) => void;
 type AuthorityListener = (authority: FlightCommandAuthority) => void;
@@ -70,8 +71,8 @@ interface PersistedMissionState {
 class MissionEngine {
   private currentState: MissionState = 'IDLE';
   private commandAuthority: FlightCommandAuthority = 'NONE';
-  private missionDurationLimitSec: number = 180; // Default 3-Minute Mission Window
-  private remainingSeconds: number = 180;
+  private missionDurationLimitSec: number = 300; // ADDC 2026 Official 5-Minute Competition Window
+  private remainingSeconds: number = 300;
   private elapsedSeconds: number = 0;
   private missionStartTime: number = 0;
   private timerInterval: any = null;
@@ -98,6 +99,7 @@ class MissionEngine {
 
   // Safety & Failsafe Watchdog Monitor
   private failsafeWatchdogTimer: any = null;
+  private targetHoldTimer: any = null;
   private rtlCommandSent: boolean = false;
   private forceBypassChecks: boolean = false;
 
@@ -114,7 +116,11 @@ class MissionEngine {
     if (typeof window !== 'undefined') {
       const savedDuration = localStorage.getItem(CONFIG_DURATION_KEY);
       if (savedDuration) {
-        const parsed = parseInt(savedDuration, 10);
+        let parsed = parseInt(savedDuration, 10);
+        if (parsed === 180) {
+          parsed = 300;
+          localStorage.setItem(CONFIG_DURATION_KEY, '300');
+        }
         if (!isNaN(parsed) && parsed > 0) {
           this.missionDurationLimitSec = parsed;
           this.remainingSeconds = parsed;
@@ -245,6 +251,18 @@ class MissionEngine {
   }
 
   private initListeners() {
+    // 0. Subscribe to Target Box Detector for Autonomous Deceleration & Inspection Hover
+    boxDetectionService.subscribeBox((box) => {
+      if (
+        box.isDetected &&
+        box.confidence >= 0.70 &&
+        this.commandAuthority === 'AUTONOMOUS' &&
+        this.currentState === 'SEARCHING'
+      ) {
+        this.handleTargetBoxSighted();
+      }
+    });
+
     // 1. Subscribe to Live QR Detection from Vision Service
     visionService.subscribeQR((data) => {
       if (data && data.isValidTwoDigit && this.commandAuthority === 'AUTONOMOUS') {
@@ -989,8 +1007,30 @@ class MissionEngine {
     audioService.triggerHaptic('warning');
   }
 
+  private handleTargetBoxSighted() {
+    this.transitionTo(
+      'OBJECT_DETECTED',
+      'Target Box locked (≥70% confidence). Autopilot executing 1.5s loiter/hover hold for optical QR decode.'
+    );
+    mavlinkService.commandHold();
+    audioService.playTargetLock();
+
+    if (this.targetHoldTimer) clearTimeout(this.targetHoldTimer);
+    this.targetHoldTimer = setTimeout(() => {
+      if (this.currentState === 'OBJECT_DETECTED' && this.commandAuthority === 'AUTONOMOUS') {
+        this.transitionTo('SEARCHING', 'Inspection hold completed without QR confirmation. Resuming search...');
+        searchEngine.resumeSearch('Inspection hold completed');
+        mavlinkService.commandStartSearch();
+      }
+    }, 4500);
+  }
+
   // Handle Target QR Detected while Airborne
   public handleQRDetected(data: DecodedQRData) {
+    if (this.targetHoldTimer) {
+      clearTimeout(this.targetHoldTimer);
+      this.targetHoldTimer = null;
+    }
     if (this.commandAuthority !== 'AUTONOMOUS') return;
     if (this.currentState !== 'SEARCHING' && this.currentState !== 'QR_DETECTED' && this.currentState !== 'OBJECT_DETECTED') {
       return;

@@ -105,6 +105,71 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // IP Camera Snapshot & Video Proxy (Zero CORS & Mixed Content bypass for untainted canvas access)
+  if (parsedUrl.pathname === '/api/ipcam/proxy') {
+    const targetUrl = parsedUrl.query.url;
+    if (!targetUrl) {
+      res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ error: 'Missing target url parameter' }));
+      return;
+    }
+
+    try {
+      const client = targetUrl.startsWith('https://') ? https : http;
+      const proxyReq = client.get(targetUrl, { timeout: 3000 }, (proxyRes) => {
+        res.writeHead(proxyRes.statusCode || 200, {
+          'Content-Type': proxyRes.headers['content-type'] || 'image/jpeg',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'no-cache, no-store, must-revalidate'
+        });
+        proxyRes.pipe(res);
+      });
+      proxyReq.on('error', (err) => {
+        res.writeHead(502, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ error: `Cannot reach phone camera: ${err.message}` }));
+      });
+      proxyReq.on('timeout', () => {
+        proxyReq.destroy();
+        res.writeHead(504, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ error: 'Camera connection timed out' }));
+      });
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // IP Camera Remote PTZ Zoom & Auto-Focus Control Endpoint (Controls Samsung S24 Hardware Zoom)
+  if (parsedUrl.pathname === '/api/ipcam/ptz') {
+    const targetBase = parsedUrl.query.target;
+    const zoomVal = parseInt(parsedUrl.query.zoom ?? '0', 10);
+    const triggerFocus = parsedUrl.query.focus === '1';
+
+    if (!targetBase) {
+      res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ error: 'Missing target camera address' }));
+      return;
+    }
+
+    const cleanBase = targetBase.replace(/\/+$/, '');
+    const zoomUrl = `${cleanBase}/ptz?zoom=${Math.max(0, Math.min(100, zoomVal))}`;
+    const client = cleanBase.startsWith('https://') ? https : http;
+
+    try {
+      client.get(zoomUrl, { timeout: 1500 }, () => {}).on('error', noop);
+      if (triggerFocus) {
+        client.get(`${cleanBase}/focus`, { timeout: 1500 }, () => {}).on('error', noop);
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ success: true, zoom: zoomVal }));
+    } catch {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ success: false }));
+    }
+    return;
+  }
+
   // Mission Upload Job Initiation Endpoint
   if (parsedUrl.pathname === '/mission/upload' && req.method === 'POST') {
     let body = '';

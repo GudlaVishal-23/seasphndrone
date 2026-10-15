@@ -4,21 +4,11 @@ import {
   ShieldAlert,
   CheckCircle2,
   X,
-  Compass,
   ArrowUp,
   ArrowDown,
   Pause,
-  PlaneTakeoff,
-  PlaneLanding,
   Crosshair,
-  Radio,
-  Sliders,
   Send,
-  Eye,
-  Camera,
-  Activity,
-  Layers,
-  RotateCw,
   Calendar,
 } from 'lucide-react';
 import { useDashboardTelemetry } from '../../hooks/useDashboardTelemetry';
@@ -38,21 +28,25 @@ import { WaypointManager } from './WaypointManager';
 import { FlightParams } from './FlightParams';
 import { MissionPatterns } from './MissionPatterns';
 import { TelemetryLog } from './TelemetryLog';
+import { FlightLogsDeck } from './FlightLogsDeck';
 import { AutonomousMissionConfigModal } from '../../components/Mission/AutonomousMissionConfigModal';
 import { MissionHistoryModal } from '../../components/History/MissionHistoryModal';
 import { SerialDiagnosticsModal } from '../../components/Drone/SerialDiagnosticsModal';
-import { CircleTestMissionModal } from '../../components/Mission/CircleTestMissionModal';
-import { LoiterTestMissionModal } from '../../components/Mission/LoiterTestMissionModal';
-import { CameraVisionHUD } from '../../components/Drone/CameraVisionHUD';
-import { TrafficViewRadar } from '../../components/GroundStation/TrafficViewRadar';
+import { AppRole } from '../../types/mission';
 
 interface DashboardPageProps {
   onLogout?: () => void;
+  onSwitchRole?: (role: AppRole) => void;
+  currentRole?: AppRole;
 }
 
-export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
+export const DashboardPage: React.FC<DashboardPageProps> = ({
+  onLogout,
+  onSwitchRole,
+  currentRole = 'GROUND_STATION',
+}) => {
   const telemetry = useDashboardTelemetry();
-  const [activeTab, setActiveTab] = useState<'Plan' | 'Fly' | 'Analyze' | 'Logs'>('Fly');
+  const [activeTab, setActiveTab] = useState<'Plan' | 'Fly' | 'Logs'>('Fly');
   const [activeNav, setActiveNav] = useState<string>('Dashboard');
   const [showArmModal, setShowArmModal] = useState<boolean>(false);
   const [showRtlModal, setShowRtlModal] = useState<boolean>(false);
@@ -67,15 +61,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
     };
   }, []);
 
-  // Modals & Overlays
+  // Modals & Overlays (Streamlined essential cockpit modals)
   const [isConfigModalOpen, setIsConfigModalOpen] = useState<boolean>(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
   const [isDiagnosticsModalOpen, setIsDiagnosticsModalOpen] = useState<boolean>(false);
   const [isFlightControlModalOpen, setIsFlightControlModalOpen] = useState<boolean>(false);
-  const [isVisionModalOpen, setIsVisionModalOpen] = useState<boolean>(false);
-  const [isCircleTestOpen, setIsCircleTestOpen] = useState<boolean>(false);
-  const [isLoiterTestOpen, setIsLoiterTestOpen] = useState<boolean>(false);
-  const [showTrafficRadar, setShowTrafficRadar] = useState<boolean>(false);
 
   const showNotification = (msg: string) => {
     setActionNotice(msg);
@@ -86,10 +76,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
     setActiveTab(tab as any);
     audioService.playBeep(700, 50);
 
-    if (tab === 'Analyze') {
-      setIsHistoryModalOpen(true);
-    } else if (tab === 'Logs') {
-      setIsDiagnosticsModalOpen(true);
+    if (tab === 'Logs') {
+      setActiveNav('Logs');
+      showNotification('Flight Logs & MAVLink Telemetry Deck active');
     } else if (tab === 'Plan') {
       showNotification('Plan Mode Active: Define waypoints, search patterns, and geofence.');
     } else if (tab === 'Fly') {
@@ -101,17 +90,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
     setActiveNav(nav);
     audioService.playBeep(650, 40);
 
-    if (nav === 'Mission') {
+    if (nav === 'Mission' || nav === 'Mission Plan') {
       setIsConfigModalOpen(true);
-    } else if (nav === 'Settings') {
-      setIsConfigModalOpen(true);
-    } else if (nav === 'Telemetry') {
+    } else if (nav === 'Diagnostics' || nav === 'Telemetry') {
       setIsDiagnosticsModalOpen(true);
+    } else if (nav === 'Logs' || nav === 'Flight Logs') {
+      setActiveTab('Logs');
     } else if (nav === 'Flight Control') {
       setIsFlightControlModalOpen(true);
-    } else if (nav === 'Camera & Vision') {
-      setIsVisionModalOpen(true);
-    } else if (nav === 'Dashboard') {
+    } else if (nav === 'Dashboard' || nav === 'Cockpit') {
+      setActiveTab('Fly');
       setActiveNav('Dashboard');
     }
   };
@@ -297,6 +285,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
         onTabChange={handleTabChange}
         onOpenSettings={() => setIsConfigModalOpen(true)}
         onLogout={onLogout}
+        onSwitchRole={onSwitchRole}
+        currentRole={currentRole}
         onArmClick={() => {
           if (telemetry.isArmed) {
             handleToggleArm();
@@ -310,16 +300,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
 
       {/* Plan Mode Tactical Planning Banner */}
       {activeTab === 'Plan' && (
-        <div className="w-full bg-[#0d223a] border-b border-[#1d4ed8] text-white px-4 py-2 flex items-center justify-between z-20 shadow-md">
-          <div className="flex items-center gap-2 text-[12px] font-semibold text-sky-300">
-            <Calendar className="w-4 h-4 text-sky-400" />
+        <div className="w-full bg-[#161B22] border-b border-[var(--uav-card-border)] text-white px-4 py-2 flex items-center justify-between z-20 shadow-md">
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-emerald-300">
+            <Calendar className="w-4 h-4 text-emerald-400" />
             <span>MISSION PLANNER ACTIVE: Click map to plot waypoints or configure autonomous search patterns in the right panel.</span>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handleUploadWaypoints}
-              className="px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-bold rounded flex items-center gap-1.5 transition cursor-pointer"
+              className="px-3 py-1 bg-[#10B981] hover:bg-[#059669] text-emerald-950 text-[11px] font-bold rounded flex items-center gap-1.5 transition cursor-pointer"
             >
               <Send className="w-3 h-3" />
               <span>Upload Plan</span>
@@ -330,7 +320,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
                 setActiveTab('Fly');
                 setActiveNav('Dashboard');
               }}
-              className="px-3 py-1 bg-[#162744] hover:bg-[#20365c] text-slate-300 hover:text-white text-[11px] font-bold rounded transition cursor-pointer"
+              className="px-3 py-1 bg-[#21262D] hover:bg-[#262C36] text-slate-300 hover:text-white text-[11px] font-bold rounded transition cursor-pointer"
             >
               Switch to Fly Cockpit
             </button>
@@ -373,7 +363,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
 
       {/* Floating Action Notice Banner */}
       {actionNotice && (
-        <div className="fixed top-20 right-6 z-50 bg-[#0F1829] border border-[var(--uav-primary-blue)] text-white px-4 py-2.5 rounded-lg shadow-2xl flex items-center gap-2 text-[12px] font-medium animate-in fade-in slide-in-from-top-4">
+        <div className="fixed top-20 right-6 z-50 bg-[#161B22] border border-[var(--uav-primary-blue)] text-white px-4 py-2.5 rounded-lg shadow-2xl flex items-center gap-2 text-[12px] font-medium animate-in fade-in slide-in-from-top-4">
           <CheckCircle2 className="w-4 h-4 text-[var(--uav-icon-blue)]" />
           <span>{actionNotice}</span>
         </div>
@@ -395,51 +385,69 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
 
         {/* Right Dashboard Content */}
         <main className="flex-1 flex flex-col p-3 gap-3 overflow-y-auto overflow-x-hidden min-w-0">
-          {/* Stat Row (66px) */}
-          <StatRow telemetry={telemetry} />
-
-          {/* Middle Row (540px) */}
-          <div className="grid grid-cols-[287px_1fr_419px] gap-3 h-[540px] items-stretch">
-            {/* Column 1: Instruments (287px) */}
-            <InstrumentColumn telemetry={telemetry} />
-
-            {/* Column 2: Map Panel (1fr) */}
-            <MapPanel
+          {activeTab === 'Logs' ? (
+            <FlightLogsDeck
               telemetry={telemetry}
-              onWaypointAdded={(_lat, _lon) => showNotification('Waypoint added to mission')}
+              onReturnToCockpit={() => {
+                setActiveTab('Fly');
+                setActiveNav('Dashboard');
+              }}
             />
+          ) : (
+            <>
+              {/* Stat Row (66px) */}
+              <StatRow telemetry={telemetry} />
 
-            {/* Column 3: Camera & Mission Status (419px) */}
-            <div className="flex flex-col gap-3 h-[540px] w-[419px] shrink-0">
-              <CameraFeed />
-              <MissionStatus
-                isArmed={telemetry.isArmed}
-                onUploadWaypoints={handleUploadWaypoints}
-                onArmAndFly={handleArmAndFly}
-              />
-            </div>
-          </div>
+              {/* Middle Row (540px) */}
+              <div className="grid grid-cols-[287px_1fr_419px] gap-3 h-[540px] items-stretch">
+                {/* Column 1: Instruments (287px) */}
+                <InstrumentColumn telemetry={telemetry} />
 
-          {/* Bottom Row (205px) */}
-          <div className="grid grid-cols-[1.32fr_1.02fr_0.88fr_1fr] gap-3 h-[205px] items-stretch">
-            <WaypointManager
-              onClearAll={() => showNotification('Mission waypoints cleared')}
-              onSaveKml={() => showNotification('Mission KML downloaded')}
-              onLoadKml={() => showNotification('Mission KML loaded')}
-            />
-            <FlightParams />
-            <MissionPatterns
-              onSelectPattern={(pat) => showNotification(`${pat} pattern generated`)}
-            />
-            <TelemetryLog isFixture={telemetry.isFixture} />
-          </div>
+                {/* Column 2: Map Panel (1fr) */}
+                <MapPanel
+                  telemetry={telemetry}
+                  onWaypointAdded={(_lat, _lon) => showNotification('Waypoint added to mission')}
+                />
+
+                {/* Column 3: Camera & Mission Status (419px) */}
+                <div className="flex flex-col gap-3 h-[540px] w-[419px] shrink-0">
+                  <CameraFeed telemetry={telemetry} />
+                  <MissionStatus
+                    isArmed={telemetry.isArmed}
+                    onUploadWaypoints={handleUploadWaypoints}
+                    onArmAndFly={handleArmAndFly}
+                  />
+                </div>
+              </div>
+
+              {/* Bottom Row (205px) */}
+              <div className="grid grid-cols-[1.32fr_1.02fr_0.88fr_1fr] gap-3 h-[205px] items-stretch">
+                <WaypointManager
+                  onClearAll={() => showNotification('Mission waypoints cleared')}
+                  onSaveKml={() => showNotification('Mission KML downloaded')}
+                  onLoadKml={() => showNotification('Mission KML loaded')}
+                />
+                <FlightParams />
+                <MissionPatterns
+                  onSelectPattern={(pat) => showNotification(`${pat} pattern generated`)}
+                />
+                <TelemetryLog
+                  isFixture={telemetry.isFixture}
+                  onExpandLogs={() => {
+                    setActiveTab('Logs');
+                    setActiveNav('Logs');
+                  }}
+                />
+              </div>
+            </>
+          )}
         </main>
       </div>
 
       {/* 4. Safety Confirmation Modal: ARM & FLY */}
       {showArmModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0F1829] border-2 border-emerald-500 rounded-[12px] max-w-md w-full p-6 text-white shadow-2xl space-y-4">
+          <div className="bg-[#161B22] border-2 border-emerald-500 rounded-[12px] max-w-md w-full p-6 text-white shadow-2xl space-y-4">
             <div className="flex items-center gap-3 text-emerald-400">
               <ShieldAlert className="w-8 h-8" />
               <div>
@@ -454,7 +462,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
               You are about to arm vehicle motors and initiate autonomous mission navigation. Ensure all personnel are clear of spinning propellers, GPS 3D fix is locked, and flight boundaries are secure.
             </p>
 
-            <div className="bg-[#0A1220] p-3 rounded-lg border border-[var(--uav-card-border)] space-y-1 text-[11px]">
+            <div className="bg-[#11161D] p-3 rounded-lg border border-[var(--uav-card-border)] space-y-1 text-[11px]">
               <div className="flex justify-between">
                 <span className="text-[var(--uav-muted)]">GPS Satellites:</span>
                 <span className="font-mono font-bold text-white">{telemetry.satellites} Sats (HDOP {telemetry.hdop.toFixed(1)})</span>
@@ -465,7 +473,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
               </div>
               <div className="flex justify-between">
                 <span className="text-[var(--uav-muted)]">Flight Mode Target:</span>
-                <span className="font-mono font-bold text-sky-400">AUTO / GUIDED</span>
+                <span className="font-mono font-bold text-emerald-400">AUTO / GUIDED</span>
               </div>
             </div>
 
@@ -473,7 +481,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
               <button
                 type="button"
                 onClick={() => setShowArmModal(false)}
-                className="px-4 py-2 rounded-lg border border-[var(--uav-card-border)] text-[var(--uav-muted)] hover:text-white hover:bg-[#1C2A42] text-[12px] font-semibold transition cursor-pointer"
+                className="px-4 py-2 rounded-lg border border-[var(--uav-card-border)] text-[var(--uav-muted)] hover:text-white hover:bg-[#21262D] text-[12px] font-semibold transition cursor-pointer"
               >
                 CANCEL
               </button>
@@ -492,7 +500,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
       {/* 5. Safety Confirmation Modal: EMERGENCY RTL */}
       {showRtlModal && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0F1829] border-2 border-red-600 rounded-[12px] max-w-md w-full p-6 text-white shadow-2xl space-y-4">
+          <div className="bg-[#161B22] border-2 border-red-600 rounded-[12px] max-w-md w-full p-6 text-white shadow-2xl space-y-4">
             <div className="flex items-center justify-between text-red-500">
               <div className="flex items-center gap-3">
                 <AlertTriangle className="w-8 h-8 text-red-500 animate-pulse" />
@@ -517,7 +525,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
               <button
                 type="button"
                 onClick={() => setShowRtlModal(false)}
-                className="px-4 py-2 rounded-lg border border-[var(--uav-card-border)] text-[var(--uav-muted)] hover:text-white hover:bg-[#1C2A42] text-[12px] font-semibold transition cursor-pointer"
+                className="px-4 py-2 rounded-lg border border-[var(--uav-card-border)] text-[var(--uav-muted)] hover:text-white hover:bg-[#21262D] text-[12px] font-semibold transition cursor-pointer"
               >
                 CANCEL
               </button>
@@ -560,7 +568,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
           onClose={() => {
             setIsHistoryModalOpen(false);
             setActiveNav('Dashboard');
-            if (activeTab === 'Analyze') setActiveTab('Fly');
           }}
         />
       )}
@@ -581,7 +588,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
       {/* 9. Tactical Flight Control Modal */}
       {isFlightControlModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0F1829] border border-[var(--uav-card-border)] rounded-[12px] max-w-2xl w-full p-5 text-white shadow-2xl space-y-4">
+          <div className="bg-[#161B22] border border-[var(--uav-card-border)] rounded-[12px] max-w-2xl w-full p-5 text-white shadow-2xl space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-[var(--uav-card-border)]">
               <div className="flex items-center gap-2.5">
                 <Crosshair className="w-5 h-5 text-[var(--uav-primary-blue)]" />
@@ -627,9 +634,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
                     await mavlinkService.setFlightMode('LOITER');
                     showNotification('Autopilot switched to LOITER');
                   }}
-                  className="py-2.5 px-3 rounded-lg bg-sky-600/20 border border-sky-500/40 hover:bg-sky-600/30 text-sky-300 font-semibold text-[12px] flex items-center justify-center gap-2 transition cursor-pointer"
+                  className="py-2.5 px-3 rounded-lg bg-[#10B981]/20 border border-emerald-500/40 hover:bg-[#10B981]/30 text-emerald-300 font-semibold text-[12px] flex items-center justify-center gap-2 transition cursor-pointer"
                 >
-                  <Pause className="w-4 h-4 text-sky-400" />
+                  <Pause className="w-4 h-4 text-emerald-400" />
                   <span>Loiter Hold</span>
                 </button>
                 <button
@@ -679,14 +686,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
                 <button
                   type="button"
                   onClick={() => handleNudge('N', 5)}
-                  className="py-2 px-3 rounded-lg bg-[#142238] border border-[var(--uav-card-border)] hover:bg-[#1c3050] text-white text-[12px] font-mono font-bold transition cursor-pointer"
+                  className="py-2 px-3 rounded-lg bg-[#21262D] border border-[var(--uav-card-border)] hover:bg-[#262C36] text-white text-[12px] font-mono font-bold transition cursor-pointer"
                 >
                   ▲ North (+5m)
                 </button>
                 <button
                   type="button"
                   onClick={() => handleNudge('UP', 2)}
-                  className="py-2 px-3 rounded-lg bg-[#142238] border border-[var(--uav-card-border)] hover:bg-[#1c3050] text-emerald-300 text-[12px] font-mono font-bold transition cursor-pointer"
+                  className="py-2 px-3 rounded-lg bg-[#21262D] border border-[var(--uav-card-border)] hover:bg-[#262C36] text-emerald-300 text-[12px] font-mono font-bold transition cursor-pointer"
                 >
                   ▲ Climb (+2m)
                 </button>
@@ -694,7 +701,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
                 <button
                   type="button"
                   onClick={() => handleNudge('W', 5)}
-                  className="py-2 px-3 rounded-lg bg-[#142238] border border-[var(--uav-card-border)] hover:bg-[#1c3050] text-white text-[12px] font-mono font-bold transition cursor-pointer"
+                  className="py-2 px-3 rounded-lg bg-[#21262D] border border-[var(--uav-card-border)] hover:bg-[#262C36] text-white text-[12px] font-mono font-bold transition cursor-pointer"
                 >
                   ◀ West (+5m)
                 </button>
@@ -704,14 +711,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
                     await mavlinkService.setFlightMode('LOITER');
                     showNotification('Loiter Hold');
                   }}
-                  className="py-2 px-3 rounded-lg bg-[#1F6FEB] text-white text-[12px] font-mono font-bold transition cursor-pointer"
+                  className="py-2 px-3 rounded-lg bg-[#10B981] hover:bg-[#059669] text-emerald-950 font-bold text-[12px] font-mono transition cursor-pointer"
                 >
                   STOP / HOLD
                 </button>
                 <button
                   type="button"
                   onClick={() => handleNudge('E', 5)}
-                  className="py-2 px-3 rounded-lg bg-[#142238] border border-[var(--uav-card-border)] hover:bg-[#1c3050] text-white text-[12px] font-mono font-bold transition cursor-pointer"
+                  className="py-2 px-3 rounded-lg bg-[#21262D] border border-[var(--uav-card-border)] hover:bg-[#262C36] text-white text-[12px] font-mono font-bold transition cursor-pointer"
                 >
                   East (+5m) ▶
                 </button>
@@ -720,57 +727,33 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
                 <button
                   type="button"
                   onClick={() => handleNudge('S', 5)}
-                  className="py-2 px-3 rounded-lg bg-[#142238] border border-[var(--uav-card-border)] hover:bg-[#1c3050] text-white text-[12px] font-mono font-bold transition cursor-pointer"
+                  className="py-2 px-3 rounded-lg bg-[#21262D] border border-[var(--uav-card-border)] hover:bg-[#262C36] text-white text-[12px] font-mono font-bold transition cursor-pointer"
                 >
                   ▼ South (+5m)
                 </button>
                 <button
                   type="button"
                   onClick={() => handleNudge('DOWN', 2)}
-                  className="py-2 px-3 rounded-lg bg-[#142238] border border-[var(--uav-card-border)] hover:bg-[#1c3050] text-amber-300 text-[12px] font-mono font-bold transition cursor-pointer"
+                  className="py-2 px-3 rounded-lg bg-[#21262D] border border-[var(--uav-card-border)] hover:bg-[#262C36] text-amber-300 text-[12px] font-mono font-bold transition cursor-pointer"
                 >
                   ▼ Descend (-2m)
                 </button>
               </div>
             </div>
 
-            {/* Flight Calibration & Airspace Tools */}
+            {/* Active Flight Status Footer */}
+            {/* Active Flight Status Footer */}
             <div className="pt-2 border-t border-[var(--uav-card-border)] flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsFlightControlModalOpen(false);
-                    setIsCircleTestOpen(true);
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-[#142238] border border-[var(--uav-card-border)] hover:bg-[#1c3050] text-white text-[11px] font-sans font-semibold transition cursor-pointer flex items-center gap-1.5"
-                >
-                  <RotateCw className="w-3.5 h-3.5 text-[var(--uav-primary-blue)]" />
-                  <span>Circle Orbit Test (15m)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsFlightControlModalOpen(false);
-                    setIsLoiterTestOpen(true);
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-[#142238] border border-[var(--uav-card-border)] hover:bg-[#1c3050] text-white text-[11px] font-sans font-semibold transition cursor-pointer flex items-center gap-1.5"
-                >
-                  <Pause className="w-3.5 h-3.5 text-amber-400" />
-                  <span>5m Loiter Test</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowTrafficRadar((prev) => !prev)}
-                  className={`px-3 py-1.5 rounded-lg border text-[11px] font-sans font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                    showTrafficRadar
-                      ? 'bg-sky-600/30 border-sky-500/60 text-sky-300'
-                      : 'bg-[#142238] border-[var(--uav-card-border)] text-white hover:bg-[#1c3050]'
-                  }`}
-                >
-                  <Radio className="w-3.5 h-3.5" />
-                  <span>Airspace Radar ({showTrafficRadar ? 'ON' : 'OFF'})</span>
-                </button>
+              <div className="flex items-center gap-3 text-[11px] font-mono">
+                <span className="text-[var(--uav-muted)]">
+                  Mode: <strong className="text-emerald-400">{telemetry.flightMode || 'GUIDED'}</strong>
+                </span>
+                <span className="text-[var(--uav-muted)]">
+                  Motors: <strong className={telemetry.isArmed ? 'text-red-400' : 'text-emerald-400'}>{telemetry.isArmed ? 'ARMED' : 'DISARMED'}</strong>
+                </span>
+                <span className="text-[var(--uav-muted)]">
+                  Altitude: <strong className="text-amber-400">{(telemetry.altitudeMeters || 0).toFixed(1)}m</strong>
+                </span>
               </div>
 
               <button
@@ -786,117 +769,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout }) => {
             </div>
           </div>
         </div>
-      )}
-
-      {/* 10. Autonomous Vision & QR Reconnaissance Modal */}
-      {isVisionModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0F1829] border border-[var(--uav-card-border)] rounded-[12px] max-w-3xl w-full p-5 text-white shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[var(--uav-card-border)]">
-              <div className="flex items-center gap-2.5">
-                <Camera className="w-5 h-5 text-[var(--uav-primary-blue)]" />
-                <div>
-                  <h3 className="font-orbitron font-bold text-[15px] tracking-wide text-white">
-                    AUTONOMOUS VISION &amp; QR RECONNAISSANCE
-                  </h3>
-                  <p className="text-[11px] text-[var(--uav-muted)]">Target Cache Box Lock &amp; 2-Digit Rescue Code Validator</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsVisionModalOpen(false);
-                  setActiveNav('Dashboard');
-                }}
-                className="text-[var(--uav-muted)] hover:text-white transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Camera Vision HUD */}
-            <div className="rounded-xl overflow-hidden border border-[var(--uav-card-border)] bg-black h-96 relative">
-              <CameraVisionHUD
-                decodedQR={missionEngine.getDecodedQR()}
-                telemetry={telemetry.rawTelemetry}
-                scannerActive={true}
-                onQRDetected={(data) => {
-                  missionEngine.handleQRDetected(data);
-                  showNotification(`QR Code Detected: "${data.code}" ✓`);
-                  audioService.playBeep(1200, 150);
-                }}
-              />
-            </div>
-
-            {/* ADDC 2026 Code Dispatch Strip */}
-            <div className="flex items-center justify-between p-3 rounded-lg bg-[#0A1220] border border-[var(--uav-card-border)]">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-[#162744] border border-[#233C66] flex items-center justify-center text-[var(--uav-primary-blue)] font-mono font-black text-[18px]">
-                  {missionEngine.getDecodedQR()?.code || '--'}
-                </div>
-                <div>
-                  <span className="text-[12px] font-bold text-white block">
-                    {missionEngine.getDecodedQR()?.code ? `2-Digit Access Code: ${missionEngine.getDecodedQR()?.code}` : 'Awaiting Target Box & QR Lock...'}
-                  </span>
-                  <span className="text-[10px] text-[var(--uav-muted)]">
-                    Rule 3.6: Must match regex ^\\d{2}$ (Exactly 2 digits)
-                  </span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const qr = missionEngine.getDecodedQR();
-                  if (qr?.code) {
-                    runnerCommService.sendQRToRunner(qr.code, 'MISSION_RESCUE_01');
-                    showNotification(`Dispatched code "${qr.code}" to Field Runner ✓`);
-                    audioService.playBeep(1100, 100);
-                  } else {
-                    showNotification('No decoded QR code available yet.');
-                  }
-                }}
-                disabled={!missionEngine.getDecodedQR()?.code}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--uav-primary-blue)] hover:bg-blue-600 disabled:opacity-40 disabled:pointer-events-none text-white text-[12px] font-sans font-semibold transition cursor-pointer"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span>Dispatch to Field Runner</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 11. Airspace Traffic View Radar Floating Overlay */}
-      {showTrafficRadar && (
-        <div className="fixed top-20 right-6 z-40 animate-in fade-in slide-in-from-top-2">
-          <TrafficViewRadar
-            telemetry={telemetry.rawTelemetry}
-            onClose={() => setShowTrafficRadar(false)}
-          />
-        </div>
-      )}
-
-      {/* 12. Circle Orbit Calibration Modal */}
-      {isCircleTestOpen && (
-        <CircleTestMissionModal
-          isOpen={isCircleTestOpen}
-          onClose={() => setIsCircleTestOpen(false)}
-          telemetry={telemetry.rawTelemetry}
-          homePoint={mavlinkService.getHomePoint()}
-          pixhawkState={telemetry.rawConnectionState}
-        />
-      )}
-
-      {/* 13. Loiter Hold Calibration Modal */}
-      {isLoiterTestOpen && (
-        <LoiterTestMissionModal
-          isOpen={isLoiterTestOpen}
-          onClose={() => setIsLoiterTestOpen(false)}
-          telemetry={telemetry.rawTelemetry}
-          homePoint={mavlinkService.getHomePoint()}
-          pixhawkState={telemetry.rawConnectionState}
-        />
       )}
     </div>
   );

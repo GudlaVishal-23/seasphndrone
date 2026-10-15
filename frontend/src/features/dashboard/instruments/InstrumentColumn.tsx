@@ -35,14 +35,14 @@ export const InstrumentColumn: React.FC<InstrumentColumnProps> = ({ telemetry })
 
   return (
     <div className="flex flex-col gap-3 h-[540px] w-[287px] shrink-0 select-none">
-      {/* 1. ATTITUDE (180 px) */}
+      {/* 1. PRIMARY ATTITUDE DISPLAY (PFD) (180 px) */}
       <Card
-        title="ATTITUDE"
+        title="ATTITUDE (PFD)"
         collapsible
         className="h-[180px] shrink-0"
-        contentClassName="p-2 flex flex-col items-center justify-center relative overflow-hidden"
+        contentClassName="p-2 flex flex-col items-center justify-center relative overflow-hidden bg-[#090D12]"
       >
-        <div className="w-28 h-28 rounded-full border-2 border-[var(--uav-card-border)] overflow-hidden relative shadow-inner bg-[#094182]">
+        <div className="w-28 h-28 rounded-full border-2 border-[var(--uav-card-border)] overflow-hidden relative shadow-[inset_0_0_12px_rgba(0,0,0,0.8)] bg-[#1c385c]">
           {/* Pitch & Roll Moving Disk */}
           <div
             className="absolute inset-[-40px] transition-transform duration-100 ease-out flex flex-col items-center justify-center pointer-events-none"
@@ -50,87 +50,109 @@ export const InstrumentColumn: React.FC<InstrumentColumnProps> = ({ telemetry })
               transform: `rotate(${-roll}deg) translateY(${pitch * 1.5}px)`,
             }}
           >
-            {/* Sky (Upper half) */}
-            <div className="w-full h-1/2 bg-[#094182]" />
-            {/* Horizon Separation Line */}
-            <div className="w-full h-[2px] bg-[var(--uav-amber)] shrink-0" />
-            {/* Ground (Lower half) */}
-            <div className="w-full h-1/2 bg-[#1b7a37]" />
+            {/* Sky (Upper half: Realistic Horizon Blue) */}
+            <div className="w-full h-1/2 bg-gradient-to-b from-[#163b66] to-[#255285]" />
+            {/* Horizon Separation Line (Crisp White/Amber) */}
+            <div className="w-full h-[2px] bg-white shadow-[0_0_4px_#ffffff] shrink-0" />
+            {/* Ground (Lower half: Terrain Earth Olive) */}
+            <div className="w-full h-1/2 bg-gradient-to-b from-[#2e4a28] to-[#1c2e19]" />
 
-            {/* Pitch Ladder Marks */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-2">
-              <div className="w-8 h-[1px] bg-white/70" />
-              <div className="w-14 h-[1px] bg-white/90" />
-              <div className="w-20 h-[2px] bg-amber-400" />
-              <div className="w-14 h-[1px] bg-white/90" />
-              <div className="w-8 h-[1px] bg-white/70" />
+            {/* Pitch Ladder Marks with Angle Numbers */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-2 text-[8px] font-mono font-bold text-white/90">
+              <div className="flex items-center gap-1">
+                <span className="text-[7.5px] opacity-75">+20</span>
+                <div className="w-8 h-[1px] bg-white/70" />
+                <span className="text-[7.5px] opacity-75">+20</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-[7.5px] opacity-90">+10</span>
+                <div className="w-14 h-[1px] bg-white/90" />
+                <span className="text-[7.5px] opacity-90">+10</span>
+              </div>
+              <div className="w-20 h-[2px] bg-amber-400 shadow-[0_0_4px_rgba(251,191,36,0.8)]" />
+              <div className="flex items-center gap-1">
+                <span className="text-[7.5px] opacity-90">-10</span>
+                <div className="w-14 h-[1px] bg-white/90" />
+                <span className="text-[7.5px] opacity-90">-10</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-[7.5px] opacity-75">-20</span>
+                <div className="w-8 h-[1px] bg-white/70" />
+                <span className="text-[7.5px] opacity-75">-20</span>
+              </div>
             </div>
           </div>
 
-          {/* Aircraft Fixed Center Crosshair Overlay */}
+          {/* Aircraft Fixed Center Boresight Overlay (Aviation Standard Yellow Wings) */}
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-            <div className="w-10 h-1 bg-[var(--uav-amber)] rounded-full shadow" />
-            <div className="w-2.5 h-2.5 rounded-full border-2 border-[var(--uav-amber)] bg-black/40 absolute" />
+            <div className="w-12 h-1 bg-amber-400 rounded-full shadow-[0_0_6px_rgba(245,158,11,0.9)]" />
+            <div className="w-2.5 h-2.5 rounded-full border-2 border-amber-400 bg-black/60 absolute" />
+          </div>
+
+          {/* Bank Angle Ticks at top arc (-45, -30, 0, +30, +45) */}
+          <div className="absolute top-1 inset-x-0 flex justify-center items-center pointer-events-none z-10">
+            <div className="w-0 h-0 border-l-[3.5px] border-l-transparent border-r-[3.5px] border-r-transparent border-t-[6px] border-t-amber-400" />
           </div>
         </div>
 
-        <div className="w-full flex justify-between items-center px-4 text-[10px] font-mono text-[var(--uav-muted)] mt-1.5">
-          <span>ROLL {roll.toFixed(1)}°</span>
-          <span>PITCH {pitch.toFixed(1)}°</span>
+        <div className="w-full flex justify-between items-center px-3 text-[10px] font-mono text-[var(--uav-muted)] mt-1.5">
+          <span className="text-emerald-400 font-bold">ROLL {roll.toFixed(1)}°</span>
+          <span className="text-amber-400 font-bold">PITCH {pitch.toFixed(1)}°</span>
         </div>
       </Card>
 
-      {/* 2. COMPASS / HEADING (156 px) */}
+      {/* 2. COMPASS / HORIZONTAL SITUATION (HSI) (156 px) */}
       <Card
-        title="COMPASS / HEADING"
+        title="COMPASS (HSI)"
         collapsible
         className="h-[156px] shrink-0"
-        contentClassName="p-2 flex items-center justify-between overflow-hidden"
+        contentClassName="p-2 flex items-center justify-between overflow-hidden bg-[#090D12]"
       >
-        <div className="w-24 h-24 rounded-full border-2 border-[var(--uav-card-border)] bg-[#0A1324] relative flex items-center justify-center ml-2 shadow-inner">
-          <span className="absolute top-1 text-[9px] font-bold text-red-500 font-mono">N</span>
-          <span className="absolute right-1 text-[9px] font-bold text-[var(--uav-muted)] font-mono">E</span>
-          <span className="absolute bottom-1 text-[9px] font-bold text-[var(--uav-muted)] font-mono">S</span>
-          <span className="absolute left-1 text-[9px] font-bold text-[var(--uav-muted)] font-mono">W</span>
+        <div className="w-24 h-24 rounded-full border-2 border-[var(--uav-card-border)] bg-[#090D12] relative flex items-center justify-center ml-2 shadow-[inset_0_0_10px_rgba(0,0,0,0.9)]">
+          {/* Cardinal Labels */}
+          <span className="absolute top-1 text-[9px] font-black text-rose-500 font-mono">N</span>
+          <span className="absolute right-1 text-[9px] font-bold text-slate-400 font-mono">E</span>
+          <span className="absolute bottom-1 text-[9px] font-bold text-slate-400 font-mono">S</span>
+          <span className="absolute left-1 text-[9px] font-bold text-slate-400 font-mono">W</span>
 
           {/* Compass Dial Needle */}
           <div
             className="w-1.5 h-18 relative flex flex-col items-center justify-between transition-transform duration-150 ease-out"
             style={{ transform: `rotate(${heading}deg)` }}
           >
-            <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-b-[24px] border-b-red-500" />
-            <div className="w-2 h-2 rounded-full bg-white z-10" />
+            <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-b-[24px] border-b-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.6)]" />
+            <div className="w-2 h-2 rounded-full bg-white z-10 border border-slate-900" />
             <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[24px] border-t-slate-400" />
           </div>
         </div>
 
-        <div className="flex flex-col items-center justify-center pr-6">
-          <span className="text-[26px] font-bold text-[var(--uav-text)] font-sans leading-none font-orbitron">
+        <div className="flex flex-col items-center justify-center pr-5">
+          <span className="text-[28px] font-black text-white font-orbitron tracking-tight leading-none text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-yellow-200 to-emerald-300">
             {heading}°
           </span>
-          <span className="text-[12px] text-[var(--uav-muted)] font-sans mt-1">
+          <span className="text-[11px] text-amber-400 font-mono font-bold mt-1 tracking-wider uppercase">
             {getHeadingCardinal(heading)}
           </span>
           {/* Magnetometer Sensing Health Badge */}
-          <div className="mt-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#0A1324] border border-[var(--uav-card-border)] text-[9.5px] font-mono" title={`Magnetometer: ${telemetry.isCompassHealthy ? 'Healthy & Calibrated' : 'Check I2C cable / Calibrate'}`}>
+          <div className="mt-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#161B22] border border-[var(--uav-card-border)] text-[9.5px] font-mono" title={`Magnetometer: ${telemetry.isCompassHealthy ? 'Healthy & Calibrated' : 'Check I2C cable / Calibrate'}`}>
             <span
               className={`w-1.5 h-1.5 rounded-full ${
-                telemetry.isCompassHealthy ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'
+                telemetry.isCompassHealthy ? 'bg-emerald-400 shadow-[0_0_4px_#34d399]' : 'bg-amber-400 animate-pulse'
               }`}
             />
-            <span className="text-slate-300">
+            <span className="text-slate-300 font-bold">
               MAG {telemetry.magFieldStrength || 480}mG
             </span>
           </div>
         </div>
       </Card>
 
-      {/* 3. ALTITUDE & SPEED (181 px) */}
+      {/* 3. ALTITUDE & SPEED AVIONICS TAPES (181 px) */}
       <Card
         title="ALTITUDE & SPEED"
         collapsible
         className="h-[181px] shrink-0"
-        contentClassName="p-2 flex items-center justify-around overflow-hidden"
+        contentClassName="p-2 flex items-center justify-around overflow-hidden bg-[#090D12]"
       >
         {/* Altitude Radial Gauge */}
         <div className="flex flex-col items-center">
@@ -141,7 +163,7 @@ export const InstrumentColumn: React.FC<InstrumentColumnProps> = ({ telemetry })
                 cy="38"
                 r="32"
                 fill="none"
-                stroke="#162744"
+                stroke="#21262D"
                 strokeWidth="5"
               />
               <circle
@@ -149,7 +171,7 @@ export const InstrumentColumn: React.FC<InstrumentColumnProps> = ({ telemetry })
                 cy="38"
                 r="32"
                 fill="none"
-                stroke="#1F6FEB"
+                stroke="#E5A93C"
                 strokeWidth="5"
                 strokeDasharray={arcCircumference}
                 strokeDashoffset={altOffset}
@@ -158,15 +180,30 @@ export const InstrumentColumn: React.FC<InstrumentColumnProps> = ({ telemetry })
               />
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-[15px] font-bold font-mono text-white leading-none">
+              <span className="text-[16px] font-black font-orbitron text-white leading-none">
                 {alt.toFixed(1)}
               </span>
-              <span className="text-[9px] text-[var(--uav-muted)] font-mono">m</span>
+              <span className="text-[9px] text-amber-400 font-mono font-bold mt-0.5">METERS</span>
             </div>
           </div>
-          <span className="text-[10px] font-semibold tracking-wider text-[var(--uav-muted)] uppercase mt-1">
+          <span className="text-[10px] font-bold tracking-wider text-slate-300 uppercase mt-1">
             ALTITUDE
           </span>
+          <div className="flex items-center gap-1 font-mono text-[9.5px] mt-0.5" title="Vertical Speed / Climb Rate">
+            <span className="text-slate-400">V-SPD:</span>
+            <span
+              className={`font-bold ${
+                telemetry.verticalSpeedMs > 0.2
+                  ? 'text-emerald-400'
+                  : telemetry.verticalSpeedMs < -0.2
+                  ? 'text-amber-400'
+                  : 'text-slate-300'
+              }`}
+            >
+              {telemetry.verticalSpeedMs > 0 ? '▲+' : telemetry.verticalSpeedMs < 0 ? '▼' : ''}
+              {telemetry.verticalSpeedMs.toFixed(1)} m/s
+            </span>
+          </div>
         </div>
 
         {/* Air Speed Radial Gauge */}
@@ -178,7 +215,7 @@ export const InstrumentColumn: React.FC<InstrumentColumnProps> = ({ telemetry })
                 cy="38"
                 r="32"
                 fill="none"
-                stroke="#162744"
+                stroke="#21262D"
                 strokeWidth="5"
               />
               <circle
@@ -186,7 +223,7 @@ export const InstrumentColumn: React.FC<InstrumentColumnProps> = ({ telemetry })
                 cy="38"
                 r="32"
                 fill="none"
-                stroke="#22C55E"
+                stroke="#10B981"
                 strokeWidth="5"
                 strokeDasharray={arcCircumference}
                 strokeDashoffset={spdOffset}
@@ -195,15 +232,21 @@ export const InstrumentColumn: React.FC<InstrumentColumnProps> = ({ telemetry })
               />
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-[15px] font-bold font-mono text-white leading-none">
+              <span className="text-[16px] font-black font-orbitron text-white leading-none">
                 {spd.toFixed(1)}
               </span>
-              <span className="text-[9px] text-[var(--uav-muted)] font-mono">m/s</span>
+              <span className="text-[9px] text-emerald-400 font-mono font-bold mt-0.5">M / S</span>
             </div>
           </div>
-          <span className="text-[10px] font-semibold tracking-wider text-[var(--uav-muted)] uppercase mt-1">
-            AIR SPEED
+          <span className="text-[10px] font-bold tracking-wider text-slate-300 uppercase mt-1">
+            GROUND SPEED
           </span>
+          <div className="flex items-center gap-1 font-mono text-[9.5px] mt-0.5" title="Airspeed (approx)">
+            <span className="text-slate-400">AIR-SPD:</span>
+            <span className="font-bold text-slate-200">
+              {(telemetry.speedMs * 1.05).toFixed(1)} m/s
+            </span>
+          </div>
         </div>
       </Card>
     </div>

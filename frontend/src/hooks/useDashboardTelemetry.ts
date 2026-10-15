@@ -16,6 +16,7 @@ export interface DashboardTelemetryData {
   batteryVoltage: number;
   altitudeMeters: number;
   speedMs: number;
+  verticalSpeedMs: number;
   headingDeg: number;
   rollDeg: number;
   pitchDeg: number;
@@ -107,6 +108,7 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
       batteryVoltage: 12.4,
       altitudeMeters: 0.0,
       speedMs: 0.0,
+      verticalSpeedMs: 0.0,
       headingDeg: 0,
       rollDeg: 0.0,
       pitchDeg: 0.0,
@@ -140,6 +142,7 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
     batteryVoltage: telemetry.batteryVoltage ?? 0,
     altitudeMeters: telemetry.altitude ?? 0.0,
     speedMs: telemetry.groundSpeed ?? 0.0,
+    verticalSpeedMs: telemetry.verticalSpeed ?? 0.0,
     headingDeg: Math.round(((telemetry.heading ?? 0) % 360 + 360) % 360),
     rollDeg: telemetry.roll ?? 0.0,
     pitchDeg: telemetry.pitch ?? 0.0,

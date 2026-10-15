@@ -3,9 +3,8 @@ import {
   LayoutDashboard,
   Compass,
   Crosshair,
-  Camera,
+  FileText,
   SlidersHorizontal,
-  Settings,
   AlertTriangle,
   Gamepad2,
   Power,
@@ -35,12 +34,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   className = '',
 }) => {
   const navItems = [
-    { id: 'Dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
-    { id: 'Mission', label: 'Mission', icon: <Compass className="w-4 h-4" /> },
+    { id: 'Dashboard', label: 'Cockpit', icon: <LayoutDashboard className="w-4 h-4" /> },
+    { id: 'Mission', label: 'Mission Plan', icon: <Compass className="w-4 h-4" /> },
     { id: 'Flight Control', label: 'Flight Control', icon: <Crosshair className="w-4 h-4" /> },
-    { id: 'Camera & Vision', label: 'Camera & Vision', icon: <Camera className="w-4 h-4" /> },
-    { id: 'Telemetry', label: 'Telemetry', icon: <SlidersHorizontal className="w-4 h-4" /> },
-    { id: 'Settings', label: 'Settings', icon: <Settings className="w-4 h-4" /> },
+    { id: 'Logs', label: 'Flight Logs', icon: <FileText className="w-4 h-4" /> },
+    { id: 'Diagnostics', label: 'Serial Link', icon: <SlidersHorizontal className="w-4 h-4" /> },
   ];
 
   return (
@@ -58,11 +56,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={() => onNavChange?.(item.id)}
               className={`w-full flex items-center gap-3 px-3 py-2 text-[12px] font-sans font-medium transition-all text-left cursor-pointer ${
                 isActive
-                  ? 'bg-[#12223b] text-[var(--uav-primary-blue)] border-l-[3px] border-[var(--uav-primary-blue)]'
-                  : 'text-[var(--uav-muted)] hover:text-[var(--uav-text)] hover:bg-[#0f1b2e] border-l-[3px] border-transparent'
+                  ? 'bg-[#1C212B] text-emerald-400 border-l-[3px] border-emerald-500 font-semibold'
+                  : 'text-[var(--uav-muted)] hover:text-[var(--uav-text)] hover:bg-[#21262D] border-l-[3px] border-transparent'
               }`}
             >
-              <span className={isActive ? 'text-[var(--uav-primary-blue)]' : 'text-[var(--uav-muted)]'}>
+              <span className={isActive ? 'text-emerald-400' : 'text-[var(--uav-muted)]'}>
                 {item.icon}
               </span>
               <span>{item.label}</span>
@@ -80,7 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           className={`w-full py-2 px-2.5 rounded-[8px] flex items-center justify-between border transition-all active:scale-95 cursor-pointer ${
             isArmed
               ? 'bg-[#220d0d] border-red-500/80 text-red-300 shadow-[0_0_12px_rgba(239,68,68,0.35)] hover:bg-[#2d1212]'
-              : 'bg-[#0B1322] border-[var(--uav-card-border)] text-slate-300 hover:text-emerald-300 hover:border-emerald-500/50 hover:bg-[#0c2419]/60'
+              : 'bg-[#161B22] border-[var(--uav-card-border)] text-slate-300 hover:text-emerald-300 hover:border-emerald-500/50 hover:bg-[#0c2419]/60'
           }`}
           title={
             isArmed
@@ -91,7 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex items-center gap-2">
             <div
               className={`w-6 h-6 rounded flex items-center justify-center ${
-                isArmed ? 'bg-red-500/20 text-red-400' : 'bg-slate-800 text-slate-400'
+                isArmed ? 'bg-red-500/20 text-red-400' : 'bg-[#21262D] text-slate-400'
               }`}
             >
               <Power className="w-3.5 h-3.5" />
@@ -109,7 +107,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase flex items-center gap-1 ${
               isArmed
                 ? 'bg-red-600 text-white animate-pulse'
-                : 'bg-slate-800 text-emerald-400 border border-emerald-500/30'
+                : 'bg-[#21262D] text-emerald-400 border border-emerald-500/30'
             }`}
           >
             <span
@@ -127,7 +125,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           className={`w-full py-2 px-2.5 rounded-[8px] flex items-center justify-between border transition-all active:scale-95 cursor-pointer ${
             rcOverrideEnabled
               ? 'bg-[#0c2419] border-emerald-500/80 text-emerald-300 shadow-[0_0_12px_rgba(34,197,94,0.3)] hover:bg-[#123826]'
-              : 'bg-[#0B1322] border-[var(--uav-card-border)] text-slate-300 hover:text-white hover:bg-[#132238]'
+              : 'bg-[#161B22] border-[var(--uav-card-border)] text-slate-300 hover:text-white hover:bg-[#21262D]'
           }`}
           title={
             rcOverrideEnabled
@@ -138,7 +136,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex items-center gap-2">
             <div
               className={`w-6 h-6 rounded flex items-center justify-center ${
-                rcOverrideEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'
+                rcOverrideEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-[#21262D] text-slate-400'
               }`}
             >
               <Gamepad2 className="w-3.5 h-3.5" />
@@ -156,7 +154,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase flex items-center gap-1 ${
               rcOverrideEnabled
                 ? 'bg-emerald-600 text-white animate-pulse'
-                : 'bg-slate-800 text-slate-400'
+                : 'bg-[#21262D] text-slate-400'
             }`}
           >
             <span

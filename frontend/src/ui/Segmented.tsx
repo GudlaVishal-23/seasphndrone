@@ -25,7 +25,7 @@ export function Segmented<T extends string = string>({
 
   return (
     <div
-      className={`inline-flex items-center rounded-[8px] border border-[var(--uav-card-border)] bg-[#0B1424] p-[2px] gap-[2px] select-none ${className}`}
+      className={`inline-flex items-center rounded-[8px] border border-[var(--uav-card-border)] bg-[#11161D] p-[2px] gap-[2px] select-none ${className}`}
     >
       {options.map((opt) => {
         const isActive = opt.id === value;
@@ -38,8 +38,8 @@ export function Segmented<T extends string = string>({
               isSm ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1 text-[12px]'
             } ${
               isActive
-                ? 'bg-[var(--uav-primary-blue)] text-white font-semibold shadow-none'
-                : 'text-[var(--uav-muted)] hover:text-[var(--uav-text)] hover:bg-[#142036]'
+                ? 'bg-[#10B981] text-black font-bold shadow-none'
+                : 'text-[var(--uav-muted)] hover:text-[var(--uav-text)] hover:bg-[#21262D]'
             }`}
           >
             {opt.icon && <span className="shrink-0">{opt.icon}</span>}

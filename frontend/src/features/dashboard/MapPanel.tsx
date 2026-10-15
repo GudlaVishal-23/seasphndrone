@@ -844,7 +844,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         const wpIcon = L.divIcon({
           className: 'wp-leaflet-icon',
           html: `
-            <div style="width: 22px; height: 22px; border-radius: 50%; background: #0F1829; border: 2px solid #22C55E; color: #ffffff; font-size: 10px; font-weight: bold; font-family: monospace; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.6);">
+            <div style="width: 22px; height: 22px; border-radius: 50%; background: #161B22; border: 2px solid #10B981; color: #ffffff; font-size: 10px; font-weight: bold; font-family: monospace; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.6);">
               ${idx + 1}
             </div>
           `,
@@ -1088,11 +1088,11 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
   return (
     <div
-      className={`rounded-[10px] border border-[var(--uav-card-border)] bg-[#070D18] h-[540px] relative overflow-hidden select-none flex flex-col ${className}`}
+      className={`rounded-[10px] border border-[var(--uav-card-border)] bg-[#0D1117] h-[540px] relative overflow-hidden select-none flex flex-col ${className}`}
     >
       {/* Top Notification / Active Tool Status Pill */}
       {statusMessage && (
-        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 px-3.5 py-1.5 rounded-lg bg-[#0F1829]/95 border border-[var(--uav-primary-blue)] text-white text-[11px] font-sans font-medium shadow-2xl backdrop-blur-md flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 px-3.5 py-1.5 rounded-lg bg-[#161B22]/95 border border-[var(--uav-primary-blue)] text-white text-[11px] font-sans font-medium shadow-2xl backdrop-blur-md flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
           <div className="w-2 h-2 rounded-full bg-[var(--uav-primary-blue)] animate-pulse" />
           <span>{statusMessage}</span>
         </div>
@@ -1100,7 +1100,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
       {/* Interactive Tool Active Floating Guide Banner */}
       {isAnyToolActive && !statusMessage && (
-        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 px-3.5 py-1.5 rounded-lg bg-[#0F1829]/95 border border-cyan-500/60 text-white text-[11px] font-sans font-medium shadow-2xl backdrop-blur-md flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2">
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 px-3.5 py-1.5 rounded-lg bg-[#161B22]/95 border border-cyan-500/60 text-white text-[11px] font-sans font-medium shadow-2xl backdrop-blur-md flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2">
           {isDrawingFreehand && (
             <>
               <Pencil className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
@@ -1111,7 +1111,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             <div className="flex items-center gap-2">
               <CircleIcon className="w-3.5 h-3.5 text-emerald-400 animate-pulse shrink-0" />
               <span>Click map to place Orbit</span>
-              <div className="flex items-center gap-1 bg-[#091120] px-1.5 py-0.5 rounded border border-emerald-500/50 text-[10px] font-mono shadow-sm">
+              <div className="flex items-center gap-1 bg-[#11161D] px-1.5 py-0.5 rounded border border-emerald-500/50 text-[10px] font-mono shadow-sm">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -1119,7 +1119,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                     groundStationMissionService.decreaseCircleRadius(2);
                     audioService.playBeep(700, 30);
                   }}
-                  className="w-4 h-4 rounded bg-[#162744] hover:bg-[#223d6a] text-slate-200 hover:text-white flex items-center justify-center font-bold cursor-pointer transition active:scale-90"
+                  className="w-4 h-4 rounded bg-[#21262D] hover:bg-[#30363D] text-slate-200 hover:text-white flex items-center justify-center font-bold cursor-pointer transition active:scale-90"
                   title="Decrease Orbit Radius (-2m)"
                 >
                   <Minus className="w-2.5 h-2.5" />
@@ -1132,7 +1132,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                     groundStationMissionService.increaseCircleRadius(2);
                     audioService.playBeep(850, 30);
                   }}
-                  className="w-4 h-4 rounded bg-[#162744] hover:bg-[#223d6a] text-slate-200 hover:text-white flex items-center justify-center font-bold cursor-pointer transition active:scale-90"
+                  className="w-4 h-4 rounded bg-[#21262D] hover:bg-[#30363D] text-slate-200 hover:text-white flex items-center justify-center font-bold cursor-pointer transition active:scale-90"
                   title="Increase Orbit Radius (+2m)"
                 >
                   <Plus className="w-2.5 h-2.5" />
@@ -1144,7 +1144,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             <div className="flex items-center gap-2">
               <Disc className="w-3.5 h-3.5 text-amber-400 animate-pulse shrink-0" />
               <span>Click map to place 3 Concentric Rings</span>
-              <div className="flex items-center gap-1 bg-[#091120] px-1.5 py-0.5 rounded border border-amber-500/50 text-[10px] font-mono shadow-sm">
+              <div className="flex items-center gap-1 bg-[#11161D] px-1.5 py-0.5 rounded border border-amber-500/50 text-[10px] font-mono shadow-sm">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -1152,7 +1152,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                     groundStationMissionService.decreaseCircleRadius(2);
                     audioService.playBeep(700, 30);
                   }}
-                  className="w-4 h-4 rounded bg-[#162744] hover:bg-[#223d6a] text-slate-200 hover:text-white flex items-center justify-center font-bold cursor-pointer transition active:scale-90"
+                  className="w-4 h-4 rounded bg-[#21262D] hover:bg-[#30363D] text-slate-200 hover:text-white flex items-center justify-center font-bold cursor-pointer transition active:scale-90"
                   title="Decrease Outer Ring Radius (-2m)"
                 >
                   <Minus className="w-2.5 h-2.5" />
@@ -1167,7 +1167,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                     groundStationMissionService.increaseCircleRadius(2);
                     audioService.playBeep(850, 30);
                   }}
-                  className="w-4 h-4 rounded bg-[#162744] hover:bg-[#223d6a] text-slate-200 hover:text-white flex items-center justify-center font-bold cursor-pointer transition active:scale-90"
+                  className="w-4 h-4 rounded bg-[#21262D] hover:bg-[#30363D] text-slate-200 hover:text-white flex items-center justify-center font-bold cursor-pointer transition active:scale-90"
                   title="Increase Outer Ring Radius (+2m)"
                 >
                   <Plus className="w-2.5 h-2.5" />
@@ -1217,7 +1217,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         </div>
 
         {/* Search Bar */}
-        <form onSubmit={handleSearchSubmit} className="pointer-events-auto flex items-center bg-[#0B1424]/90 backdrop-blur-sm border border-[var(--uav-card-border)] rounded-[8px] px-2.5 py-1 w-56 text-[12px]">
+        <form onSubmit={handleSearchSubmit} className="pointer-events-auto flex items-center bg-[#11161D]/90 backdrop-blur-sm border border-[var(--uav-card-border)] rounded-[8px] px-2.5 py-1 w-56 text-[12px]">
           <Search className="w-3.5 h-3.5 text-[var(--uav-muted)] shrink-0 mr-2" />
           <input
             type="text"
@@ -1232,7 +1232,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       {/* Real Interactive Leaflet Map Container */}
       <div
         ref={mapContainerRef}
-        className="w-full h-full relative z-0 bg-[#070D18]"
+        className="w-full h-full relative z-0 bg-[#0D1117]"
         style={{
           cursor: isDrawingFreehand
             ? 'crosshair'
@@ -1248,12 +1248,12 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
       {/* Right Vertical Action Stack */}
       <div className="absolute right-2.5 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-1">
-        <div className="flex flex-col bg-[#0B1424]/90 backdrop-blur-sm border border-[var(--uav-card-border)] rounded-[8px] p-1 gap-1 shadow-xl">
+        <div className="flex flex-col bg-[#11161D]/90 backdrop-blur-sm border border-[var(--uav-card-border)] rounded-[8px] p-1 gap-1 shadow-xl">
           {/* Layer Toggle */}
           <button
             type="button"
             onClick={() => setLayer((prev) => (prev === 'Satellite' ? 'Map' : 'Satellite'))}
-            className="w-7 h-7 rounded-[6px] hover:bg-[#162744] flex items-center justify-center text-[var(--uav-muted)] hover:text-white transition cursor-pointer"
+            className="w-7 h-7 rounded-[6px] hover:bg-[#21262D] flex items-center justify-center text-[var(--uav-muted)] hover:text-white transition cursor-pointer"
             title="Toggle Map Airspace Layers"
           >
             <Layers className="w-3.5 h-3.5" />
@@ -1265,8 +1265,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             onClick={handleLocateDrone}
             className={`w-7 h-7 rounded-[6px] flex items-center justify-center transition cursor-pointer ${
               droneHasValidCoords
-                ? 'text-emerald-400 hover:bg-[#162744] hover:text-emerald-300'
-                : 'text-[var(--uav-muted)] opacity-50 hover:bg-[#162744]'
+                ? 'text-emerald-400 hover:bg-[#21262D] hover:text-emerald-300'
+                : 'text-[var(--uav-muted)] opacity-50 hover:bg-[#21262D]'
             }`}
             title="Locate Drone (Center on Pixhawk GPS)"
           >
@@ -1279,8 +1279,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             onClick={handleLocateDevice}
             className={`w-7 h-7 rounded-[6px] flex items-center justify-center transition cursor-pointer ${
               deviceLocation
-                ? 'text-sky-400 hover:bg-[#162744] hover:text-sky-300'
-                : 'text-[var(--uav-muted)] hover:bg-[#162744]'
+                ? 'text-amber-400 hover:bg-[#21262D] hover:text-amber-300'
+                : 'text-[var(--uav-muted)] hover:bg-[#21262D]'
             }`}
             title={
               deviceLocation
@@ -1299,8 +1299,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               followMode === 'drone'
                 ? 'bg-emerald-600 text-white'
                 : followMode === 'device'
-                ? 'bg-sky-600 text-white'
-                : 'hover:bg-[#162744] text-[var(--uav-muted)] hover:text-white'
+                ? 'bg-amber-600 text-white'
+                : 'hover:bg-[#21262D] text-[var(--uav-muted)] hover:text-white'
             }`}
             title={`Follow Mode: ${
               followMode === 'drone'
@@ -1320,7 +1320,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             className={`w-7 h-7 rounded-[6px] flex items-center justify-center transition cursor-pointer ${
               deviceLocation
                 ? 'hover:bg-amber-600/30 text-amber-400 hover:text-amber-300'
-                : 'text-[var(--uav-muted)] opacity-40 hover:bg-[#162744]'
+                : 'text-[var(--uav-muted)] opacity-40 hover:bg-[#21262D]'
             }`}
             title="Set Drone Home to Ground Station Device GPS"
           >
@@ -1335,8 +1335,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             onClick={handleToggleFreehandDraw}
             className={`w-7 h-7 rounded-[6px] flex items-center justify-center transition cursor-pointer ${
               isDrawingFreehand
-                ? 'bg-cyan-500 text-white shadow-lg animate-pulse'
-                : 'hover:bg-[#162744] text-[var(--uav-muted)] hover:text-cyan-300'
+                ? 'bg-emerald-600 text-white shadow-lg animate-pulse'
+                : 'hover:bg-[#21262D] text-[var(--uav-muted)] hover:text-emerald-300'
             }`}
             title="Freehand Draw Path: Click & Drag cursor across map to sketch flight route"
           >
@@ -1350,7 +1350,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             className={`w-7 h-7 rounded-[6px] flex items-center justify-center transition cursor-pointer ${
               isPlacingCircle
                 ? 'bg-emerald-600 text-white shadow-lg animate-pulse'
-                : 'hover:bg-[#162744] text-[var(--uav-muted)] hover:text-emerald-300'
+                : 'hover:bg-[#21262D] text-[var(--uav-muted)] hover:text-emerald-300'
             }`}
             title="Circle Mission: Click map to place 15m orbit waypoints"
           >
@@ -1364,7 +1364,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             className={`w-7 h-7 rounded-[6px] flex items-center justify-center transition cursor-pointer ${
               isPlacingConcentric
                 ? 'bg-amber-600 text-white shadow-lg animate-pulse'
-                : 'hover:bg-[#162744] text-[var(--uav-muted)] hover:text-amber-300'
+                : 'hover:bg-[#21262D] text-[var(--uav-muted)] hover:text-amber-300'
             }`}
             title="Concentric Circles: Click map to place 3 concentric rings (6m, 12m, 18m)"
           >
@@ -1377,8 +1377,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             onClick={handleTogglePinning}
             className={`w-7 h-7 rounded-[6px] flex items-center justify-center transition cursor-pointer ${
               isPinningWp
-                ? 'bg-[var(--uav-primary-blue)] text-white'
-                : 'hover:bg-[#162744] text-[var(--uav-muted)] hover:text-white'
+                ? 'bg-[#10B981] text-black font-bold'
+                : 'hover:bg-[#21262D] text-[var(--uav-muted)] hover:text-white'
             }`}
             title="Pin Waypoint: Click on map to add waypoints sequentially"
           >
@@ -1422,7 +1422,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             type="button"
             onClick={handleToggleMeasuring}
             className={`w-7 h-7 rounded-[6px] flex items-center justify-center transition cursor-pointer ${
-              isMeasuring ? 'bg-amber-600 text-white' : 'hover:bg-[#162744] text-[var(--uav-muted)] hover:text-white'
+              isMeasuring ? 'bg-amber-600 text-white' : 'hover:bg-[#21262D] text-[var(--uav-muted)] hover:text-white'
             }`}
             title="Ruler Measure Distance (Click 2 points)"
           >
@@ -1434,7 +1434,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             type="button"
             onClick={() => setShowGeofence((prev) => !prev)}
             className={`w-7 h-7 rounded-[6px] flex items-center justify-center transition cursor-pointer ${
-              showGeofence ? 'bg-amber-600/30 border border-amber-500/60 text-amber-300' : 'hover:bg-[#162744] text-[var(--uav-muted)] hover:text-white'
+              showGeofence ? 'bg-amber-600/30 border border-amber-500/60 text-amber-300' : 'hover:bg-[#21262D] text-[var(--uav-muted)] hover:text-white'
             }`}
             title="Toggle ADDC 50m Arena Geofence"
           >
@@ -1443,11 +1443,11 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         </div>
 
         {/* Zoom In / Out */}
-        <div className="flex flex-col bg-[#0B1424]/90 backdrop-blur-sm border border-[var(--uav-card-border)] rounded-[8px] p-1 gap-1 mt-1">
+        <div className="flex flex-col bg-[#11161D]/90 backdrop-blur-sm border border-[var(--uav-card-border)] rounded-[8px] p-1 gap-1 mt-1">
           <button
             type="button"
             onClick={handleZoomIn}
-            className="w-7 h-7 rounded-[6px] hover:bg-[#162744] flex items-center justify-center text-[var(--uav-muted)] hover:text-white transition cursor-pointer"
+            className="w-7 h-7 rounded-[6px] hover:bg-[#21262D] flex items-center justify-center text-[var(--uav-muted)] hover:text-white transition cursor-pointer"
             title="Zoom In"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -1455,7 +1455,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           <button
             type="button"
             onClick={handleZoomOut}
-            className="w-7 h-7 rounded-[6px] hover:bg-[#162744] flex items-center justify-center text-[var(--uav-muted)] hover:text-white transition cursor-pointer"
+            className="w-7 h-7 rounded-[6px] hover:bg-[#21262D] flex items-center justify-center text-[var(--uav-muted)] hover:text-white transition cursor-pointer"
             title="Zoom Out"
           >
             <Minus className="w-3.5 h-3.5" />
@@ -1487,11 +1487,11 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                 onClick={() => setActiveGpsTab('device')}
                 className={`px-2 py-0.5 rounded text-[10px] font-bold transition flex items-center gap-1 ${
                   activeGpsTab === 'device'
-                    ? 'bg-sky-600/30 text-sky-300 border border-sky-500/50'
+                    ? 'bg-[#10B981]/20 text-emerald-300 border border-emerald-500/40'
                     : 'text-[var(--uav-muted)] hover:text-white'
                 }`}
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${deviceLocation ? 'bg-sky-400' : 'bg-rose-400'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${deviceLocation ? 'bg-emerald-400' : 'bg-rose-400'}`} />
                 <span>Device GCS</span>
               </button>
             </div>
@@ -1537,12 +1537,12 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                   type="button"
                   onClick={handleLocateDrone}
                   disabled={!droneHasValidCoords}
-                  className="px-2 py-0.5 rounded bg-[#162744] hover:bg-[#20365c] text-white disabled:opacity-40 transition cursor-pointer font-medium"
+                  className="px-2 py-0.5 rounded bg-[#21262D] hover:bg-[#262C36] text-slate-200 hover:text-white disabled:opacity-40 transition cursor-pointer font-medium"
                 >
                   Pan to Drone
                 </button>
                 {distanceDroneToDevice !== null && (
-                  <span className="text-sky-300 font-mono text-[9px]">
+                  <span className="text-emerald-400 font-mono text-[9px]">
                     ↔ {distanceDroneToDevice.toFixed(1)}m from GCS
                   </span>
                 )}
@@ -1618,7 +1618,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                         { enableHighAccuracy: true, timeout: 8000 }
                       );
                     }}
-                    className="ml-1 px-1.5 py-0.5 rounded bg-sky-600/30 hover:bg-sky-600/50 text-sky-300 text-[9px] font-semibold flex items-center gap-1 cursor-pointer shrink-0"
+                    className="ml-1 px-1.5 py-0.5 rounded bg-[#10B981]/20 hover:bg-[#10B981]/40 text-emerald-300 text-[9px] font-semibold flex items-center gap-1 cursor-pointer shrink-0"
                   >
                     <RefreshCw className="w-2.5 h-2.5" />
                     <span>Retry</span>
@@ -1632,7 +1632,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                   type="button"
                   onClick={handleLocateDevice}
                   disabled={!deviceLocation}
-                  className="px-2 py-0.5 rounded bg-sky-600/30 border border-sky-500/40 hover:bg-sky-600/50 text-sky-200 disabled:opacity-40 transition cursor-pointer font-medium shrink-0"
+                  className="px-2 py-0.5 rounded bg-[#10B981]/20 border border-emerald-500/40 hover:bg-[#10B981]/40 text-emerald-200 disabled:opacity-40 transition cursor-pointer font-medium shrink-0"
                 >
                   Pan to Device
                 </button>

@@ -1,17 +1,21 @@
-/* UAV CONTROL Dashboard Design Tokens - Single Source of Truth */
+/* SKYCON GCS Design Tokens — Realistic Tactical Aerospace HUD (Stitch AI) */
 :root {
-  --uav-bg: #0A101C;
-  --uav-header: #0B1220;
-  --uav-card: #0F1829;
-  --uav-card-border: #1C2A42;
-  --uav-text: #E6EDF7;
-  --uav-muted: #8B9BB4;
-  --uav-primary-blue: #1F6FEB;
-  --uav-icon-blue: #38A1FF;
-  --uav-green: #22C55E;
-  --uav-green-fill: #16A34A;
-  --uav-amber: #F5B81C;
-  --uav-red: #DC2626;
+  --uav-bg: #0D1117;
+  --uav-header: #11161D;
+  --uav-card: #161B22;
+  --uav-card-border: #262C36;
+  --uav-card-hover: #21262D;
+  --uav-card-inner: #090D12;
+  --uav-text: #E6EDF3;
+  --uav-muted: #8B949E;
+  --uav-primary-blue: #10B981; /* Tactical Aerospace Emerald replaces saturated cobalt */
+  --uav-primary: #10B981;
+  --uav-icon-blue: #38BDF8;
+  --uav-vector-amber: #E5A93C;
+  --uav-green: #10B981;
+  --uav-green-fill: #059669;
+  --uav-amber: #F59E0B;
+  --uav-red: #EF4444;
   --uav-red-dark: #3b0d0d;
   --uav-red-border: #7f1d1d;
   --uav-purple: #A855F7;
@@ -30,12 +34,12 @@ body.uav-theme {
   height: 6px;
 }
 .uav-scrollbar::-webkit-scrollbar-track {
-  background: #0B1220;
+  background: #11161D;
 }
 .uav-scrollbar::-webkit-scrollbar-thumb {
-  background: #1C2A42;
+  background: #262C36;
   border-radius: 4px;
 }
 .uav-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #2b3d5c;
+  background: #30363D;
 }

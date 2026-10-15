@@ -78,23 +78,39 @@ export const StatRow: React.FC<StatRowProps> = ({ telemetry, className = '' }) =
         valueClassName={batteryColor}
       />
 
-      {/* 4. ALTITUDE */}
+      {/* 4. ALTITUDE & ALTITUDE SPEED */}
       <StatTile
         icon={<Mountain className="w-5 h-5 text-[var(--uav-icon-blue)]" />}
-        label="ALTITUDE"
-        value={`${telemetry.altitudeMeters.toFixed(1)} m`}
+        label="ALTITUDE / V-SPD"
+        value={
+          <span className="flex items-baseline gap-1.5">
+            <span>{telemetry.altitudeMeters.toFixed(1)}m</span>
+            <span
+              className={`text-[11px] font-mono font-bold ${
+                telemetry.verticalSpeedMs > 0.2
+                  ? 'text-emerald-400'
+                  : telemetry.verticalSpeedMs < -0.2
+                  ? 'text-amber-400'
+                  : 'text-slate-400'
+              }`}
+            >
+              {telemetry.verticalSpeedMs > 0 ? '▲+' : telemetry.verticalSpeedMs < 0 ? '▼' : ''}
+              {telemetry.verticalSpeedMs.toFixed(1)}m/s
+            </span>
+          </span>
+        }
         valueClassName="text-[var(--uav-text)]"
       />
 
-      {/* 5. SPEED */}
+      {/* 5. GROUND SPEED */}
       <StatTile
         icon={<Gauge className="w-5 h-5 text-[var(--uav-icon-blue)]" />}
-        label="SPEED"
+        label="GROUND SPEED"
         value={`${telemetry.speedMs.toFixed(1)} m/s`}
         valueClassName="text-[var(--uav-text)]"
       />
 
-      {/* 6. HEADING */}
+      {/* 6. COMPASS HEADING */}
       <StatTile
         icon={<Compass className="w-5 h-5 text-[var(--uav-icon-blue)]" />}
         label="HEADING"

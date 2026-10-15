@@ -82,7 +82,7 @@ export const MissionStatus: React.FC<MissionStatusProps> = ({
       action={
         <div className="flex items-center gap-2">
           {/* Status Pill */}
-          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-[var(--uav-card-border)] bg-[#0B1322] text-[10px] font-sans text-[var(--uav-text)]">
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-[var(--uav-card-border)] bg-[#161B22] text-[10px] font-sans text-[var(--uav-text)]">
             <span
               className={`w-1.5 h-1.5 rounded-full ${
                 isArmed ? 'bg-[#22C55E] animate-pulse' : 'bg-[var(--uav-muted)]'
@@ -100,7 +100,7 @@ export const MissionStatus: React.FC<MissionStatusProps> = ({
     >
       {/* Progress Bar Row */}
       <div className="flex items-center gap-2">
-        <div className="flex-1 h-1.5 rounded-full bg-[#162744] overflow-hidden">
+        <div className="flex-1 h-1.5 rounded-full bg-[#21262D] overflow-hidden">
           <div
             className="h-full bg-[var(--uav-primary-blue)] transition-all duration-300"
             style={{ width: `${Math.min(100, Math.max(0, displayProgress))}%` }}
@@ -154,7 +154,7 @@ export const MissionStatus: React.FC<MissionStatusProps> = ({
         <button
           type="button"
           onClick={onUploadWaypoints}
-          className="py-1.5 px-2.5 rounded-[7px] bg-[var(--uav-primary-blue)] hover:bg-blue-600 text-white font-sans font-bold text-[10.5px] tracking-wider uppercase flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-none"
+          className="py-1.5 px-2.5 rounded-[7px] bg-[#10B981] hover:bg-[#059669] text-emerald-950 font-sans font-bold text-[10.5px] tracking-wider uppercase flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-none"
         >
           <Send className="w-3.5 h-3.5" />
           <span>UPLOAD WAYPOINTS</span>
@@ -163,7 +163,7 @@ export const MissionStatus: React.FC<MissionStatusProps> = ({
         <button
           type="button"
           onClick={onArmAndFly}
-          className="py-1.5 px-2.5 rounded-[7px] bg-[var(--uav-green-fill)] hover:bg-emerald-600 text-white font-sans font-bold text-[10.5px] tracking-wider uppercase flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-none"
+          className="py-1.5 px-2.5 rounded-[7px] bg-[#059669] hover:bg-[#047857] text-white font-sans font-bold text-[10.5px] tracking-wider uppercase flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-none"
         >
           <Play className="w-3.5 h-3.5 fill-current" />
           <span>ARM & FLY</span>

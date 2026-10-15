@@ -757,6 +757,60 @@ class VisionService {
     this.notifyListeners(data);
   }
 
+  public reportDecodedQR(code: string, confidence: number = 0.98) {
+    const trimmed = (code || '').trim();
+    const hasContent = trimmed.length > 0;
+    const valid = this.validateTwoDigitCode(trimmed);
+    const snapshot = this.generateSyntheticTargetSnapshot(trimmed);
+    this.latestVerifiedPhoto = snapshot;
+
+    const data: DecodedQRData = {
+      rawText: trimmed,
+      code: trimmed,
+      isValidTwoDigit: valid,
+      detectedAt: Date.now(),
+      confidence,
+      photoSnapshotUrl: snapshot,
+      boundingBox: {
+        x: 320,
+        y: 180,
+        width: 160,
+        height: 160
+      },
+      normalizedBox: {
+        xPercent: 38,
+        yPercent: 38,
+        widthPercent: 24,
+        heightPercent: 24,
+        centerXPercent: 50,
+        centerYPercent: 50
+      }
+    };
+
+    this.latestResult = data;
+    if (hasContent) {
+      audioService.playQrDetected();
+      audioService.triggerHaptic('success');
+    }
+
+    const event: PhotoCaptureEvent = {
+      id: `PHOTO_SNAP_${Date.now()}_IPCAM`,
+      timestamp: Date.now(),
+      intervalSec: this.captureIntervalSec,
+      qrFound: hasContent,
+      qrCode: trimmed,
+      autoPurged: !hasContent,
+      photoDataUrl: hasContent ? snapshot : undefined,
+      altitudeMeters: 25.0,
+      latitude: 12.9715987,
+      longitude: 77.5945627
+    };
+
+    this.latestCaptureEvent = event;
+    this.notifyPhotoListeners(event, this.countdownSec);
+    this.notifyListeners(data);
+  }
+
   public validateTwoDigitCode(text: string): boolean {
     if (!text || typeof text !== 'string') return false;
     const trimmed = text.trim();
@@ -795,16 +849,26 @@ class VisionService {
     ctx.fillRect(250, 220, 30, 30);
 
     ctx.fillStyle = '#000000';
-    ctx.font = 'bold 52px JetBrains Mono, monospace';
+    if (code.length > 25) {
+      ctx.font = 'bold 12px JetBrains Mono, monospace';
+    } else if (code.length > 10) {
+      ctx.font = 'bold 18px JetBrains Mono, monospace';
+    } else if (code.length > 4) {
+      ctx.font = 'bold 26px JetBrains Mono, monospace';
+    } else {
+      ctx.font = 'bold 52px JetBrains Mono, monospace';
+    }
     ctx.textAlign = 'center';
-    ctx.fillText(code, 320, 195);
+    const displayLabel = code.length > 35 ? `${code.substring(0, 32)}...` : code;
+    ctx.fillText(displayLabel, 320, 190);
 
     ctx.fillStyle = 'rgba(16, 185, 129, 0.9)';
     ctx.fillRect(235, 65, 170, 26);
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 11px JetBrains Mono, monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(`OPENCV TARGET [${code}] 98%`, 320, 82);
+    const shortBadge = code.length > 12 ? `${code.substring(0, 10)}...` : code;
+    ctx.fillText(`OPENCV TARGET [${shortBadge}] 98%`, 320, 82);
 
     return canvas.toDataURL('image/jpeg', 0.85);
   }

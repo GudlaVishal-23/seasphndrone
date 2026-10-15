@@ -1,4 +1,5 @@
 import { TargetBoxDetection, VisualServoingCommand } from '../types/mission';
+export type { TargetBoxDetection };
 
 type BoxDetectionListener = (box: TargetBoxDetection) => void;
 

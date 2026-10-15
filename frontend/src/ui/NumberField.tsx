@@ -40,7 +40,7 @@ export const NumberField: React.FC<NumberFieldProps> = ({
       <label className="text-[11px] font-semibold text-[var(--uav-muted)] select-none">
         {label}
       </label>
-      <div className="relative flex items-center rounded-[8px] border border-[var(--uav-card-border)] bg-[#0B1322] px-2.5 py-1.5 focus-within:border-[var(--uav-primary-blue)] transition">
+      <div className="relative flex items-center rounded-[8px] border border-[var(--uav-card-border)] bg-[#11161D] px-2.5 py-1.5 focus-within:border-[var(--uav-primary-blue)] transition">
         <input
           type="number"
           value={value}

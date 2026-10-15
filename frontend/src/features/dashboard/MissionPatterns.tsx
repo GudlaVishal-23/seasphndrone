@@ -212,7 +212,7 @@ export const MissionPatterns: React.FC<MissionPatternsProps> = ({
       title="MISSION PATTERNS"
       collapsible
       action={
-        <div className="flex items-center gap-1.5 bg-[#0B1322] px-2 py-0.5 rounded-[5px] border border-[var(--uav-card-border)] text-[11px] font-mono shadow-sm">
+        <div className="flex items-center gap-1.5 bg-[#161B22] px-2 py-0.5 rounded-[5px] border border-[var(--uav-card-border)] text-[11px] font-mono shadow-sm">
           <span className="text-[10px] text-slate-400 font-sans uppercase font-bold">Radius:</span>
           <button
             type="button"
@@ -221,7 +221,7 @@ export const MissionPatterns: React.FC<MissionPatternsProps> = ({
               groundStationMissionService.decreaseCircleRadius(2);
               audioService.playBeep(700, 30);
             }}
-            className="w-4 h-4 flex items-center justify-center rounded bg-[#162744] hover:bg-[#223d6a] text-slate-200 hover:text-white font-bold cursor-pointer transition active:scale-90"
+            className="w-4 h-4 flex items-center justify-center rounded bg-[#21262D] hover:bg-[#262C36] text-slate-200 hover:text-white font-bold cursor-pointer transition active:scale-90"
             title="Decrease Orbit Radius (-2m)"
           >
             <Minus className="w-2.5 h-2.5" />
@@ -234,7 +234,7 @@ export const MissionPatterns: React.FC<MissionPatternsProps> = ({
               groundStationMissionService.increaseCircleRadius(2);
               audioService.playBeep(850, 30);
             }}
-            className="w-4 h-4 flex items-center justify-center rounded bg-[#162744] hover:bg-[#223d6a] text-slate-200 hover:text-white font-bold cursor-pointer transition active:scale-90"
+            className="w-4 h-4 flex items-center justify-center rounded bg-[#21262D] hover:bg-[#262C36] text-slate-200 hover:text-white font-bold cursor-pointer transition active:scale-90"
             title="Increase Orbit Radius (+2m)"
           >
             <Plus className="w-2.5 h-2.5" />
@@ -250,7 +250,7 @@ export const MissionPatterns: React.FC<MissionPatternsProps> = ({
             key={p.id}
             type="button"
             onClick={() => handlePatternClick(p.id)}
-            className="flex flex-col items-center justify-center rounded-[7px] border border-[var(--uav-card-border)] bg-[#0B1322] hover:bg-[#132238] hover:border-[var(--uav-primary-blue)] transition cursor-pointer p-1 active:scale-95"
+            className="flex flex-col items-center justify-center rounded-[7px] border border-[var(--uav-card-border)] bg-[#161B22] hover:bg-[#21262D] hover:border-[var(--uav-primary-blue)] transition cursor-pointer p-1 active:scale-95"
             title={`${p.label}: ${p.desc}`}
           >
             <div className="mb-0.5">{p.icon}</div>

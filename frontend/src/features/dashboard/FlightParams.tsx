@@ -122,10 +122,10 @@ export const FlightParams: React.FC<FlightParamsProps> = ({ className = '' }) =>
                 type="button"
                 onClick={() => handleExecuteVerticalAlt(altitude)}
                 disabled={isExecutingVertical}
-                className="h-[28px] px-2 rounded bg-sky-700 hover:bg-sky-600 disabled:opacity-50 text-white text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition active:scale-95"
+                className="h-[28px] px-2 rounded bg-[#10B981] hover:bg-[#059669] disabled:opacity-50 text-emerald-950 text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition active:scale-95"
                 title="Climb / Descend directly at drone's current location to this altitude"
               >
-                <MoveVertical className="w-3 h-3 text-sky-200" />
+                <MoveVertical className="w-3 h-3 text-emerald-950" />
                 <span>Go</span>
               </button>
             </div>
@@ -217,28 +217,28 @@ export const FlightParams: React.FC<FlightParamsProps> = ({ className = '' }) =>
                 <button
                   type="button"
                   onClick={() => handleNudgeAltitude(2)}
-                  className="py-1 px-1 rounded bg-[#132238] border border-[var(--uav-card-border)] hover:bg-[#1f375a] text-emerald-300 font-mono text-[10px] font-bold flex items-center justify-center gap-0.5 cursor-pointer"
+                  className="py-1 px-1 rounded bg-[#161B22] border border-[var(--uav-card-border)] hover:bg-[#21262D] text-emerald-300 font-mono text-[10px] font-bold flex items-center justify-center gap-0.5 cursor-pointer"
                 >
                   <ArrowUp className="w-2.5 h-2.5" /> +2m
                 </button>
                 <button
                   type="button"
                   onClick={() => handleNudgeAltitude(-2)}
-                  className="py-1 px-1 rounded bg-[#132238] border border-[var(--uav-card-border)] hover:bg-[#1f375a] text-amber-300 font-mono text-[10px] font-bold flex items-center justify-center gap-0.5 cursor-pointer"
+                  className="py-1 px-1 rounded bg-[#161B22] border border-[var(--uav-card-border)] hover:bg-[#21262D] text-amber-300 font-mono text-[10px] font-bold flex items-center justify-center gap-0.5 cursor-pointer"
                 >
                   <ArrowDown className="w-2.5 h-2.5" /> -2m
                 </button>
                 <button
                   type="button"
                   onClick={() => handleNudgeAltitude(5)}
-                  className="py-1 px-1 rounded bg-[#132238] border border-[var(--uav-card-border)] hover:bg-[#1f375a] text-emerald-400 font-mono text-[10px] font-bold flex items-center justify-center gap-0.5 cursor-pointer"
+                  className="py-1 px-1 rounded bg-[#161B22] border border-[var(--uav-card-border)] hover:bg-[#21262D] text-emerald-400 font-mono text-[10px] font-bold flex items-center justify-center gap-0.5 cursor-pointer"
                 >
                   <ArrowUp className="w-2.5 h-2.5" /> +5m
                 </button>
                 <button
                   type="button"
                   onClick={() => handleNudgeAltitude(-5)}
-                  className="py-1 px-1 rounded bg-[#132238] border border-[var(--uav-card-border)] hover:bg-[#1f375a] text-amber-400 font-mono text-[10px] font-bold flex items-center justify-center gap-0.5 cursor-pointer"
+                  className="py-1 px-1 rounded bg-[#161B22] border border-[var(--uav-card-border)] hover:bg-[#21262D] text-amber-400 font-mono text-[10px] font-bold flex items-center justify-center gap-0.5 cursor-pointer"
                 >
                   <ArrowDown className="w-2.5 h-2.5" /> -5m
                 </button>
@@ -250,13 +250,13 @@ export const FlightParams: React.FC<FlightParamsProps> = ({ className = '' }) =>
             type="button"
             onClick={() => handleExecuteVerticalAlt(altitude)}
             disabled={isExecutingVertical}
-            className="w-full py-1.5 px-3 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-sans font-bold text-[11px] flex items-center justify-center gap-2 shadow transition cursor-pointer active:scale-95 disabled:opacity-50"
+            className="w-full py-1.5 px-3 rounded-lg bg-[#10B981] hover:bg-[#059669] text-emerald-950 font-sans font-bold text-[11px] flex items-center justify-center gap-2 shadow transition cursor-pointer active:scale-95 disabled:opacity-50"
           >
-            <MoveVertical className="w-3.5 h-3.5 text-sky-200" />
+            <MoveVertical className="w-3.5 h-3.5 text-emerald-950" />
             <span>CLIMB / DESCEND AT DRONE LOCATION ({altitude}m)</span>
           </button>
           {verticalStatusMsg && (
-            <div className="text-[10px] font-mono text-center text-sky-300 truncate">
+            <div className="text-[10px] font-mono text-center text-emerald-400 truncate">
               {verticalStatusMsg}
             </div>
           )}

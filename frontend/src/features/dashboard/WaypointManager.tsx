@@ -189,9 +189,9 @@ export const WaypointManager: React.FC<WaypointManagerProps> = ({
 
       {/* Active Tab View */}
       {activeTab === 'Waypoints' && (
-        <div className="flex-1 flex flex-col my-1 rounded-[6px] border border-[var(--uav-card-border)] bg-[#0A1220] overflow-hidden">
+        <div className="flex-1 flex flex-col my-1 rounded-[6px] border border-[var(--uav-card-border)] bg-[#11161D] overflow-hidden">
           {/* Table Header */}
-          <div className="grid grid-cols-[30px_1fr_1fr_60px_45px] px-2 py-1 bg-[#0E1A2E] text-[10px] font-semibold uppercase text-[var(--uav-muted)] border-b border-[var(--uav-card-border)] text-left">
+          <div className="grid grid-cols-[30px_1fr_1fr_60px_45px] px-2 py-1 bg-[#161B22] text-[10px] font-semibold uppercase text-[var(--uav-muted)] border-b border-[var(--uav-card-border)] text-left">
             <span>#</span>
             <span>Latitude</span>
             <span>Longitude</span>
@@ -200,7 +200,7 @@ export const WaypointManager: React.FC<WaypointManagerProps> = ({
           </div>
 
           {/* Table Body */}
-          <div className="flex-1 overflow-y-auto font-mono text-[11px] divide-y divide-[#162744]/40 scrollbar-thin scrollbar-thumb-[#1C2A42]">
+          <div className="flex-1 overflow-y-auto font-mono text-[11px] divide-y divide-[#262C36]/50 scrollbar-thin scrollbar-thumb-[#262C36]">
             {waypoints.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center p-3 text-center text-[var(--uav-muted)] text-[11px]">
                 <span className="font-semibold text-slate-300">No waypoints added</span>
@@ -210,7 +210,7 @@ export const WaypointManager: React.FC<WaypointManagerProps> = ({
               waypoints.map((wp, idx) => (
                 <div
                   key={wp.id || idx}
-                  className="grid grid-cols-[30px_1fr_1fr_60px_45px] px-2 py-1 items-center hover:bg-[#12223b] text-[var(--uav-text)] text-left"
+                  className="grid grid-cols-[30px_1fr_1fr_60px_45px] px-2 py-1 items-center hover:bg-[#161B22] text-[var(--uav-text)] text-left"
                 >
                   <span className="font-bold text-[var(--uav-primary-blue)]">{idx + 1}</span>
                   <span className="truncate">{wp.lat.toFixed(5)}°</span>
@@ -234,7 +234,7 @@ export const WaypointManager: React.FC<WaypointManagerProps> = ({
       )}
 
       {activeTab === 'Patterns' && (
-        <div className="flex-1 flex flex-col justify-between my-1 p-2 rounded-[6px] border border-[var(--uav-card-border)] bg-[#0A1220] text-[11px] font-sans">
+        <div className="flex-1 flex flex-col justify-between my-1 p-2 rounded-[6px] border border-[var(--uav-card-border)] bg-[#11161D] text-[11px] font-sans">
           <div className="grid grid-cols-2 gap-2 text-[10px]">
             <div className="flex flex-col">
               <span className="text-[var(--uav-muted)]">Grid Spacing:</span>
@@ -260,7 +260,7 @@ export const WaypointManager: React.FC<WaypointManagerProps> = ({
       )}
 
       {activeTab === 'Geo Fence' && (
-        <div className="flex-1 flex flex-col justify-between my-1 p-2 rounded-[6px] border border-[var(--uav-card-border)] bg-[#0A1220] text-[11px] font-sans">
+        <div className="flex-1 flex flex-col justify-between my-1 p-2 rounded-[6px] border border-[var(--uav-card-border)] bg-[#11161D] text-[11px] font-sans">
           <div className="space-y-1 text-[10px]">
             <div className="flex items-center justify-between">
               <span className="text-[var(--uav-muted)]">Arena Boundary:</span>
@@ -301,7 +301,7 @@ export const WaypointManager: React.FC<WaypointManagerProps> = ({
           <button
             type="button"
             onClick={handleLoadKmlClick}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-[6px] border border-[var(--uav-card-border)] bg-[#0E1A2E] hover:bg-[#162744] text-[var(--uav-text)] text-[11px] font-sans font-medium transition cursor-pointer"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-[6px] border border-[var(--uav-card-border)] bg-[#161B22] hover:bg-[#21262D] text-[var(--uav-text)] text-[11px] font-sans font-medium transition cursor-pointer"
           >
             <Upload className="w-3 h-3 text-[var(--uav-muted)]" />
             <span>Load (KML)</span>
@@ -310,7 +310,7 @@ export const WaypointManager: React.FC<WaypointManagerProps> = ({
             type="button"
             onClick={handleSaveKml}
             disabled={waypoints.length === 0}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-[6px] bg-[var(--uav-primary-blue)] hover:bg-blue-600 disabled:opacity-40 disabled:pointer-events-none text-white text-[11px] font-sans font-semibold transition cursor-pointer"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-[6px] bg-[#10B981] hover:bg-[#059669] disabled:opacity-40 disabled:pointer-events-none text-emerald-950 text-[11px] font-sans font-bold transition cursor-pointer"
           >
             <Download className="w-3 h-3" />
             <span>Save (KML)</span>

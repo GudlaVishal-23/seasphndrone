@@ -419,11 +419,7 @@ export class SearchEngine {
     this.statusMessage = `Target Inspection Active: Aligning camera & activating QR Scanner at target GPS (${target.gpsPosition.lat.toFixed(5)}, ${target.gpsPosition.lng.toFixed(5)})`;
     this.notify();
 
-    // Dynamically adjust zoom for optimal QR detection (default: 2.0x to 3.0x inspection zoom)
-    visionService.setAutoZoom(false);
-    visionService.setHardwareZoom(2.5);
-
-    // Activate QR Detection
+    // Keep camera at 1.0x wide search; auto-zoom triggers specifically when QR is sighted
     this.state = 'QR_ACTIVE';
     this.notify();
 

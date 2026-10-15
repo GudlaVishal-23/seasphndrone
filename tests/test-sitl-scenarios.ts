@@ -217,7 +217,7 @@ class SimulatedPixhawk {
     // 6. COMMAND_LONG (76)
     if (msgId === 76) {
       const view = new DataView(bytes.buffer, bytes.byteOffset + payloadOffset);
-      const cmd = view.getUint16(30, true);
+      const cmd = view.getUint16(28, true);
       setTimeout(() => {
         const ackPayload = new Uint8Array(4);
         const aView = new DataView(ackPayload.buffer);
@@ -226,6 +226,11 @@ class SimulatedPixhawk {
         ackPayload[3] = 0;
         const ackPkt = buildMavlink1Packet(77, ackPayload, ++this.seqCounter);
         (mavlinkService as any).parseMavlinkStream(ackPkt);
+
+        if (cmd === 176) {
+          const customMode = Math.round(view.getFloat32(4, true));
+          this.sendHeartbeat(true, customMode);
+        }
       }, 20);
       return;
     }

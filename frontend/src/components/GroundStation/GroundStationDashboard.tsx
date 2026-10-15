@@ -66,6 +66,7 @@ interface GroundStationDashboardProps {
   onStartMission: () => void;
   onEmergencyRTL: () => void;
   onSwitchToManual?: () => void;
+  onOpenHistory?: () => void;
 }
 
 export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
@@ -81,7 +82,8 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
   onSetHomePoint,
   onStartMission,
   onEmergencyRTL,
-  onSwitchToManual
+  onSwitchToManual,
+  onOpenHistory
 }) => {
   // View Modes: COCKPIT (Default Stitch UI), DETAILED (Multi-card view), SPLIT, VIDEO
   const [viewMode, setViewMode] = useState<'COCKPIT' | 'DETAILED' | 'SPLIT' | 'VIDEO'>('COCKPIT');
@@ -570,6 +572,16 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
               </div>
             </aside>
           )}
+
+          <button
+            type="button"
+            onClick={() => setIsConfigModalOpen(true)}
+            className="px-2 py-1 rounded bg-[#1f2022] hover:bg-[#292a2c] text-[#ffb95f] border border-[#343537] text-[10px] font-sans font-bold flex items-center gap-1 transition-colors cursor-pointer"
+            title="Configure Autonomous Search & Mission Parameters"
+          >
+            <Settings className="w-3 h-3" />
+            <span className="hidden sm:inline">CONFIG</span>
+          </button>
         </div>
       )}
 

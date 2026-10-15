@@ -1,5 +1,5 @@
 import { LatLngPoint, HomePoint } from '../types/mission';
-import { GroundStationMission, GroundStationWaypoint, MissionType } from '../types/groundStationMap';
+import { GroundStationMission, GroundStationWaypoint, MissionType, MissionDrawingTool } from '../types/groundStationMap';
 import { missionEngine } from './missionEngine';
 import { mavlinkService, MavlinkMissionItem } from './mavlinkService';
 import { audioService } from './audioService';
@@ -119,6 +119,8 @@ export function isPointInPolygon(point: LatLngPoint, polygon: LatLngPoint[]): bo
 export class GroundStationMissionService {
   private currentMission: GroundStationMission | null = null;
   private subscribers: Set<(mission: GroundStationMission | null) => void> = new Set();
+  private activeDrawingTool: MissionDrawingTool = 'select';
+  private toolSubscribers: Set<(tool: MissionDrawingTool) => void> = new Set();
 
   public subscribe(fn: (mission: GroundStationMission | null) => void): () => void {
     this.subscribers.add(fn);
@@ -138,6 +140,81 @@ export class GroundStationMissionService {
     this.currentMission = null;
     this.notify();
     mavlinkService.clearMissionWaypoints().catch(() => {});
+  }
+
+  public setDrawingTool(tool: MissionDrawingTool): void {
+    this.activeDrawingTool = tool;
+    this.toolSubscribers.forEach((fn) => fn(tool));
+  }
+
+  public getDrawingTool(): MissionDrawingTool {
+    return this.activeDrawingTool;
+  }
+
+  public subscribeDrawingTool(fn: (tool: MissionDrawingTool) => void): () => void {
+    this.toolSubscribers.add(fn);
+    fn(this.activeDrawingTool);
+    return () => this.toolSubscribers.delete(fn);
+  }
+
+  // --- Dynamic Circle & Concentric Radius Controls ---
+  private circleRadiusMeters: number = 15;
+  private circleRadiusSubscribers: Set<(radius: number) => void> = new Set();
+
+  public getCircleRadius(): number {
+    return this.circleRadiusMeters;
+  }
+
+  public setCircleRadius(radius: number): void {
+    const clamped = Math.max(3, Math.min(200, Math.round(radius)));
+    this.circleRadiusMeters = clamped;
+    this.circleRadiusSubscribers.forEach((fn) => fn(clamped));
+
+    // If active mission is a CIRCLE, dynamically recalculate waypoints with the updated radius
+    if (this.currentMission?.missionType === 'CIRCLE' && this.currentMission.geometry?.circleCenter) {
+      const center = this.currentMission.geometry.circleCenter;
+      const home: HomePoint = {
+        latitude: this.currentMission.homePoint.latitude,
+        longitude: this.currentMission.homePoint.longitude,
+        altitude: this.currentMission.homePoint.altitude || 0,
+        isSet: this.currentMission.homePoint.isSet,
+        timestamp: Date.now(),
+      };
+      const alt = this.currentMission.altitude;
+      const spd = this.currentMission.speed;
+      this.generateCircleMission(center, clamped, home, alt, spd);
+    } else if (this.currentMission?.missionType === 'CONCENTRIC_CIRCLE' && this.currentMission.geometry?.circleCenter) {
+      const center = this.currentMission.geometry.circleCenter;
+      const home: HomePoint = {
+        latitude: this.currentMission.homePoint.latitude,
+        longitude: this.currentMission.homePoint.longitude,
+        altitude: this.currentMission.homePoint.altitude || 0,
+        isSet: this.currentMission.homePoint.isSet,
+        timestamp: Date.now(),
+      };
+      const alt = this.currentMission.altitude;
+      const spd = this.currentMission.speed;
+      const ring1 = Math.max(3, Math.round(clamped * 0.4));
+      const ring2 = Math.max(ring1 + 3, Math.round(clamped * 0.8));
+      const ring3 = Math.max(ring2 + 3, clamped);
+      this.generateConcentricCircleMission(center, [ring1, ring2, ring3], home, alt, spd);
+    }
+  }
+
+  public increaseCircleRadius(stepMeters: number = 2): number {
+    this.setCircleRadius(this.circleRadiusMeters + stepMeters);
+    return this.circleRadiusMeters;
+  }
+
+  public decreaseCircleRadius(stepMeters: number = 2): number {
+    this.setCircleRadius(this.circleRadiusMeters - stepMeters);
+    return this.circleRadiusMeters;
+  }
+
+  public subscribeCircleRadius(fn: (radius: number) => void): () => void {
+    this.circleRadiusSubscribers.add(fn);
+    fn(this.circleRadiusMeters);
+    return () => this.circleRadiusSubscribers.delete(fn);
   }
 
   /**
@@ -342,10 +419,10 @@ export class GroundStationMissionService {
    */
   public generateCircleMission(
     center: LatLngPoint,
-    radiusMeters: number,
+    radiusMeters: number = this.circleRadiusMeters,
     homePoint: HomePoint,
-    altitude: number,
-    speed: number,
+    altitude: number = 25,
+    speed: number = 4.0,
     direction: 'CW' | 'CCW' = 'CW',
     autoReturnToHome: boolean = true
   ): GroundStationMission {
@@ -437,6 +514,123 @@ export class GroundStationMissionService {
         circleRadiusMeters: validRadius,
         areaSquareMeters: Math.PI * validRadius * validRadius,
         coordinates: circleCoords,
+      },
+      isUploaded: false,
+      createdAt: Date.now(),
+    };
+
+    this.currentMission = mission;
+    this.notify();
+    return mission;
+  }
+
+  /**
+   * Generates mission for CONCENTRIC CIRCULAR ORBITS.
+   * Creates expanding or contracting circular rings around a central coordinate.
+   * Ring radii in meters (e.g. [5, 10, 15] or [8, 16, 24]).
+   */
+  public generateConcentricCircleMission(
+    center: LatLngPoint,
+    ringRadiiMeters: number[] = [6, 12, 18],
+    homePoint: HomePoint,
+    altitude: number = 20,
+    speed: number = 4.0,
+    direction: 'CW' | 'CCW' = 'CW',
+    autoReturnToHome: boolean = true
+  ): GroundStationMission {
+    const validAlt = Math.max(2, Math.min(120, altitude));
+    const validSpeed = Math.max(1, Math.min(15, speed));
+    const sanitizedRadii = ringRadiiMeters.length > 0 ? ringRadiiMeters : [6, 12, 18];
+
+    const homeBearing = homePoint.isSet
+      ? calculateBearing(homePoint.latitude, homePoint.longitude, center.lat, center.lng)
+      : 0;
+
+    const waypoints: GroundStationWaypoint[] = [];
+    let cumulativeDistance = 0;
+    let prevLat = homePoint.isSet ? homePoint.latitude : center.lat;
+    let prevLng = homePoint.isSet ? homePoint.longitude : center.lng;
+    const allCoords: LatLngPoint[] = [];
+
+    let globalWpIndex = 1;
+
+    sanitizedRadii.forEach((radius, ringIdx) => {
+      const validRadius = Math.max(3, Math.min(500, radius));
+      const circumference = 2 * Math.PI * validRadius;
+      // 8 to 24 points per ring depending on radius
+      const numPoints = Math.max(8, Math.min(24, Math.round(circumference / 12)));
+
+      for (let i = 0; i <= numPoints; i++) {
+        const stepAngle = (360 / numPoints) * i;
+        const angle = direction === 'CW'
+          ? (homeBearing + stepAngle) % 360
+          : (homeBearing - stepAngle + 360) % 360;
+
+        const wpPos = computeDestination(center.lat, center.lng, validRadius, angle);
+        allCoords.push(wpPos);
+
+        const legDist = calculateHaversineDistance(prevLat, prevLng, wpPos.lat, wpPos.lng);
+        cumulativeDistance += legDist;
+
+        waypoints.push({
+          id: `CONC_R${ringIdx + 1}_WP_${i + 1}`,
+          index: globalWpIndex++,
+          lat: wpPos.lat,
+          lng: wpPos.lng,
+          altitude: validAlt,
+          speed: validSpeed,
+          action: 'ORBIT',
+          name: `Ring ${ringIdx + 1} (${validRadius}m) - Pt ${i + 1}`,
+          distanceFromPreviousMeters: Math.round(legDist * 10) / 10,
+        });
+
+        prevLat = wpPos.lat;
+        prevLng = wpPos.lng;
+      }
+    });
+
+    if (autoReturnToHome && homePoint.isSet) {
+      const rtlDist = calculateHaversineDistance(prevLat, prevLng, homePoint.latitude, homePoint.longitude);
+      cumulativeDistance += rtlDist;
+      waypoints.push({
+        id: `CONC_RTL`,
+        index: globalWpIndex,
+        lat: homePoint.latitude,
+        lng: homePoint.longitude,
+        altitude: validAlt,
+        speed: validSpeed,
+        action: 'RTL',
+        name: 'Return To Home (RTL)',
+        distanceFromPreviousMeters: Math.round(rtlDist * 10) / 10,
+      });
+    }
+
+    const estimatedDuration = Math.round(
+      (cumulativeDistance / validSpeed) + (waypoints.length * 1.2) + (validAlt / 2.0)
+    );
+
+    const maxRadius = Math.max(...sanitizedRadii);
+
+    const mission: GroundStationMission = {
+      id: `MSN_CONC_${Date.now().toString(36).toUpperCase()}`,
+      homePoint: {
+        latitude: homePoint.latitude,
+        longitude: homePoint.longitude,
+        altitude: homePoint.altitude || 0,
+        isSet: homePoint.isSet,
+      },
+      missionType: 'CIRCLE',
+      altitude: validAlt,
+      speed: validSpeed,
+      waypoints,
+      totalDistance: Math.round(cumulativeDistance * 10) / 10,
+      estimatedDuration,
+      geometry: {
+        type: 'circle',
+        circleCenter: center,
+        circleRadiusMeters: maxRadius,
+        areaSquareMeters: Math.PI * maxRadius * maxRadius,
+        coordinates: allCoords,
       },
       isUploaded: false,
       createdAt: Date.now(),

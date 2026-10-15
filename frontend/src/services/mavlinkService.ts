@@ -115,6 +115,8 @@ export const MAVLINK_CRC_EXTRAS: Record<number, number> = {
   22: 220, // PARAM_VALUE
   23: 168, // PARAM_SET
   24: 24,  // GPS_RAW_INT
+  26: 170, // SCALED_IMU (Magnetometer XYZ)
+  27: 144, // RAW_IMU (Raw Magnetometer XYZ)
   29: 115, // SCALED_PRESSURE
   30: 39,  // ATTITUDE
   32: 185, // LOCAL_POSITION_NED
@@ -137,11 +139,13 @@ export const MAVLINK_CRC_EXTRAS: Record<number, number> = {
   75: 158, // COMMAND_INT
   76: 152, // COMMAND_LONG
   77: 143, // COMMAND_ACK
+  116: 76, // SCALED_IMU2
   124: 87, // GPS2_RAW
   125: 203, // POWER_STATUS
   147: 154, // BATTERY_STATUS
   163: 187, // AHRS2
   168: 21,  // WIND
+  192: 36,  // MAG_CAL_REPORT
   242: 104, // HOME_POSITION
   253: 83  // STATUSTEXT
 };
@@ -169,6 +173,10 @@ class MAVLinkService {
     mavlinkVersion: 'MAVLink 2.0 / 1.0',
     isReceivingTelemetry: false,
     ekfHealthy: true,
+    compassHealthy: true,
+    compassCalibrated: true,
+    magFieldStrength: 480,
+    rcOverrideEnabled: true,
     preArmChecksPassed: false,
     statusHistory: [],
     commandAckHistory: [],
@@ -186,14 +194,25 @@ class MAVLinkService {
     }
   };
 
+  private rcOverrideEnabled: boolean = true;
+
   private telemetry: DroneTelemetry = {
     latitude: 0.0,
     longitude: 0.0,
     altitude: 0.0,
     targetAltitude: 0.0,
     groundSpeed: 0.0,
+    airSpeed: 0.0,
     verticalSpeed: 0.0,
     heading: 0,
+    magHeading: 0,
+    magFieldStrength: 480,
+    isCompassHealthy: true,
+    isCompassCalibrated: true,
+    rcOverrideEnabled: true,
+    pitch: 0.0,
+    roll: 0.0,
+    satellitesVisible: 0,
     batteryPercent: 0,
     batteryVoltage: 0.0,
     batteryCurrent: 0.0,
@@ -1124,6 +1143,8 @@ class MAVLinkService {
       0: 'HEARTBEAT',
       1: 'SYS_STATUS',
       24: 'GPS_RAW_INT',
+      26: 'SCALED_IMU',
+      27: 'RAW_IMU',
       30: 'ATTITUDE',
       33: 'GLOBAL_POSITION_INT',
       39: 'MISSION_ITEM',
@@ -1135,8 +1156,10 @@ class MAVLinkService {
       74: 'VFR_HUD',
       76: 'COMMAND_LONG',
       77: 'COMMAND_ACK',
+      116: 'SCALED_IMU2',
       124: 'GPS2_RAW',
       147: 'BATTERY_STATUS',
+      192: 'MAG_CAL_REPORT',
       242: 'HOME_POSITION',
       253: 'STATUSTEXT'
     };
@@ -1217,8 +1240,43 @@ class MAVLinkService {
         break;
       }
 
+      // ATTITUDE (msgId = 30) - Primary roll, pitch, yaw angles (radians -> degrees)
+      case 30: {
+        if (payload.length >= 16) {
+          const rollRad = view.getFloat32(4, true);
+          const pitchRad = view.getFloat32(8, true);
+          const yawRad = view.getFloat32(12, true);
+
+          if (Number.isFinite(rollRad)) {
+            this.telemetry.roll = +(rollRad * (180 / Math.PI)).toFixed(1);
+          }
+          if (Number.isFinite(pitchRad)) {
+            this.telemetry.pitch = +(pitchRad * (180 / Math.PI)).toFixed(1);
+          }
+          if (Number.isFinite(yawRad)) {
+            const yawDeg = ((yawRad * (180 / Math.PI)) % 360 + 360) % 360;
+            this.telemetry.heading = Math.round(yawDeg);
+          }
+          this.notifyTelemetry();
+        }
+        break;
+      }
+
       // SYS_STATUS (msgId = 1)
       case 1: {
+        if (payload.length >= 12) {
+          const sensorsPresent = view.getUint32(0, true);
+          const sensorsHealth = view.getUint32(8, true);
+          const magBit = 1 << 2; // MAV_SYS_STATUS_SENSOR_3D_MAG (4)
+          if ((sensorsPresent & magBit) !== 0) {
+            const isMagHealthy = (sensorsHealth & magBit) !== 0;
+            this.telemetry.isCompassHealthy = isMagHealthy;
+            this.telemetry.isCompassCalibrated = isMagHealthy;
+            this.connectionState.compassHealthy = isMagHealthy;
+            this.connectionState.compassCalibrated = isMagHealthy;
+          }
+        }
+
         // MAVLink wire format: uint16_t voltage_battery is at offset 14 (in mV)
         // MAVLink 2 zero-truncation means payload can be 16 to 31 bytes
         if (payload.length >= 16) {
@@ -1252,14 +1310,79 @@ class MAVLinkService {
         break;
       }
 
+      // SCALED_IMU (msgId = 26) & SCALED_IMU2 (msgId = 116)
+      case 26:
+      case 116: {
+        if (payload.length >= 22) {
+          const xmag = view.getInt16(16, true);
+          const ymag = view.getInt16(18, true);
+          const zmag = view.getInt16(20, true);
+          const strength = Math.round(Math.hypot(xmag, ymag, zmag));
+          if (strength > 0) {
+            this.telemetry.magX = xmag;
+            this.telemetry.magY = ymag;
+            this.telemetry.magZ = zmag;
+            this.telemetry.magFieldStrength = strength;
+            const magHeading = Math.round((Math.atan2(ymag, xmag) * (180 / Math.PI) + 360) % 360);
+            this.telemetry.magHeading = magHeading;
+            const isHealthy = strength >= 120 && strength <= 1400;
+            this.telemetry.isCompassHealthy = isHealthy;
+            this.telemetry.isCompassCalibrated = isHealthy;
+            this.connectionState.magRaw = { x: xmag, y: ymag, z: zmag };
+            this.connectionState.magFieldStrength = strength;
+            this.connectionState.compassHealthy = isHealthy;
+            this.connectionState.compassCalibrated = isHealthy;
+            if (!this.telemetry.heading || this.telemetry.heading === 0) {
+              this.telemetry.heading = magHeading;
+            }
+            this.notifyTelemetry();
+          }
+        }
+        break;
+      }
+
+      // RAW_IMU (msgId = 27)
+      case 27: {
+        if (payload.length >= 26) {
+          const xmag = view.getInt16(20, true);
+          const ymag = view.getInt16(22, true);
+          const zmag = view.getInt16(24, true);
+          const strength = Math.round(Math.hypot(xmag, ymag, zmag));
+          if (strength > 0) {
+            this.telemetry.magX = xmag;
+            this.telemetry.magY = ymag;
+            this.telemetry.magZ = zmag;
+            this.telemetry.magFieldStrength = strength;
+            const magHeading = Math.round((Math.atan2(ymag, xmag) * (180 / Math.PI) + 360) % 360);
+            this.telemetry.magHeading = magHeading;
+            const isHealthy = strength >= 120 && strength <= 1400;
+            this.telemetry.isCompassHealthy = isHealthy;
+            this.telemetry.isCompassCalibrated = isHealthy;
+            this.connectionState.magRaw = { x: xmag, y: ymag, z: zmag };
+            this.connectionState.magFieldStrength = strength;
+            this.connectionState.compassHealthy = isHealthy;
+            this.connectionState.compassCalibrated = isHealthy;
+            if (!this.telemetry.heading || this.telemetry.heading === 0) {
+              this.telemetry.heading = magHeading;
+            }
+            this.notifyTelemetry();
+          }
+        }
+        break;
+      }
+
       // VFR_HUD (msgId = 74) - Primary flight instruments stream (Altitude, Speed, Throttle)
       case 74: {
         if (payload.length >= 12) {
+          const airspeed = view.getFloat32(0, true);
           const groundspeed = view.getFloat32(4, true);
           const alt = view.getFloat32(8, true);
           const climb = payload.length >= 16 ? view.getFloat32(12, true) : 0;
           const heading = payload.length >= 18 ? view.getInt16(16, true) : 0;
 
+          if (Number.isFinite(airspeed) && airspeed >= 0) {
+            this.telemetry.airSpeed = +airspeed.toFixed(2);
+          }
           if (Number.isFinite(groundspeed) && groundspeed >= 0) {
             this.telemetry.groundSpeed = +groundspeed.toFixed(2);
           }
@@ -1714,9 +1837,12 @@ class MAVLinkService {
             }
           }
           this.telemetry.altitude = +Math.max(0, relativeAlt).toFixed(2);
-          this.telemetry.groundSpeed = +Math.hypot(vx, vy).toFixed(2);
-          this.telemetry.verticalSpeed = +(-vz).toFixed(2);
-          this.telemetry.heading = +hdg.toFixed(0);
+          const rawHdg = view.getUint16(26, true);
+          if (rawHdg !== 65535) {
+            this.telemetry.heading = Math.round(rawHdg / 100);
+          } else if (this.telemetry.magHeading) {
+            this.telemetry.heading = this.telemetry.magHeading;
+          }
 
           if (this.homePoint.isSet && this.homePoint.latitude !== 0) {
             const dy = (this.telemetry.latitude - this.homePoint.latitude) * 111320;
@@ -2004,6 +2130,8 @@ class MAVLinkService {
       await this.sendMavlinkCommandLong(511, 30 /* ATTITUDE: roll, pitch, yaw */, 100000 /* 10 Hz */);
       await this.sendMavlinkCommandLong(511, 24 /* GPS_RAW_INT: Primary GPS 1 */, 200000 /* 5 Hz */);
       await this.sendMavlinkCommandLong(511, 124 /* GPS2_RAW: Secondary GPS 2 */, 200000 /* 5 Hz */);
+      await this.sendMavlinkCommandLong(511, 27 /* RAW_IMU: Magnetometer sensors */, 250000 /* 4 Hz */);
+      await this.sendMavlinkCommandLong(511, 26 /* SCALED_IMU: Calibrated Magnetometer */, 250000 /* 4 Hz */);
       await this.sendMavlinkCommandLong(511, 65 /* RC_CHANNELS: TELEM1 receiver sticks */, 250000 /* 4 Hz */);
     } catch (e) {
       console.warn('Failed to send MAV_CMD_SET_MESSAGE_INTERVAL', e);
@@ -2377,6 +2505,86 @@ class MAVLinkService {
     }
   }
 
+  /**
+   * IN-PLACE VERTICAL ALTITUDE REPOSITION (Go Up / Go Down at Drone's Current Location):
+   * Locks the drone's horizontal coordinates (latitude & longitude) at its current fix
+   * and commands vertical climb or descent to targetAltitudeMeters via ArduPilot GUIDED repositioning.
+   */
+  public async commandVerticalAltitude(targetAltitudeMeters: number, verticalSpeedMps: number = 1.5): Promise<boolean> {
+    const isConnected = this.connectionState.isConnected || this.connectionState.isUsbConnected;
+    const clampedAlt = Math.max(1, Math.min(120, Math.round(targetAltitudeMeters * 10) / 10));
+    
+    // Acquire current GPS position
+    let targetLat = this.telemetry.gps?.latitude || 0;
+    let targetLon = this.telemetry.gps?.longitude || 0;
+
+    // Validate coordinates (protect against Null Island)
+    if (Math.abs(targetLat) < 0.001 || Math.abs(targetLon) < 0.001) {
+      if (this.homePoint?.isSet && Math.abs(this.homePoint.latitude) > 0.001) {
+        targetLat = this.homePoint.latitude;
+        targetLon = this.homePoint.longitude;
+      } else {
+        targetLat = 17.3850;
+        targetLon = 78.4867;
+      }
+    }
+
+    const currentAlt = this.telemetry.altitude || 0;
+    const direction = clampedAlt >= currentAlt ? 'CLIMB UP ▲' : 'DESCEND DOWN ▼';
+    this.telemetry.targetAltitude = clampedAlt;
+
+    this.addStatusMessage(
+      'NOTICE',
+      5,
+      `Vertical Reposition (${direction}): Holding (${targetLat.toFixed(5)}, ${targetLon.toFixed(5)}) -> Target Altitude ${clampedAlt}m`
+    );
+
+    if (this.connectionState.isRealHardware || isConnected) {
+      // 1. Ensure flight controller is in GUIDED mode
+      await this.setFlightMode('GUIDED');
+
+      // 2. Send COMMAND_INT with MAV_CMD_DO_REPOSITION (192) locking lat/lon and updating altitude
+      const latE7 = Math.round(targetLat * 1e7);
+      const lonE7 = Math.round(targetLon * 1e7);
+      await this.sendMavlinkCommandInt(
+        192 /* MAV_CMD_DO_REPOSITION */,
+        verticalSpeedMps,
+        1.0 /* MAV_DO_REPOSITION_FLAGS_CHANGE_MODE */,
+        0,
+        0,
+        latE7,
+        lonE7,
+        clampedAlt,
+        6 /* MAV_FRAME_GLOBAL_RELATIVE_ALT_INT */
+      );
+
+      // 3. Fallback COMMAND_LONG frame (192)
+      await this.sendMavlinkCommandLong(192 /* MAV_CMD_DO_REPOSITION */, verticalSpeedMps, 1.0, 0, 0, targetLat, targetLon, clampedAlt);
+
+      // 4. Send MAV_CMD_DO_CHANGE_ALTITUDE (186)
+      await this.sendMavlinkCommandLong(186 /* MAV_CMD_DO_CHANGE_ALTITUDE */, clampedAlt, 0, 0, 0, 0, 0, 0);
+
+      this.notifyTelemetry();
+      return true;
+    } else {
+      // Simulated drone response: update altitude and mode
+      this.telemetry.flightMode = 'GUIDED';
+      this.telemetry.targetAltitude = clampedAlt;
+      this.telemetry.altitude = clampedAlt;
+      this.notifyTelemetry();
+      return true;
+    }
+  }
+
+  /**
+   * Nudges altitude vertically up or down by deltaMeters at current drone position.
+   */
+  public async nudgeVerticalAltitude(deltaMeters: number): Promise<boolean> {
+    const currentAlt = this.telemetry.targetAltitude || this.telemetry.altitude || 5.0;
+    const newAlt = Math.max(1, Math.min(120, currentAlt + deltaMeters));
+    return this.commandVerticalAltitude(newAlt);
+  }
+
   public async commandStartMission(): Promise<boolean> {
     const isConnected = this.connectionState.isConnected || this.connectionState.isUsbConnected;
     if (!isConnected && !this.simInterval) {
@@ -2417,16 +2625,57 @@ class MAVLinkService {
 
   public async commandRTL(): Promise<boolean> {
     this.addStatusMessage('WARNING', 4, 'Initiating Emergency Return-To-Launch (RTL)...');
+    this.logDiagnostic('MAVLINK', 'EMERGENCY RTL COMMAND DISPATCHED', 'warn');
     const isConnected = this.connectionState.isConnected || this.connectionState.isUsbConnected;
     if (this.connectionState.isRealHardware || isConnected) {
-      await this.setFlightMode('RTL');
+      // 1. Direct MAVLink COMMAND_LONG 20 (MAV_CMD_NAV_RETURN_TO_LAUNCH)
+      await this.sendMavlinkCommandLong(20 /* MAV_CMD_NAV_RETURN_TO_LAUNCH */, 0, 0, 0, 0, 0, 0, 0);
+      // 2. Direct ArduPilot SET_MODE message (Custom Mode 6 = RTL)
+      await this.sendSetModeMessage(6 /* RTL */);
+      await this.sendMavlinkCommandLong(176 /* MAV_CMD_DO_SET_MODE */, 1 /* MAV_MODE_FLAG_CUSTOM_MODE_ENABLED */, 6 /* RTL */);
+      this.telemetry.flightMode = 'RTL';
+      this.connectionState.pendingFlightMode = undefined;
+      this.notifyTelemetry();
+      this.notifyConnection();
       return true;
     } else {
       this.telemetry.flightMode = 'RTL';
       this.telemetry.targetAltitude = 25;
       this.notifyTelemetry();
+      this.notifyConnection();
       return true;
     }
+  }
+
+  public toggleRCOverride(): boolean {
+    this.rcOverrideEnabled = !this.rcOverrideEnabled;
+    this.connectionState.rcOverrideEnabled = this.rcOverrideEnabled;
+    this.telemetry.rcOverrideEnabled = this.rcOverrideEnabled;
+    this.telemetry.controlMode = this.rcOverrideEnabled ? 'RC' : 'NO_RC';
+    this.connectionState.controlMode = this.rcOverrideEnabled ? 'RC' : 'NO_RC';
+    const msg = this.rcOverrideEnabled
+      ? 'RC Manual Control Override Enabled'
+      : 'RC Manual Control Disabled (GCS Autonomous Hold)';
+    this.addStatusMessage('NOTICE', 5, msg);
+    this.logDiagnostic('MAVLINK', msg, 'info');
+    this.notifyTelemetry();
+    this.notifyConnection();
+    return this.rcOverrideEnabled;
+  }
+
+  public setRCOverrideEnabled(enabled: boolean): boolean {
+    this.rcOverrideEnabled = enabled;
+    this.connectionState.rcOverrideEnabled = enabled;
+    this.telemetry.rcOverrideEnabled = enabled;
+    this.telemetry.controlMode = enabled ? 'RC' : 'NO_RC';
+    this.connectionState.controlMode = enabled ? 'RC' : 'NO_RC';
+    this.notifyTelemetry();
+    this.notifyConnection();
+    return this.rcOverrideEnabled;
+  }
+
+  public isRCOverrideEnabled(): boolean {
+    return this.rcOverrideEnabled;
   }
 
   public async commandLand(): Promise<boolean> {
@@ -2658,14 +2907,22 @@ class MAVLinkService {
 
           if (result.success) {
             // 5. Readback verification!
-            onProgress?.('Verifying mission readback from Pixhawk...', items.length, items.length);
-            this.logDiagnostic('MAVLINK', `[MISSION READBACK] Starting verification readback for ${items.length} items...`, 'info');
             try {
+              // Allow 500ms for Pixhawk STM32 EEPROM/flash memory commit to complete
+              await new Promise((r) => setTimeout(r, 500));
               const readbackTimeout = Math.max(8000, items.length * 600);
-              const readback = await this.downloadMissionWaypoints(readbackTimeout);
+              let readback = await this.downloadMissionWaypoints(readbackTimeout);
+
+              // If initial readback caught storage mid-commit (0 items), retry once after 800ms
+              if (readback.success && readback.items.length === 0 && items.length > 0) {
+                this.logDiagnostic('MAVLINK', '[MISSION READBACK] Initial readback returned 0 items; retrying after flash write settle...', 'warn');
+                await new Promise((r) => setTimeout(r, 800));
+                readback = await this.downloadMissionWaypoints(readbackTimeout);
+              }
+
               if (readback.success) {
                 if (readback.items.length !== items.length) {
-                  const mismatchErr = `Readback count mismatch: Pixhawk stored ${readback.items.length} items, expected ${items.length}.`;
+                  const mismatchErr = `Readback count mismatch: Pixhawk stored ${readback.items.length} items, expected ${items.length}. Check "Bypass checks" below to fly in GUIDED mode.`;
                   this.logDiagnostic('ERROR', mismatchErr, 'error');
                   resolve({ success: false, message: mismatchErr, upload_id });
                   return;
@@ -3336,6 +3593,27 @@ class MAVLinkService {
           this.telemetry.flightMode = 'DISARMED';
         }
       }
+
+      if (this.telemetry.isArmed && this.telemetry.altitude > 0.5) {
+        this.telemetry.pitch = +(Math.sin(now / 1500) * 2.5).toFixed(1);
+        this.telemetry.roll = +(Math.cos(now / 1200) * 1.8).toFixed(1);
+        this.telemetry.heading = Math.round((now / 100) % 360);
+        this.telemetry.airSpeed = +(this.telemetry.groundSpeed * 1.05 + 0.3).toFixed(1);
+      } else {
+        this.telemetry.pitch = 0.0;
+        this.telemetry.roll = 0.0;
+        this.telemetry.airSpeed = 0.0;
+      }
+
+      // Update simulated magnetometer sensing & compass health
+      this.telemetry.isCompassHealthy = true;
+      this.telemetry.isCompassCalibrated = true;
+      this.telemetry.magFieldStrength = 475 + Math.round(Math.sin(now / 2000) * 15);
+      this.telemetry.magHeading = this.telemetry.heading;
+      this.connectionState.compassHealthy = true;
+      this.connectionState.compassCalibrated = true;
+      this.connectionState.magFieldStrength = this.telemetry.magFieldStrength;
+
       this.notifyTelemetry();
     }, 500);
   }

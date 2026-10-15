@@ -154,7 +154,12 @@ export interface PixhawkConnectionState {
   vehicleState?: 'ARMED' | 'DISARMED' | 'ARMING' | 'DISARMING' | 'UNKNOWN';
   controlMode?: 'RC' | 'NO_RC';
   rcSignalDetected?: boolean;
+  rcOverrideEnabled?: boolean;
   rcRssi?: number;
+  compassHealthy?: boolean;
+  compassCalibrated?: boolean;
+  magFieldStrength?: number;
+  magRaw?: { x: number; y: number; z: number };
   commandAckHistory: MAVLinkCommandAck[];
   diagnosticsLogs: DiagnosticsLogEntry[];
   isRealHardware: boolean;

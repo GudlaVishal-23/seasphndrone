@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 interface TacticalCommandRailProps {
   isArmed: boolean;
@@ -7,7 +7,12 @@ interface TacticalCommandRailProps {
   onLoiter: () => void;
   onLand: () => void;
   onEmergencyRTL: () => void;
-  onDropPayload?: () => void;
+  onCenterDrone?: () => void;
+  onClearDrawings?: () => void;
+  onUploadMission?: () => void;
+  onDownloadMission?: () => void;
+  onOpenSettings?: () => void;
+  onTogglePlayMission?: () => void;
   className?: string;
 }
 
@@ -18,65 +23,150 @@ export const TacticalCommandRail: React.FC<TacticalCommandRailProps> = ({
   onLoiter,
   onLand,
   onEmergencyRTL,
-  onDropPayload,
+  onCenterDrone,
+  onClearDrawings,
+  onUploadMission,
+  onDownloadMission,
+  onOpenSettings,
+  onTogglePlayMission,
   className = ''
 }) => {
+  const [activeTool, setActiveTool] = useState<'select' | 'crosshair' | 'draw'>('select');
+
   return (
-    <aside className={`flex flex-col w-12 bg-[#1b1c1e]/95 backdrop-blur-md rounded-xl shadow-2xl border border-[#343537]/80 p-1 gap-1.5 z-30 select-none ${className}`}>
-      {/* TAKEOFF BUTTON */}
+    <aside
+      className={`flex flex-col w-10 bg-[#18191d]/95 backdrop-blur-md rounded-xl shadow-2xl border border-[#303138] p-1 gap-1 z-30 select-none ${className}`}
+    >
+      {/* 1. SELECTION BOX TOOL */}
       <button
-        onClick={onTakeoff}
-        className="group flex flex-col items-center justify-center h-12 w-full rounded-lg bg-[#1f2022] hover:bg-[#292a2c] text-[#aec6ff] border border-transparent hover:border-[#2f6fd6]/40 transition-all active:scale-95 cursor-pointer shadow-sm"
-        title="Initiate Autonomous Takeoff (5.0m)"
+        onClick={() => setActiveTool('select')}
+        className={`flex items-center justify-center h-8 w-full rounded-lg transition-all active:scale-95 cursor-pointer shadow-sm ${
+          activeTool === 'select'
+            ? 'bg-[#2563eb] text-white shadow-md shadow-blue-600/40'
+            : 'bg-[#1e1f24] hover:bg-[#282a30] text-slate-300'
+        }`}
+        title="Tactical Box Selection Tool"
       >
-        <span className="material-symbols-outlined text-[#aec6ff] text-[20px] group-hover:scale-110 transition-transform">flight_takeoff</span>
-        <span className="font-sans text-[8px] uppercase tracking-tighter text-[#aec6ff] mt-0.5 font-bold">TAKEOFF</span>
+        <span className="material-symbols-outlined text-[17px]">crop_square</span>
       </button>
 
-      {/* PAUSE / LOITER BUTTON */}
+      {/* 2. TRASH / CLEAR DRAWINGS */}
+      <button
+        onClick={onClearDrawings}
+        className="flex items-center justify-center h-8 w-full rounded-lg bg-[#1e1f24] hover:bg-[#282a30] text-slate-400 hover:text-rose-400 transition-all active:scale-95 cursor-pointer shadow-sm"
+        title="Clear Selected Drawings"
+      >
+        <span className="material-symbols-outlined text-[17px]">delete</span>
+      </button>
+
+      {/* 3. CROSSHAIR / LOCATE DRONE */}
+      <button
+        onClick={() => {
+          setActiveTool('crosshair');
+          onCenterDrone?.();
+        }}
+        className={`flex items-center justify-center h-8 w-full rounded-lg transition-all active:scale-95 cursor-pointer shadow-sm ${
+          activeTool === 'crosshair'
+            ? 'bg-[#2563eb] text-white shadow-md'
+            : 'bg-[#1e1f24] hover:bg-[#282a30] text-slate-400 hover:text-[#38bdf8]'
+        }`}
+        title="Center / Lock onto Drone"
+      >
+        <span className="material-symbols-outlined text-[17px]">my_location</span>
+      </button>
+
+      {/* 4. LAYERS / GEOFENCE TOGGLE */}
+      <button
+        className="flex items-center justify-center h-8 w-full rounded-lg bg-[#1e1f24] hover:bg-[#282a30] text-slate-400 hover:text-white transition-all active:scale-95 cursor-pointer shadow-sm"
+        title="Toggle Map Airspace Layers"
+      >
+        <span className="material-symbols-outlined text-[17px]">layers</span>
+      </button>
+
+      {/* 5. UPLOAD MISSION / WAYPOINTS */}
+      <button
+        onClick={onUploadMission}
+        className="flex items-center justify-center h-8 w-full rounded-lg bg-[#1e1f24] hover:bg-[#282a30] text-slate-400 hover:text-[#38bdf8] transition-all active:scale-95 cursor-pointer shadow-sm"
+        title="Upload Mission to Drone (FC)"
+      >
+        <span className="material-symbols-outlined text-[17px]">upload</span>
+      </button>
+
+      {/* 6. DOWNLOAD MISSION FROM DRONE */}
+      <button
+        onClick={onDownloadMission}
+        className="flex items-center justify-center h-8 w-full rounded-lg bg-[#1e1f24] hover:bg-[#282a30] text-slate-400 hover:text-[#38bdf8] transition-all active:scale-95 cursor-pointer shadow-sm"
+        title="Download Mission from Drone (FC)"
+      >
+        <span className="material-symbols-outlined text-[17px]">download</span>
+      </button>
+
+      {/* 7. SLIDERS / PARAMETERS */}
+      <button
+        onClick={onOpenSettings}
+        className="flex items-center justify-center h-8 w-full rounded-lg bg-[#1e1f24] hover:bg-[#282a30] text-slate-400 hover:text-white transition-all active:scale-95 cursor-pointer shadow-sm"
+        title="Configure Search & Drone Parameters"
+      >
+        <span className="material-symbols-outlined text-[17px]">tune</span>
+      </button>
+
+      {/* 8. PLAY / EXECUTE MISSION */}
+      <button
+        onClick={onTogglePlayMission}
+        className="flex items-center justify-center h-8 w-full rounded-lg bg-[#1e1f24] hover:bg-[#282a30] text-slate-400 hover:text-[#22c55e] transition-all active:scale-95 cursor-pointer shadow-sm"
+        title="Start / Resume Mission Execution"
+      >
+        <span className="material-symbols-outlined text-[17px]">play_arrow</span>
+      </button>
+
+      <div className="w-full h-px bg-[#2d2e34] my-0.5" />
+
+      {/* 9. TAKEOFF COMMAND */}
+      <button
+        onClick={onTakeoff}
+        className="flex flex-col items-center justify-center h-8.5 w-full rounded-lg bg-[#1e1f24] hover:bg-[#2563eb] text-[#38bdf8] hover:text-white transition-all active:scale-95 cursor-pointer shadow-sm"
+        title="Initiate Autonomous Takeoff (5.0m)"
+      >
+        <span className="material-symbols-outlined text-[16px]">flight_takeoff</span>
+        <span className="text-[7px] font-bold uppercase">TKOF</span>
+      </button>
+
+      {/* 10. LOITER / PAUSE */}
       <button
         onClick={onLoiter}
-        className={`group flex flex-col items-center justify-center h-12 w-full rounded-lg bg-[#1f2022] hover:bg-[#292a2c] text-[#ffb95f] border border-transparent hover:border-[#ee9800]/40 transition-all active:scale-95 cursor-pointer shadow-sm ${
-          flightMode === 'LOITER' ? 'ring-1 ring-[#ee9800] bg-[#ee9800]/20' : ''
+        className={`flex flex-col items-center justify-center h-8.5 w-full rounded-lg transition-all active:scale-95 cursor-pointer shadow-sm ${
+          flightMode === 'LOITER'
+            ? 'bg-[#f59e0b] text-white'
+            : 'bg-[#1e1f24] hover:bg-[#282a30] text-[#f59e0b]'
         }`}
         title="Loiter / Brake and Hold Position"
       >
-        <span className="material-symbols-outlined text-[#ffb95f] text-[20px] group-hover:scale-110 transition-transform">pause_circle</span>
-        <span className="font-sans text-[8px] uppercase tracking-tighter text-[#ffb95f] mt-0.5 font-bold">PAUSE</span>
+        <span className="material-symbols-outlined text-[16px]">pause</span>
+        <span className="text-[7px] font-bold uppercase">HOLD</span>
       </button>
 
-      {/* LAND BUTTON */}
+      {/* 11. LAND */}
       <button
         onClick={onLand}
-        className={`group flex flex-col items-center justify-center h-12 w-full rounded-lg bg-[#1f2022] hover:bg-[#292a2c] text-slate-300 border border-transparent hover:border-slate-500/40 transition-all active:scale-95 cursor-pointer shadow-sm ${
-          flightMode === 'LAND' ? 'ring-1 ring-white bg-white/20' : ''
+        className={`flex flex-col items-center justify-center h-8.5 w-full rounded-lg transition-all active:scale-95 cursor-pointer shadow-sm ${
+          flightMode === 'LAND'
+            ? 'bg-white text-slate-900 font-bold'
+            : 'bg-[#1e1f24] hover:bg-[#282a30] text-slate-300'
         }`}
-        title="Precision Land at Current Coordinates"
+        title="Precision Land"
       >
-        <span className="material-symbols-outlined text-slate-300 text-[20px] group-hover:scale-110 transition-transform">flight_land</span>
-        <span className="font-sans text-[8px] uppercase tracking-tighter text-slate-300 mt-0.5 font-bold">LAND</span>
+        <span className="material-symbols-outlined text-[16px]">flight_land</span>
+        <span className="text-[7px] font-bold uppercase">LAND</span>
       </button>
 
-      <div className="w-full h-px bg-[#343537] my-0.5" />
-
-      {/* RETURN TO LAUNCH (RTL) - EMERGENCY HIGH CONTRAST */}
+      {/* 12. EMERGENCY RTL */}
       <button
         onClick={onEmergencyRTL}
-        className="group flex flex-col items-center justify-center h-12 w-full rounded-lg bg-[#93000a]/40 hover:bg-[#93000a] text-[#ffb4ab] hover:text-white border border-[#93000a] transition-all active:scale-95 cursor-pointer shadow-md"
-        title="Emergency Return to Launch (RTL)"
+        className="flex flex-col items-center justify-center h-8.5 w-full rounded-lg bg-[#b91c1c]/40 hover:bg-[#b91c1c] text-[#fca5a5] hover:text-white border border-[#b91c1c] transition-all active:scale-95 cursor-pointer shadow-md"
+        title="Emergency Return To Launch (RTL)"
       >
-        <span className="material-symbols-outlined text-[20px] group-hover:scale-110 transition-transform">u_turn_left</span>
-        <span className="font-sans text-[8px] uppercase tracking-tighter mt-0.5 font-bold">RTL</span>
-      </button>
-
-      {/* ACTION / DROP PAYLOAD */}
-      <button
-        onClick={onDropPayload}
-        className="group flex flex-col items-center justify-center h-12 w-full rounded-lg bg-[#1f2022] hover:bg-[#292a2c] text-[#57df85] border border-transparent hover:border-[#008442]/40 transition-all active:scale-95 cursor-pointer shadow-sm"
-        title="Trigger Rescue Mission Code Dispatch"
-      >
-        <span className="material-symbols-outlined text-[#57df85] text-[20px] group-hover:scale-110 transition-transform">local_shipping</span>
-        <span className="font-sans text-[8px] uppercase tracking-tighter text-[#57df85] mt-0.5 font-bold">DROP</span>
+        <span className="material-symbols-outlined text-[16px]">u_turn_left</span>
+        <span className="text-[7px] font-bold uppercase">RTL</span>
       </button>
     </aside>
   );

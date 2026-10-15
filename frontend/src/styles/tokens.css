@@ -1,0 +1,41 @@
+/* UAV CONTROL Dashboard Design Tokens - Single Source of Truth */
+:root {
+  --uav-bg: #0A101C;
+  --uav-header: #0B1220;
+  --uav-card: #0F1829;
+  --uav-card-border: #1C2A42;
+  --uav-text: #E6EDF7;
+  --uav-muted: #8B9BB4;
+  --uav-primary-blue: #1F6FEB;
+  --uav-icon-blue: #38A1FF;
+  --uav-green: #22C55E;
+  --uav-green-fill: #16A34A;
+  --uav-amber: #F5B81C;
+  --uav-red: #DC2626;
+  --uav-red-dark: #3b0d0d;
+  --uav-red-border: #7f1d1d;
+  --uav-purple: #A855F7;
+}
+
+/* Base Body Surface */
+body.uav-theme {
+  background-color: var(--uav-bg) !important;
+  color: var(--uav-text) !important;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Custom Scrollbar for Telemetry Log & Lists */
+.uav-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.uav-scrollbar::-webkit-scrollbar-track {
+  background: #0B1220;
+}
+.uav-scrollbar::-webkit-scrollbar-thumb {
+  background: #1C2A42;
+  border-radius: 4px;
+}
+.uav-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #2b3d5c;
+}

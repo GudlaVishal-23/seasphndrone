@@ -89,90 +89,92 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="bg-[#0d0e10]/95 border-b border-[#343537] backdrop-blur-md px-3 sm:px-4 h-12 flex items-center justify-between text-xs select-none z-50 sticky top-0 shadow-[0_1px_8px_rgba(0,0,0,0.6)]">
-      {/* Left: Branding & Vehicle Status */}
+      {/* Left: Branding & Quick Menus (Matching Image 1) */}
       <div className="flex items-center gap-2.5 shrink-0">
+        {/* Blue Circular Brand Logo (Matching Image 1) */}
         <button
           onClick={onSwitchRole}
-          className="flex items-center justify-center w-7 h-7 rounded bg-[#292a2c] hover:bg-[#343537] text-[#aec6ff] transition cursor-pointer border border-[#343537]"
-          title="Switch Role / Mode"
+          className="flex items-center justify-center w-7 h-7 rounded-full bg-[#2563eb] hover:bg-[#1d4ed8] text-white shadow-md transition cursor-pointer border border-blue-400/40"
+          title="SAE India Autonomous Rescue Mission Core"
         >
-          <span className="material-symbols-outlined text-[18px]">flight_takeoff</span>
+          <span className="material-symbols-outlined text-[17px]">navigation</span>
         </button>
 
-        <div className="flex items-center gap-2">
-          <span className="font-sans font-bold text-slate-100 uppercase tracking-wider text-xs hidden sm:inline">
-            SAE INDIA RESCUE GCS
-          </span>
-          <span className="text-slate-600 font-mono text-[10px] hidden md:inline">|</span>
-          <div className="flex items-center gap-1.5 bg-[#1f2022] px-2 py-0.5 rounded border border-[#343537]/60">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#57df85] animate-pulse" />
-            <span className="font-mono text-[10px] text-[#57df85] font-semibold tracking-wide uppercase">
-              Vehicle 1
-            </span>
-          </div>
-
-          <button
-            onClick={() => setShowTeamInfo(true)}
-            className="px-1.5 py-0.5 rounded bg-[#1f2022] hover:bg-[#292a2c] border border-[#343537] text-[#aec6ff] text-[9px] font-mono font-bold transition cursor-pointer"
-            title="Team Info: Skycon (ADDC20260123)"
-          >
-            Skycon
+        {/* "File" Menu */}
+        <div className="relative group">
+          <button className="px-2 py-1 rounded text-slate-300 hover:text-white hover:bg-[#1e1f24] font-sans text-xs font-semibold flex items-center gap-1 transition cursor-pointer">
+            <span>File</span>
+            <span className="material-symbols-outlined text-[13px] text-slate-500">expand_more</span>
           </button>
+          <div className="hidden group-hover:flex flex-col absolute top-full left-0 bg-[#18191d] border border-[#303138] rounded-lg shadow-2xl py-1 min-w-[140px] z-50">
+            <button onClick={onResetMission} className="px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-[#2563eb] hover:text-white transition">
+              New Mission
+            </button>
+            <button onClick={onOpenHistory} className="px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-[#2563eb] hover:text-white transition">
+              Mission Logs
+            </button>
+            <button onClick={() => setShowTeamInfo(true)} className="px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-[#2563eb] hover:text-white transition">
+              About Skycon
+            </button>
+          </div>
+        </div>
+
+        {/* "Widgets" Menu */}
+        <div className="relative group">
+          <button className="px-2 py-1 rounded text-slate-300 hover:text-white hover:bg-[#1e1f24] font-sans text-xs font-semibold flex items-center gap-1 transition cursor-pointer">
+            <span>Widgets</span>
+            <span className="material-symbols-outlined text-[13px] text-slate-500">expand_more</span>
+          </button>
+          <div className="hidden group-hover:flex flex-col absolute top-full left-0 bg-[#18191d] border border-[#303138] rounded-lg shadow-2xl py-1 min-w-[160px] z-50">
+            <button onClick={() => authService.switchRole('GROUND_STATION')} className="px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-[#2563eb] hover:text-white transition">
+              Ground Station
+            </button>
+            <button onClick={() => authService.switchRole('DRONE')} className="px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-[#2563eb] hover:text-white transition">
+              Drone Onboard Cam
+            </button>
+            <button onClick={() => authService.switchRole('RUNNER')} className="px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-[#2563eb] hover:text-white transition">
+              Runner P2P Link
+            </button>
+            <button onClick={() => authService.switchRole('TESTBENCH')} className="px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-[#2563eb] hover:text-white transition">
+              SITL Testbench
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Center: Mission / Role Navigation Tabs (Plan, Fly, Recon, SimBench) */}
-      <nav className="flex items-center gap-1 bg-[#1b1c1e] p-0.5 rounded-lg border border-[#343537]/80">
+      {/* Center: Segmented Navigation Pills: Plan / Fly / Analyze (Matching Image 1) */}
+      <nav className="flex items-center bg-[#141518] p-1 rounded-xl border border-[#2a2b30] shadow-inner gap-1">
+        {/* Plan Mode */}
         <button
           type="button"
           onClick={() => authService.switchRole('GROUND_STATION')}
-          className={`px-2.5 py-1 rounded font-sans text-[11px] uppercase tracking-wider transition-all cursor-pointer ${
-            currentRole === 'GROUND_STATION'
-              ? 'bg-[#2f6fd6] text-white font-bold shadow-sm'
-              : 'text-slate-400 hover:text-white hover:bg-[#292a2c]'
-          }`}
-          title="Commander Fly View - Tactical GCS"
+          className="px-3.5 py-1 rounded-lg font-sans text-xs font-semibold text-slate-400 hover:text-white hover:bg-[#1f2025] flex items-center gap-1.5 transition cursor-pointer"
+          title="Mission Planning & Waypoint Corridors"
         >
-          Fly (GCS)
+          <span className="material-symbols-outlined text-[15px]">edit_calendar</span>
+          <span>Plan</span>
         </button>
 
+        {/* Fly Mode (Active in Image 1 with Dark Highlighted Pill) */}
         <button
           type="button"
-          onClick={() => authService.switchRole('DRONE')}
-          className={`px-2.5 py-1 rounded font-sans text-[11px] uppercase tracking-wider transition-all cursor-pointer ${
-            currentRole === 'DRONE'
-              ? 'bg-[#2f6fd6] text-white font-bold shadow-sm'
-              : 'text-slate-400 hover:text-white hover:bg-[#292a2c]'
-          }`}
-          title="Onboard Drone Camera & Avionics"
+          onClick={() => authService.switchRole('GROUND_STATION')}
+          className="px-4 py-1 rounded-lg font-sans text-xs font-bold bg-[#222329] text-white border border-[#383a42] shadow-sm flex items-center gap-1.5 transition cursor-pointer"
+          title="Flight Cockpit & Tactical Execution"
         >
-          Cam (Drone)
+          <span className="material-symbols-outlined text-[16px] text-[#38bdf8]">flight</span>
+          <span>Fly</span>
         </button>
 
+        {/* Analyze Mode */}
         <button
           type="button"
-          onClick={() => authService.switchRole('RUNNER')}
-          className={`px-2.5 py-1 rounded font-sans text-[11px] uppercase tracking-wider transition-all cursor-pointer ${
-            currentRole === 'RUNNER'
-              ? 'bg-[#2f6fd6] text-white font-bold shadow-sm'
-              : 'text-slate-400 hover:text-white hover:bg-[#292a2c]'
-          }`}
-          title="Field Rescue Runner Unit"
+          onClick={onOpenHistory}
+          className="px-3.5 py-1 rounded-lg font-sans text-xs font-semibold text-slate-400 hover:text-white hover:bg-[#1f2025] flex items-center gap-1.5 transition cursor-pointer"
+          title="Flight Logs, Telemetry & Sensor Analytics"
         >
-          Runner
-        </button>
-
-        <button
-          type="button"
-          onClick={() => authService.switchRole('TESTBENCH')}
-          className={`px-2.5 py-1 rounded font-sans text-[11px] uppercase tracking-wider transition-all cursor-pointer ${
-            currentRole === 'TESTBENCH'
-              ? 'bg-[#2f6fd6] text-white font-bold shadow-sm'
-              : 'text-slate-400 hover:text-white hover:bg-[#292a2c]'
-          }`}
-          title="Quad Simulation & Testbench"
-        >
-          SimBench
+          <span className="material-symbols-outlined text-[15px]">analytics</span>
+          <span>Analyze</span>
         </button>
       </nav>
 
@@ -249,6 +251,15 @@ export const Header: React.FC<HeaderProps> = ({
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
         )}
+
+        {/* User Avatar Badge (Matching Image 1 Top Right) */}
+        <div
+          onClick={() => setShowTeamInfo(true)}
+          className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-600 via-orange-500 to-rose-600 border border-amber-300/60 flex items-center justify-center text-white font-bold text-[10px] shadow-md cursor-pointer ml-1 hover:scale-105 transition-transform"
+          title="Operator Profile • Skycon Team"
+        >
+          <span>VG</span>
+        </div>
       </div>
 
       {/* Project & Team Branding Modal */}

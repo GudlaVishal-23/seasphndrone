@@ -67,6 +67,7 @@ interface GoogleMapGroundStationProps {
   className?: string;
   isPipVideoVisible?: boolean;
   onTogglePipVideo?: () => void;
+  isCockpitView?: boolean;
 }
 
 export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
@@ -80,6 +81,7 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
   className = '',
   isPipVideoVisible,
   onTogglePipVideo,
+  isCockpitView = false,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -104,6 +106,35 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
   const [gridSpacing, setGridSpacing] = useState<number>(8.0); // for polygon survey
   const [circleRadius, setCircleRadius] = useState<number>(25); // for circle mission
   const [circleDirection, setCircleDirection] = useState<'CW' | 'CCW'>('CW');
+
+  // Mouse wheel scroll handlers for smooth parameter increment / decrement
+  const handleAltitudeWheel = (e: React.WheelEvent) => {
+    if (e.cancelable) e.preventDefault();
+    e.stopPropagation();
+    const delta = e.deltaY < 0 ? 1 : -1;
+    setAltitude((prev) => Math.max(2, Math.min(120, prev + delta)));
+  };
+
+  const handleSpeedWheel = (e: React.WheelEvent) => {
+    if (e.cancelable) e.preventDefault();
+    e.stopPropagation();
+    const delta = e.deltaY < 0 ? 0.5 : -0.5;
+    setSpeed((prev) => Math.max(1.0, Math.min(15.0, +(prev + delta).toFixed(1))));
+  };
+
+  const handleGridSpacingWheel = (e: React.WheelEvent) => {
+    if (e.cancelable) e.preventDefault();
+    e.stopPropagation();
+    const delta = e.deltaY < 0 ? 1 : -1;
+    setGridSpacing((prev) => Math.max(4, Math.min(30, prev + delta)));
+  };
+
+  const handleCircleRadiusWheel = (e: React.WheelEvent) => {
+    if (e.cancelable) e.preventDefault();
+    e.stopPropagation();
+    const delta = e.deltaY < 0 ? 5 : -5;
+    setCircleRadius((prev) => Math.max(5, Math.min(150, prev + delta)));
+  };
 
   // Drawing geometry state
   const [drawnPoints, setDrawnPoints] = useState<LatLngPoint[]>([]);
@@ -326,9 +357,9 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    const lat = telemetry.latitude;
-    const lng = telemetry.longitude;
-    const hasValidGps = Boolean(lat && lng && lat !== 0 && lng !== 0 && telemetry.gps?.isLocked);
+    const lat = telemetry.latitude || telemetry.gps?.latitude || 0;
+    const lng = telemetry.longitude || telemetry.gps?.longitude || 0;
+    const hasValidGps = hasValidFcGps || Boolean(lat && lng && Math.abs(lat) > 0.0001 && Math.abs(lng) > 0.0001);
 
     droneLayerRef.current.clearLayers();
 
@@ -1217,60 +1248,63 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
 
         {/* ------------------------------------------------------------- */}
         {/* TOP LEFT: SEARCH BAR (GoogleMap.html Nominatim Search)        */}
+        {/* Hidden in Cockpit view to prevent overlap with Tactical Rail  */}
         {/* ------------------------------------------------------------- */}
-        <div className="absolute top-3 left-3 z-[400] w-64 sm:w-80">
-          <div className="relative flex items-center bg-slate-900/90 backdrop-blur-md rounded-xl border border-slate-700 shadow-xl overflow-hidden">
-            <Search className="w-4 h-4 ml-3 text-slate-400 shrink-0" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearchPlaces()}
-              placeholder="Search location or coordinates..."
-              className="w-full bg-transparent px-2.5 py-2 text-xs text-white placeholder-slate-400 focus:outline-none"
-            />
-            {searchQuery && (
+        {!isCockpitView && (
+          <div className="absolute top-3 left-3 z-[400] w-64 sm:w-80">
+            <div className="relative flex items-center bg-slate-900/90 backdrop-blur-md rounded-xl border border-slate-700 shadow-xl overflow-hidden">
+              <Search className="w-4 h-4 ml-3 text-slate-400 shrink-0" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearchPlaces()}
+                placeholder="Search location or coordinates..."
+                className="w-full bg-transparent px-2.5 py-2 text-xs text-white placeholder-slate-400 focus:outline-none"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="p-1.5 text-slate-400 hover:text-white"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setSearchQuery('')}
-                className="p-1.5 text-slate-400 hover:text-white"
+                onClick={handleSearchPlaces}
+                disabled={isSearching}
+                className="px-2.5 py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] uppercase transition cursor-pointer"
               >
-                <X className="w-3.5 h-3.5" />
+                {isSearching ? '...' : 'GO'}
               </button>
-            )}
-            <button
-              type="button"
-              onClick={handleSearchPlaces}
-              disabled={isSearching}
-              className="px-2.5 py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] uppercase transition cursor-pointer"
-            >
-              {isSearching ? '...' : 'GO'}
-            </button>
-          </div>
-
-          {/* Search Dropdown Results */}
-          {searchResults.length > 0 && (
-            <div className="absolute top-11 left-0 w-full bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-xl shadow-2xl overflow-hidden mt-1 max-h-56 overflow-y-auto">
-              {searchResults.map((res, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => handleSelectSearchResult(res)}
-                  className="w-full text-left p-2.5 hover:bg-sky-950/60 border-b border-slate-800 text-[11px] text-slate-200 flex items-start space-x-2 transition"
-                >
-                  <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                  <span className="line-clamp-2 leading-tight">{res.displayName}</span>
-                </button>
-              ))}
             </div>
-          )}
-        </div>
+
+            {/* Search Dropdown Results */}
+            {searchResults.length > 0 && (
+              <div className="absolute top-11 left-0 w-full bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-xl shadow-2xl overflow-hidden mt-1 max-h-56 overflow-y-auto">
+                {searchResults.map((res, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => handleSelectSearchResult(res)}
+                    className="w-full text-left p-2.5 hover:bg-sky-950/60 border-b border-slate-800 text-[11px] text-slate-200 flex items-start space-x-2 transition"
+                  >
+                    <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                    <span className="line-clamp-2 leading-tight">{res.displayName}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ------------------------------------------------------------- */}
-        {/* TOP RIGHT: MAP LAYER SWITCHER (Street / Sat / Topo / Dark)    */}
-        {/* Reused from GoogleMap.html buttons                            */}
+        {/* TOP CENTER: MAP LAYER SWITCHER (Street / Sat / Topo / Dark)  */}
+        {/* Centered at top to guarantee zero overlap with left/right cards */}
         {/* ------------------------------------------------------------- */}
-        <div className="absolute top-3 right-3 sm:right-auto sm:left-[350px] z-[400] flex items-center bg-slate-900/90 backdrop-blur-md p-1 rounded-xl border border-slate-700 shadow-xl space-x-1">
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[400] flex items-center bg-slate-900/90 backdrop-blur-md p-1 rounded-xl border border-slate-700 shadow-xl space-x-1">
           {[
             { id: 'satellite', label: 'SATELLITE' },
             { id: 'street', label: 'STREET' },
@@ -1293,175 +1327,177 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
         </div>
 
         {/* ------------------------------------------------------------- */}
-        {/* FLOATING DRAWING TOOLBAR (Left Side on Desktop / Bottom)      */}
+        {/* FLOATING DRAWING TOOLBAR (Hidden in Cockpit View)             */}
         {/* ------------------------------------------------------------- */}
-        <div className="absolute left-3 top-16 sm:top-16 z-[400] flex flex-col bg-slate-900/90 backdrop-blur-md p-1.5 rounded-xl border border-slate-700 shadow-2xl space-y-1">
-          <div className="text-[9px] font-black uppercase text-slate-400 px-1 py-0.5 text-center">
-            DRAW
+        {!isCockpitView && (
+          <div className="absolute left-3 top-16 sm:top-16 z-[400] flex flex-col bg-slate-900/90 backdrop-blur-md p-1.5 rounded-xl border border-slate-700 shadow-2xl space-y-1">
+            <div className="text-[9px] font-black uppercase text-slate-400 px-1 py-0.5 text-center">
+              DRAW
+            </div>
+
+            {/* Waypoint Point Tool */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTool('point');
+                setActiveMissionType('WAYPOINTS');
+                audioService.playBeep(700, 60);
+              }}
+              className={`p-2 rounded-lg text-xs font-bold flex items-center justify-center transition cursor-pointer ${
+                activeTool === 'point' && activeMissionType === 'WAYPOINTS'
+                  ? 'bg-sky-600 text-white shadow-md shadow-sky-600/40'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+              title="Waypoint Mode: Click map to place numbered waypoints"
+            >
+              <MapPin className="w-4 h-4" />
+            </button>
+
+            {/* Path / Polyline Tool */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTool('path');
+                setActiveMissionType('PATH');
+                audioService.playBeep(700, 60);
+              }}
+              className={`p-2 rounded-lg text-xs font-bold flex items-center justify-center transition cursor-pointer ${
+                activeTool === 'path' && activeMissionType === 'PATH'
+                  ? 'bg-amber-600 text-white shadow-md shadow-amber-600/40'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+              title="Path Mode: Draw connected polyline path"
+            >
+              <Navigation className="w-4 h-4" />
+            </button>
+
+            {/* Polygon / Area Survey Tool */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTool('polygon');
+                setActiveMissionType('POLYGON_GRID');
+                audioService.playBeep(700, 60);
+              }}
+              className={`p-2 rounded-lg text-xs font-bold flex items-center justify-center transition cursor-pointer ${
+                activeTool === 'polygon' && activeMissionType === 'POLYGON_GRID'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/40'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+              title="Polygon Grid Mode: Draw area boundary to generate survey lawnmower grid"
+            >
+              <SquareIcon className="w-4 h-4" />
+            </button>
+
+            {/* Circle Mission Tool */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTool('circle');
+                setActiveMissionType('CIRCLE');
+                setCircleCenter(null);
+                audioService.playBeep(700, 60);
+              }}
+              className={`p-2 rounded-lg text-xs font-bold flex items-center justify-center transition cursor-pointer ${
+                activeTool === 'circle' && activeMissionType === 'CIRCLE'
+                  ? 'bg-purple-600 text-white shadow-md shadow-purple-600/40'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+              title="Circle Mode: Click center and click/drag radius to generate circular orbit"
+            >
+              <CircleIcon className="w-4 h-4" />
+            </button>
+
+            {/* Set Home Point Tool (Click Map) */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTool('set_home');
+                audioService.playBeep(700, 60);
+              }}
+              className={`p-2 rounded-lg text-xs font-bold flex items-center justify-center transition cursor-pointer ${
+                activeTool === 'set_home'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/40 animate-pulse'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+              title="Home Tool: Click anywhere on map to position Home origin"
+            >
+              <Home className="w-4 h-4 text-emerald-400" />
+            </button>
+
+            {/* 1-Click Snap Home to Drone GPS */}
+            <button
+              type="button"
+              onClick={handleSetHomeToDrone}
+              disabled={!hasValidFcGps}
+              className="p-2 rounded-lg text-xs font-bold flex items-center justify-center transition cursor-pointer text-slate-300 hover:bg-emerald-950/80 hover:text-emerald-300 disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Snap Home directly to Drone GPS coordinates"
+            >
+              <Crosshair className="w-4 h-4 text-emerald-400" />
+            </button>
+
+            <div className="w-full border-t border-slate-700/80 my-1" />
+
+            {/* Undo Point */}
+            <button
+              type="button"
+              onClick={handleUndoPoint}
+              disabled={drawnPoints.length === 0}
+              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition"
+              title="Undo Last Drawn Point"
+            >
+              <Undo2 className="w-4 h-4" />
+            </button>
+
+            {/* Clear All */}
+            <button
+              type="button"
+              onClick={handleClearDrawings}
+              disabled={drawnPoints.length === 0 && !circleCenter && !generatedMission}
+              className="p-2 rounded-lg text-rose-400 hover:text-white hover:bg-rose-950 disabled:opacity-30 disabled:cursor-not-allowed transition"
+              title="Clear Mission Drawings"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+
+            <div className="w-full border-t border-slate-700/80 my-1" />
+
+            {/* Center Drone */}
+            <button
+              type="button"
+              onClick={handleCenterDrone}
+              className="p-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition"
+              title="Locate / Center Drone"
+            >
+              <Navigation className="w-4 h-4 text-sky-400" />
+            </button>
+
+            {/* Center Home Point */}
+            <button
+              type="button"
+              onClick={handleRecenterHome}
+              className="p-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              title="Locate Home Point"
+            >
+              <Home className="w-4 h-4 text-sky-400" />
+            </button>
+
+            {/* Operator Device Location (Browser Geolocation - distinct from drone) */}
+            <button
+              type="button"
+              onClick={handleGetOperatorLocation}
+              disabled={isDetectingOperatorLocation}
+              className={`p-2 rounded-lg text-xs font-bold flex items-center justify-center transition cursor-pointer ${
+                isDetectingOperatorLocation
+                  ? 'bg-blue-900/60 text-blue-200 animate-pulse'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+              title="Locate Operator / Ground Station Device (Browser Geolocation)"
+            >
+              <User className="w-4 h-4 text-blue-400" />
+            </button>
           </div>
-
-          {/* Waypoint Point Tool */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTool('point');
-              setActiveMissionType('WAYPOINTS');
-              audioService.playBeep(700, 60);
-            }}
-            className={`p-2 rounded-lg text-xs font-bold flex items-center justify-center transition cursor-pointer ${
-              activeTool === 'point' && activeMissionType === 'WAYPOINTS'
-                ? 'bg-sky-600 text-white shadow-md shadow-sky-600/40'
-                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-            title="Waypoint Mode: Click map to place numbered waypoints"
-          >
-            <MapPin className="w-4 h-4" />
-          </button>
-
-          {/* Path / Polyline Tool */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTool('path');
-              setActiveMissionType('PATH');
-              audioService.playBeep(700, 60);
-            }}
-            className={`p-2 rounded-lg text-xs font-bold flex items-center justify-center transition cursor-pointer ${
-              activeTool === 'path' && activeMissionType === 'PATH'
-                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/40'
-                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-            title="Path Mode: Draw connected polyline path"
-          >
-            <Navigation className="w-4 h-4" />
-          </button>
-
-          {/* Polygon / Area Survey Tool */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTool('polygon');
-              setActiveMissionType('POLYGON_GRID');
-              audioService.playBeep(700, 60);
-            }}
-            className={`p-2 rounded-lg text-xs font-bold flex items-center justify-center transition cursor-pointer ${
-              activeTool === 'polygon' && activeMissionType === 'POLYGON_GRID'
-                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/40'
-                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-            title="Polygon Grid Mode: Draw area boundary to generate survey lawnmower grid"
-          >
-            <SquareIcon className="w-4 h-4" />
-          </button>
-
-          {/* Circle Mission Tool */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTool('circle');
-              setActiveMissionType('CIRCLE');
-              setCircleCenter(null);
-              audioService.playBeep(700, 60);
-            }}
-            className={`p-2 rounded-lg text-xs font-bold flex items-center justify-center transition cursor-pointer ${
-              activeTool === 'circle' && activeMissionType === 'CIRCLE'
-                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/40'
-                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-            title="Circle Mode: Click center and click/drag radius to generate circular orbit"
-          >
-            <CircleIcon className="w-4 h-4" />
-          </button>
-
-          {/* Set Home Point Tool (Click Map) */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTool('set_home');
-              audioService.playBeep(700, 60);
-            }}
-            className={`p-2 rounded-lg text-xs font-bold flex items-center justify-center transition cursor-pointer ${
-              activeTool === 'set_home'
-                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/40 animate-pulse'
-                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-            title="Home Tool: Click anywhere on map to position Home origin"
-          >
-            <Home className="w-4 h-4 text-emerald-400" />
-          </button>
-
-          {/* 1-Click Snap Home to Drone GPS */}
-          <button
-            type="button"
-            onClick={handleSetHomeToDrone}
-            disabled={!hasValidFcGps}
-            className="p-2 rounded-lg text-xs font-bold flex items-center justify-center transition cursor-pointer text-slate-300 hover:bg-emerald-950/80 hover:text-emerald-300 disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Snap Home directly to Drone GPS coordinates"
-          >
-            <Crosshair className="w-4 h-4 text-emerald-400" />
-          </button>
-
-          <div className="w-full border-t border-slate-700/80 my-1" />
-
-          {/* Undo Point */}
-          <button
-            type="button"
-            onClick={handleUndoPoint}
-            disabled={drawnPoints.length === 0}
-            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition"
-            title="Undo Last Drawn Point"
-          >
-            <Undo2 className="w-4 h-4" />
-          </button>
-
-          {/* Clear All */}
-          <button
-            type="button"
-            onClick={handleClearDrawings}
-            disabled={drawnPoints.length === 0 && !circleCenter && !generatedMission}
-            className="p-2 rounded-lg text-rose-400 hover:text-white hover:bg-rose-950 disabled:opacity-30 disabled:cursor-not-allowed transition"
-            title="Clear Mission Drawings"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-
-          <div className="w-full border-t border-slate-700/80 my-1" />
-
-          {/* Center Drone */}
-          <button
-            type="button"
-            onClick={handleCenterDrone}
-            className="p-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition"
-            title="Locate / Center Drone"
-          >
-            <Navigation className="w-4 h-4 text-sky-400" />
-          </button>
-
-          {/* Center Home Point */}
-          <button
-            type="button"
-            onClick={handleRecenterHome}
-            className="p-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition cursor-pointer"
-            title="Locate Home Point"
-          >
-            <Home className="w-4 h-4 text-sky-400" />
-          </button>
-
-          {/* Operator Device Location (Browser Geolocation - distinct from drone) */}
-          <button
-            type="button"
-            onClick={handleGetOperatorLocation}
-            disabled={isDetectingOperatorLocation}
-            className={`p-2 rounded-lg text-xs font-bold flex items-center justify-center transition cursor-pointer ${
-              isDetectingOperatorLocation
-                ? 'bg-blue-900/60 text-blue-200 animate-pulse'
-                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-            title="Locate Operator / Ground Station Device (Browser Geolocation)"
-          >
-            <User className="w-4 h-4 text-blue-400" />
-          </button>
-        </div>
+        )}
 
         {/* ------------------------------------------------------------- */}
         {/* REQUIREMENT 3: FC GPS FIX STATUS FLOATING WARNING BANNER      */}
@@ -1508,43 +1544,109 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
         )}
 
         {/* ------------------------------------------------------------- */}
-        {/* MISSION PLANNING CONTROL PANEL (Side Panel / Collapsible)     */}
+        {/* HORIZONTAL MISSION PLANNING DOCK (Bottom / Non-Clipped)       */}
         {/* ------------------------------------------------------------- */}
-        <div className={`absolute right-3 top-3 bottom-3 z-[400] transition-all duration-300 flex flex-col ${
-          isSidePanelCollapsed ? 'w-0 opacity-0 pointer-events-none' : 'w-80 sm:w-96'
+        <div className={`absolute left-3 right-3 bottom-3 z-[400] transition-all duration-300 flex flex-col bg-[#0d0f14]/95 backdrop-blur-md rounded-2xl border border-slate-700 shadow-2xl overflow-hidden font-mono text-xs ${
+          isSidePanelCollapsed ? 'h-10' : 'h-[235px]'
         }`}>
-          <div className="flex-1 flex flex-col bg-slate-900/95 backdrop-blur-md rounded-2xl border border-slate-700 shadow-2xl overflow-hidden font-mono">
-            
-            {/* Panel Header */}
-            <div className="flex items-center justify-between px-3.5 py-2.5 bg-slate-950/80 border-b border-slate-800">
-              <div className="flex items-center space-x-2">
-                <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
-                <span className="text-xs font-black uppercase tracking-wider text-slate-200">
-                  MISSION PLANNER
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsSidePanelCollapsed(true)}
-                className="text-slate-400 hover:text-white p-1"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
+          {/* Dock Header Bar */}
+          <div className="flex items-center justify-between px-3.5 py-1.5 bg-[#141720] border-b border-slate-800 shrink-0 h-10">
+            {/* Left: Title + Pattern Badge */}
+            <div className="flex items-center space-x-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-sky-400 animate-pulse shadow-sm shadow-sky-400" />
+              <span className="text-[11px] font-black uppercase tracking-wider text-white">
+                MISSION PLANNER
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-sky-500/20 text-sky-300 border border-sky-500/40 text-[9px] font-black uppercase tracking-wide">
+                {activeMissionType}
+              </span>
             </div>
 
-            {/* Scrollable Configuration Body */}
-            <div className="flex-1 overflow-y-auto p-3.5 space-y-3.5 text-xs">
+            {/* Center Quick Stats */}
+            <div className="hidden md:flex items-center space-x-3 text-[10px] text-slate-300">
+              <div className="flex items-center space-x-1">
+                <span className="text-slate-400 font-bold">WAYPOINTS:</span>
+                <span className="text-sky-300 font-extrabold">{drawnPoints.length + (generatedMission?.waypoints.length || 0)}</span>
+              </div>
+              <span className="text-slate-600 font-bold">|</span>
+              <div className="flex items-center space-x-1">
+                <span className="text-slate-400 font-bold">ALT:</span>
+                <span className="text-amber-300 font-extrabold">{altitude}m</span>
+              </div>
+              <span className="text-slate-600 font-bold">|</span>
+              <div className="flex items-center space-x-1">
+                <span className="text-slate-400 font-bold">SPD:</span>
+                <span className="text-emerald-300 font-extrabold">{speed.toFixed(1)} m/s</span>
+              </div>
+              <span className="text-slate-600 font-bold">|</span>
+              <div className="flex items-center space-x-1">
+                <span className="text-slate-400 font-bold">HOME:</span>
+                <span className={homePoint.isSet ? 'text-emerald-400 font-extrabold' : 'text-amber-400 font-extrabold'}>
+                  {homePoint.isSet ? 'LOCKED ✓' : 'NOT SET'}
+                </span>
+              </div>
+            </div>
+
+            {/* Right: Quick Actions & Collapse Button */}
+            <div className="flex items-center space-x-1.5">
+              <button
+                type="button"
+                onClick={handleUploadMission}
+                disabled={!generatedMission || isUploading}
+                className="px-3 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white text-[10px] font-black uppercase transition flex items-center space-x-1 cursor-pointer shadow-md shadow-sky-600/30"
+                title="Upload Mission to Pixhawk Flight Controller"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{isUploading ? 'SENDING...' : 'UPLOAD FC'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsArmingModalOpen(true)}
+                disabled={!generatedMission || (telemetry.isArmed && missionState !== 'IDLE')}
+                className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-[10px] font-black uppercase transition flex items-center space-x-1 cursor-pointer shadow-md shadow-emerald-600/30 animate-pulse"
+                title="Arm Flight Controller & Start Autonomous Mission"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>ARM &amp; FLY</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onEmergencyRTL}
+                className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-black uppercase transition flex items-center space-x-1 cursor-pointer shadow-md shadow-rose-600/30"
+                title="Emergency RTL (Return Home)"
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>RTL</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsSidePanelCollapsed(!isSidePanelCollapsed)}
+                className="w-7 h-7 rounded-lg flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-black text-sm transition-colors cursor-pointer border border-slate-700 ml-1"
+                title={isSidePanelCollapsed ? 'Expand Mission Planner (+)' : 'Collapse Mission Planner (−)'}
+              >
+                {isSidePanelCollapsed ? '+' : '−'}
+              </button>
+            </div>
+          </div>
+
+          {/* Expanded Horizontal Body (Scrollable, Non-Clipped) */}
+          {!isSidePanelCollapsed && (
+            <div className="flex-1 overflow-x-auto overflow-y-hidden flex items-stretch gap-3 p-3 bg-slate-950/90 scrollbar-thin scrollbar-thumb-slate-700">
               
-              {/* Mission Type Selector */}
-              <div>
-                <label className="text-[10px] text-slate-400 uppercase font-extrabold block mb-1.5">
-                  1. Mission Pattern Type
-                </label>
-                <div className="grid grid-cols-2 gap-1.5">
+              {/* Card 1: Mission Pattern Type */}
+              <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 shrink-0 w-60 h-full flex flex-col justify-between">
+                <div className="flex items-center space-x-1.5 text-slate-300 font-extrabold text-[11px] uppercase mb-1">
+                  <Layers className="w-3.5 h-3.5 text-sky-400" />
+                  <span>1. MISSION PATTERN</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 flex-1">
                   {[
                     { id: 'WAYPOINTS', label: 'WAYPOINTS', desc: 'Point-to-point' },
-                    { id: 'PATH', label: 'PATH / LINE', desc: 'Ordered corridor' },
-                    { id: 'POLYGON_GRID', label: 'AREA GRID', desc: 'Lawnmower survey' },
+                    { id: 'PATH', label: 'PATH / LINE', desc: 'Corridor sweep' },
+                    { id: 'POLYGON_GRID', label: 'AREA GRID', desc: 'Lawnmower' },
                     { id: 'CIRCLE', label: 'CIRCLE ORBIT', desc: 'Radial perimeter' },
                   ].map((m) => (
                     <button
@@ -1558,431 +1660,396 @@ export const GoogleMapGroundStation: React.FC<GoogleMapGroundStationProps> = ({
                         if (m.id === 'CIRCLE') setActiveTool('circle');
                         audioService.playBeep(700, 50);
                       }}
-                      className={`p-2 rounded-xl border text-left transition cursor-pointer ${
+                      className={`p-2 rounded-lg border text-left transition cursor-pointer flex flex-col justify-center ${
                         activeMissionType === m.id
-                          ? 'bg-sky-950/80 border-sky-400 text-sky-200 shadow-md shadow-sky-950/40'
-                          : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                          ? 'bg-sky-950 border-sky-400 text-sky-200 shadow-md shadow-sky-500/20'
+                          : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
                       }`}
                     >
-                      <div className="font-black text-[11px]">{m.label}</div>
-                      <div className="text-[9px] text-slate-400 truncate">{m.desc}</div>
+                      <div className="font-extrabold text-[10px] leading-tight">{m.label}</div>
+                      <div className="text-[8px] text-slate-500 truncate leading-tight mt-0.5">{m.desc}</div>
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Dedicated Home Point Configuration & Sync Card */}
-              <div className="bg-slate-950/90 p-3 rounded-xl border border-emerald-500/50 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Home className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span className="text-xs font-black text-emerald-300 uppercase tracking-wide">
-                      HOME POINT (ORIGIN)
-                    </span>
+              {/* Card 2: Home Point & FC Origin */}
+              <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 shrink-0 w-72 h-full flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center space-x-1.5 text-slate-300 font-extrabold text-[11px] uppercase">
+                    <Home className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>2. HOME &amp; ORIGIN</span>
                   </div>
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-black border ${
+                  <span className={`text-[8px] px-1.5 py-0.5 rounded font-black border ${
                     homePoint.isSet && homePoint.latitude !== 0
-                      ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
-                      : 'bg-amber-950/80 border-amber-500 text-amber-300'
+                      ? 'bg-emerald-950 border-emerald-500 text-emerald-300'
+                      : 'bg-amber-950 border-amber-500 text-amber-300'
                   }`}>
-                    {homePoint.isSet && homePoint.latitude !== 0 ? 'LOCKED ✓' : 'NOT SET'}
+                    {homePoint.isSet ? 'LOCKED ✓' : 'NOT SET'}
                   </span>
                 </div>
 
-                <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800 text-[10px] space-y-1">
-                  <div className="flex justify-between items-center text-slate-400">
+                <div className="bg-slate-950/80 p-2 rounded-lg border border-slate-800 text-[9px] font-mono space-y-1">
+                  <div className="flex justify-between text-slate-400">
                     <span>Home GPS:</span>
-                    <span className="font-bold text-slate-100 font-mono">
-                      {homePoint.isSet && homePoint.latitude !== 0
-                        ? `${homePoint.latitude.toFixed(6)}, ${homePoint.longitude.toFixed(6)}`
-                        : 'None'}
+                    <span className="text-white font-bold truncate max-w-[150px]">
+                      {homePoint.isSet ? `${homePoint.latitude.toFixed(5)}, ${homePoint.longitude.toFixed(5)}` : 'None'}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center text-slate-400">
-                    <span>Drone GPS:</span>
-                    <span className="font-bold text-sky-300 font-mono">
-                      {hasValidFcGps
-                        ? `${currentLat.toFixed(6)}, ${currentLon.toFixed(6)}`
-                        : (currentSats > 0
-                            ? `Acquiring (${currentSats} Sats)...`
-                            : 'Waiting for Fix...')}
+                  <div className="flex justify-between text-slate-400">
+                    <span>Drone FC:</span>
+                    <span className="text-sky-300 font-bold truncate max-w-[150px]">
+                      {hasValidFcGps ? `${currentLat.toFixed(5)}, ${currentLon.toFixed(5)}` : 'No GPS Fix'}
                     </span>
                   </div>
-                  {homePoint.isSet && hasValidFcGps && (
-                    <div className="flex justify-between items-center text-slate-400">
-                      <span>Distance to Home:</span>
-                      <span className={`font-black font-mono ${droneToHomeDist > 15 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                        {droneToHomeDist.toFixed(1)} m
-                      </span>
-                    </div>
-                  )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 pt-0.5">
+                <div className="grid grid-cols-2 gap-1.5 mt-1">
                   <button
                     type="button"
                     onClick={handleSetHomeToDrone}
                     disabled={!hasValidFcGps}
-                    className="py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[10px] font-black uppercase rounded-lg flex items-center justify-center space-x-1 shadow-md shadow-emerald-600/30 transition cursor-pointer"
-                    title="Snap Home directly to Drone GPS coordinates"
+                    className="py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-[9px] font-black uppercase rounded-lg flex items-center justify-center space-x-1 transition cursor-pointer shadow-sm shadow-emerald-600/30"
                   >
-                    <Home className="w-3.5 h-3.5" />
+                    <Home className="w-3 h-3" />
                     <span>SET AT DRONE</span>
                   </button>
-
                   <button
                     type="button"
                     onClick={() => {
                       setActiveTool('set_home');
                       audioService.playBeep(700, 60);
                     }}
-                    className={`py-1.5 px-2 border text-[10px] font-black uppercase rounded-lg flex items-center justify-center space-x-1 transition cursor-pointer ${
+                    className={`py-1.5 px-2 border text-[9px] font-black uppercase rounded-lg flex items-center justify-center space-x-1 transition cursor-pointer ${
                       activeTool === 'set_home'
                         ? 'bg-sky-600 border-sky-400 text-white animate-pulse'
-                        : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-sky-300'
+                        : 'bg-slate-800 border-slate-700 text-sky-300 hover:border-sky-500'
                     }`}
-                    title="Click anywhere on the map to place Home"
                   >
-                    <MapPin className="w-3.5 h-3.5" />
+                    <MapPin className="w-3 h-3" />
                     <span>PICK ON MAP</span>
                   </button>
                 </div>
-              </div>
 
-              {/* FC Drone Origin Seeding (Requirement 7) */}
-              <div className="bg-slate-950/80 p-2.5 rounded-xl border border-sky-500/30 flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Navigation className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black text-sky-200 uppercase">Start From FC Location</span>
-                    <span className="text-[9px] text-slate-400">
-                      {hasValidFcGps
-                        ? `${currentLat.toFixed(5)}, ${currentLon.toFixed(5)}`
-                        : (currentSats > 0
-                            ? `Locking (${currentSats} Sats)...`
-                            : 'Waiting for FC GPS fix...')}
-                    </span>
-                  </div>
-                </div>
                 <button
                   type="button"
                   onClick={handleStartFromDroneLocation}
                   disabled={!hasValidFcGps}
-                  className="px-2.5 py-1 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[10px] font-extrabold uppercase transition cursor-pointer"
-                  title="Add current FC GPS coordinates as origin/center"
+                  className="w-full py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white border border-slate-700 text-[8px] font-extrabold uppercase rounded flex items-center justify-center space-x-1 transition cursor-pointer mt-0.5"
                 >
-                  SET ORIGIN
+                  <Navigation className="w-2.5 h-2.5 text-sky-400" />
+                  <span>START PATH FROM FC LOCATION</span>
                 </button>
               </div>
 
-              {/* Altitude Configuration */}
-              <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-slate-400 uppercase font-extrabold">
-                    2. Planned Altitude
-                  </span>
-                  <span className="font-extrabold text-amber-300 text-sm">
-                    {altitude} m
+              {/* Card 3: Flight Parameters (SCROLLABLE & SLIDERS) */}
+              <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 shrink-0 w-[450px] h-full flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-0.5">
+                  <div className="flex items-center space-x-1.5 text-slate-300 font-extrabold text-[11px] uppercase">
+                    <Sliders className="w-3.5 h-3.5 text-amber-400" />
+                    <span>3. FLIGHT PARAMETERS</span>
+                  </div>
+                  <span className="text-[9px] text-amber-400 font-mono font-bold bg-amber-950/60 border border-amber-500/40 px-2 py-0.5 rounded flex items-center gap-1">
+                    <span>↕</span>
+                    <span>SCROLL WHEEL / DRAG SLIDER</span>
                   </span>
                 </div>
 
-                <div className="flex items-center space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => setAltitude((a) => Math.max(2, a - 5))}
-                    className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
-                  >
-                    <Minus className="w-3.5 h-3.5" />
-                  </button>
-                  <input
-                    type="range"
-                    min="2"
-                    max="100"
-                    step="1"
-                    value={altitude}
-                    onChange={(e) => setAltitude(parseInt(e.target.value) || 10)}
-                    className="flex-1 accent-amber-400 cursor-pointer"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setAltitude((a) => Math.min(120, a + 5))}
-                    className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                <div className="flex items-center space-x-1.5 pt-1">
-                  {[10, 20, 30, 50, 80].map((altVal) => (
-                    <button
-                      key={altVal}
-                      type="button"
-                      onClick={() => setAltitude(altVal)}
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
-                        altitude === altVal
-                          ? 'bg-amber-600 text-white border-amber-400'
-                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                      }`}
+                {/* Altitude Slider & Stepper */}
+                <div
+                  onWheel={handleAltitudeWheel}
+                  className="bg-slate-950/80 p-2 rounded-lg border border-slate-800 space-y-1 hover:border-amber-500/40 transition-colors"
+                  title="Scroll mouse wheel anywhere here to adjust Altitude"
+                >
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="text-slate-300 font-bold flex items-center gap-1">
+                      <span>Planned Altitude:</span>
+                      <span className="text-[9px] text-amber-400/80 font-normal">(scroll ↕ or drag)</span>
+                    </span>
+                    <span
+                      onWheel={handleAltitudeWheel}
+                      className="font-extrabold text-amber-300 text-xs font-mono bg-amber-950/70 border border-amber-500/50 px-2 py-0.5 rounded cursor-ns-resize select-none flex items-center gap-1 shadow-sm"
+                      title="Scroll mouse wheel here to adjust altitude"
                     >
-                      {altVal}m
+                      <span className="text-[10px] text-amber-400">↕</span>
+                      <span>{altitude} m</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setAltitude((a) => Math.max(2, a - 1))}
+                      className="w-6 h-5 rounded bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 font-black text-xs flex items-center justify-center cursor-pointer transition"
+                      title="Decrease Altitude (-1m)"
+                    >
+                      -
                     </button>
-                  ))}
+                    <input
+                      type="range"
+                      min="2"
+                      max="100"
+                      step="1"
+                      value={altitude}
+                      onChange={(e) => setAltitude(parseInt(e.target.value) || 10)}
+                      onWheel={handleAltitudeWheel}
+                      className="flex-1 h-2 accent-amber-400 bg-slate-800 rounded-lg cursor-ew-resize"
+                      title="Drag slider or scroll mouse wheel to increase/decrease altitude"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setAltitude((a) => Math.min(120, a + 1))}
+                      className="w-6 h-5 rounded bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 font-black text-xs flex items-center justify-center cursor-pointer transition"
+                      title="Increase Altitude (+1m)"
+                    >
+                      +
+                    </button>
+                    <div className="flex items-center space-x-1 shrink-0">
+                      {[10, 20, 30, 50].map((v) => (
+                        <button
+                          key={v}
+                          type="button"
+                          onClick={() => setAltitude(v)}
+                          className={`px-1.5 py-0.5 rounded text-[8px] font-bold border transition cursor-pointer ${
+                            altitude === v
+                              ? 'bg-amber-600 border-amber-400 text-white shadow-sm'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                          }`}
+                        >
+                          {v}m
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
-                {altitude < 15 && (
-                  <div className="text-[10px] text-amber-300 bg-amber-950/40 border border-amber-800/40 px-2 py-1 rounded flex items-center space-x-1">
-                    <span>⚠️ Note: Flight altitude is {altitude}m. Pixhawk default RTL_ALT is 15m (drone climbs to 15m on RTL).</span>
+                {/* Speed Slider & Stepper */}
+                <div
+                  onWheel={handleSpeedWheel}
+                  className="bg-slate-950/80 p-2 rounded-lg border border-slate-800 space-y-1 hover:border-sky-500/40 transition-colors"
+                  title="Scroll mouse wheel anywhere here to adjust Speed"
+                >
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="text-slate-300 font-bold flex items-center gap-1">
+                      <span>Planned Speed:</span>
+                      <span className="text-[9px] text-sky-400/80 font-normal">(scroll ↕ or drag)</span>
+                    </span>
+                    <span
+                      onWheel={handleSpeedWheel}
+                      className="font-extrabold text-sky-300 text-xs font-mono bg-sky-950/70 border border-sky-500/50 px-2 py-0.5 rounded cursor-ns-resize select-none flex items-center gap-1 shadow-sm"
+                      title="Scroll mouse wheel here to adjust speed"
+                    >
+                      <span className="text-[10px] text-sky-400">↕</span>
+                      <span>{speed.toFixed(1)} m/s</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setSpeed((s) => Math.max(1, +(s - 0.5).toFixed(1)))}
+                      className="w-6 h-5 rounded bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 font-black text-xs flex items-center justify-center cursor-pointer transition"
+                      title="Decrease Speed (-0.5m/s)"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="range"
+                      min="1.0"
+                      max="15.0"
+                      step="0.5"
+                      value={speed}
+                      onChange={(e) => setSpeed(parseFloat(e.target.value) || 3)}
+                      onWheel={handleSpeedWheel}
+                      className="flex-1 h-2 accent-sky-400 bg-slate-800 rounded-lg cursor-ew-resize"
+                      title="Drag slider or scroll mouse wheel to increase/decrease speed"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setSpeed((s) => Math.min(15, +(s + 0.5).toFixed(1)))}
+                      className="w-6 h-5 rounded bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 font-black text-xs flex items-center justify-center cursor-pointer transition"
+                      title="Increase Speed (+0.5m/s)"
+                    >
+                      +
+                    </button>
+                    <div className="flex items-center space-x-1 shrink-0">
+                      {[2.0, 3.0, 5.0, 8.0].map((v) => (
+                        <button
+                          key={v}
+                          type="button"
+                          onClick={() => setSpeed(v)}
+                          className={`px-1.5 py-0.5 rounded text-[8px] font-bold border transition cursor-pointer ${
+                            speed === v
+                              ? 'bg-sky-600 border-sky-400 text-white shadow-sm'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                          }`}
+                        >
+                          {v}m/s
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Contextual Parameter Row */}
+                {activeMissionType === 'POLYGON_GRID' && (
+                  <div
+                    onWheel={handleGridSpacingWheel}
+                    className="flex items-center justify-between text-[10px] bg-slate-950/80 px-2.5 py-1.5 rounded-lg border border-slate-800 hover:border-emerald-500/40 transition-colors"
+                    title="Scroll mouse wheel anywhere here to adjust Lane Spacing"
+                  >
+                    <span className="text-slate-300 font-bold flex items-center gap-1">
+                      <span>Lane Spacing:</span>
+                      <span className="text-[9px] text-emerald-400 font-normal">(scroll ↕)</span>
+                    </span>
+                    <div className="flex items-center space-x-2 flex-1 max-w-[240px] ml-2">
+                      <input
+                        type="range"
+                        min="4"
+                        max="25"
+                        step="1"
+                        value={gridSpacing}
+                        onChange={(e) => setGridSpacing(parseInt(e.target.value) || 8)}
+                        onWheel={handleGridSpacingWheel}
+                        className="flex-1 h-1.5 accent-emerald-400 bg-slate-800 rounded cursor-ew-resize"
+                        title="Scroll or drag to change lane spacing"
+                      />
+                      <span className="font-extrabold text-emerald-300 font-mono text-[10px] bg-emerald-950/60 border border-emerald-500/40 px-1.5 py-0.5 rounded cursor-ns-resize">
+                        ↕ {gridSpacing}m
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {activeMissionType === 'CIRCLE' && (
+                  <div
+                    onWheel={handleCircleRadiusWheel}
+                    className="flex items-center justify-between text-[10px] bg-slate-950/80 px-2.5 py-1.5 rounded-lg border border-slate-800 hover:border-purple-500/40 transition-colors"
+                    title="Scroll mouse wheel anywhere here to adjust Orbit Radius"
+                  >
+                    <span className="text-slate-300 font-bold flex items-center gap-1">
+                      <span>Orbit Radius:</span>
+                      <span className="text-[9px] text-purple-400 font-normal">(scroll ↕)</span>
+                    </span>
+                    <div className="flex items-center space-x-2 flex-1 max-w-[190px] ml-2">
+                      <input
+                        type="range"
+                        min="5"
+                        max="120"
+                        step="5"
+                        value={circleRadius}
+                        onChange={(e) => setCircleRadius(parseInt(e.target.value) || 25)}
+                        onWheel={handleCircleRadiusWheel}
+                        className="flex-1 h-1.5 accent-purple-400 bg-slate-800 rounded cursor-ew-resize"
+                        title="Scroll or drag to change circle radius"
+                      />
+                      <span className="font-extrabold text-purple-300 font-mono text-[10px] bg-purple-950/60 border border-purple-500/40 px-1.5 py-0.5 rounded cursor-ns-resize">
+                        ↕ {circleRadius}m
+                      </span>
+                    </div>
+                    <div className="flex items-center space-x-1 shrink-0 ml-1">
+                      <button
+                        type="button"
+                        onClick={() => setCircleDirection('CW')}
+                        className={`px-1.5 py-0.5 rounded text-[8px] font-bold border transition ${
+                          circleDirection === 'CW' ? 'bg-purple-600 border-purple-400 text-white' : 'bg-slate-900 border-slate-800 text-slate-400'
+                        }`}
+                      >
+                        CW
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCircleDirection('CCW')}
+                        className={`px-1.5 py-0.5 rounded text-[8px] font-bold border transition ${
+                          circleDirection === 'CCW' ? 'bg-purple-600 border-purple-400 text-white' : 'bg-slate-900 border-slate-800 text-slate-400'
+                        }`}
+                      >
+                        CCW
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {activeMissionType !== 'POLYGON_GRID' && activeMissionType !== 'CIRCLE' && (
+                  <div className="flex items-center justify-between text-[9px] text-slate-400 bg-slate-950/60 px-2 py-1 rounded border border-slate-800">
+                    <span>Waypoint Corridor Navigation:</span>
+                    <span className="text-emerald-400 font-bold font-mono">ARDUPILOT GUIDED REPOSITION</span>
                   </div>
                 )}
               </div>
 
-              {/* Speed Configuration */}
-              <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-slate-400 uppercase font-extrabold">
-                    3. Planned Speed
+              {/* Card 4: Mission Summary & Pre-Arm Check Bypass */}
+              <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 shrink-0 w-64 h-full flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px] text-slate-300 uppercase font-extrabold">
+                    4. SUMMARY &amp; SAFETY
                   </span>
-                  <span className="font-extrabold text-sky-300 text-sm">
-                    {speed.toFixed(1)} m/s
+                  <span className="text-[9px] font-mono font-bold text-sky-400">
+                    {drawnPoints.length + (generatedMission?.waypoints.length || 0)} WP
                   </span>
                 </div>
 
-                <div className="flex items-center space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => setSpeed((s) => Math.max(1, +(s - 0.5).toFixed(1)))}
-                    className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
-                  >
-                    <Minus className="w-3.5 h-3.5" />
-                  </button>
-                  <input
-                    type="range"
-                    min="1"
-                    max="15"
-                    step="0.5"
-                    value={speed}
-                    onChange={(e) => setSpeed(parseFloat(e.target.value) || 3)}
-                    className="flex-1 accent-sky-400 cursor-pointer"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setSpeed((s) => Math.min(15, +(s + 0.5).toFixed(1)))}
-                    className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                <div className="flex items-center space-x-1.5 pt-1">
-                  {[2.0, 3.0, 5.0, 8.0].map((sVal) => (
-                    <button
-                      key={sVal}
-                      type="button"
-                      onClick={() => setSpeed(sVal)}
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
-                        speed === sVal
-                          ? 'bg-sky-600 text-white border-sky-400'
-                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {sVal} m/s
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Mode-Specific Parameters */}
-              {activeMissionType === 'POLYGON_GRID' && (
-                <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-slate-400 uppercase font-extrabold">
-                      Lane Spacing (Transect)
+                <div className="bg-slate-950/80 p-2 rounded-lg border border-slate-800 text-[9px] font-mono space-y-1">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Est. Distance:</span>
+                    <span className="text-white font-bold">
+                      {generatedMission ? `${generatedMission.totalDistance.toFixed(1)}m` : '0.0m'}
                     </span>
-                    <span className="font-extrabold text-emerald-300">{gridSpacing}m</span>
                   </div>
-                  <input
-                    type="range"
-                    min="4"
-                    max="25"
-                    step="1"
-                    value={gridSpacing}
-                    onChange={(e) => setGridSpacing(parseInt(e.target.value) || 8)}
-                    className="w-full accent-emerald-400 cursor-pointer"
-                  />
-                </div>
-              )}
-
-              {activeMissionType === 'CIRCLE' && (
-                <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-slate-400 uppercase font-extrabold">
-                      Circle Radius
+                  <div className="flex justify-between text-slate-400">
+                    <span>Est. Duration:</span>
+                    <span className="text-white font-bold">
+                      {generatedMission ? `${Math.floor(generatedMission.estimatedDuration / 60)}m ${generatedMission.estimatedDuration % 60}s` : '0s'}
                     </span>
-                    <span className="font-extrabold text-purple-300">{circleRadius}m</span>
                   </div>
-                  <input
-                    type="range"
-                    min="5"
-                    max="150"
-                    step="5"
-                    value={circleRadius}
-                    onChange={(e) => setCircleRadius(parseInt(e.target.value) || 25)}
-                    className="w-full accent-purple-400 cursor-pointer"
-                  />
-                  <div className="flex items-center space-x-2 pt-1">
-                    <span className="text-[10px] text-slate-400 uppercase">Orbit:</span>
-                    <button
-                      type="button"
-                      onClick={() => setCircleDirection('CW')}
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
-                        circleDirection === 'CW'
-                          ? 'bg-purple-600 text-white border-purple-400'
-                          : 'bg-slate-900 border-slate-800 text-slate-400'
-                      }`}
-                    >
-                      CLOCKWISE
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCircleDirection('CCW')}
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
-                        circleDirection === 'CCW'
-                          ? 'bg-purple-600 text-white border-purple-400'
-                          : 'bg-slate-900 border-slate-800 text-slate-400'
-                      }`}
-                    >
-                      COUNTER-CW
-                    </button>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Upload State:</span>
+                    <span className={generatedMission?.isUploaded ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                      {generatedMission?.isUploaded ? 'UPLOADED ✓' : 'PENDING'}
+                    </span>
                   </div>
                 </div>
-              )}
 
-              {/* Mission Statistics Card */}
-              {generatedMission && (
-                <div className="bg-slate-950/90 p-3 rounded-xl border border-sky-500/40 space-y-2">
-                  <div className="flex items-center justify-between text-[11px] font-black uppercase text-sky-300 border-b border-slate-800 pb-1">
-                    <span>MISSION SUMMARY</span>
-                    <span>{generatedMission.waypoints.length} WAYPOINTS</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-[11px]">
-                    <div>
-                      <span className="text-[9px] text-slate-400 uppercase block">Distance</span>
-                      <span className="font-bold text-slate-200">
-                        {generatedMission.totalDistance > 1000
-                          ? `${(generatedMission.totalDistance / 1000).toFixed(2)} km`
-                          : `${generatedMission.totalDistance} m`}
-                      </span>
-                    </div>
-
-                    <div>
-                      <span className="text-[9px] text-slate-400 uppercase block">Est. Duration</span>
-                      <span className="font-bold text-slate-200">
-                        {Math.floor(generatedMission.estimatedDuration / 60)}m {generatedMission.estimatedDuration % 60}s
-                      </span>
-                    </div>
-
-                    <div>
-                      <span className="text-[9px] text-slate-400 uppercase block">Home Point</span>
-                      <span className="font-bold text-cyan-300">
-                        {homePoint.isSet ? 'CONFIGURED ✓' : 'NOT SET ⚠'}
-                      </span>
-                    </div>
-
-                    <div>
-                      <span className="text-[9px] text-slate-400 uppercase block">Upload State</span>
-                      <span className={`font-bold ${generatedMission.isUploaded ? 'text-emerald-400' : 'text-amber-400'}`}>
-                        {generatedMission.isUploaded ? 'UPLOADED ✓' : 'PENDING'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* In-Flight Upload Progress Status */}
-              {isUploading && (
-                <div className="p-2.5 rounded-xl border border-sky-500/50 bg-sky-950/80 text-sky-300 text-xs flex items-center space-x-2 animate-pulse">
-                  <div className="w-4 h-4 border-2 border-sky-400 border-t-transparent rounded-full animate-spin shrink-0" />
-                  <span className="leading-tight font-medium">{uploadProgress || 'Communicating with flight controller...'}</span>
-                </div>
-              )}
-
-              {/* Upload Feedback Message */}
-              {!isUploading && uploadFeedback && (
-                <div className={`p-2.5 rounded-xl border text-xs flex items-center space-x-2 ${
-                  uploadFeedback.success
-                    ? 'bg-emerald-950/70 border-emerald-500/60 text-emerald-300'
-                    : 'bg-rose-950/70 border-rose-500/60 text-rose-300'
-                }`}>
-                  {uploadFeedback.success ? (
-                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
-                  )}
-                  <span className="leading-tight">{uploadFeedback.message}</span>
-                </div>
-              )}
-
-              {/* Force Pre-Arm Bypass Option */}
-              <div className="pt-1">
-                <label className="flex items-center space-x-2 select-none cursor-pointer">
+                <label className="flex items-center space-x-1.5 select-none cursor-pointer mt-1 bg-slate-950/60 p-1.5 rounded-lg border border-slate-800 hover:border-amber-500/50 transition">
                   <input
                     type="checkbox"
                     checked={forceBypassChecks}
                     onChange={(e) => setForceBypassChecks(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded text-amber-500 accent-amber-500 cursor-pointer"
+                    className="w-3.5 h-3.5 rounded accent-amber-500 cursor-pointer"
                   />
-                  <span className="text-[10px] text-slate-400 font-bold">
-                    No problem, Start Mission (Bypass checks)
+                  <span className="text-[8px] text-slate-300 font-bold leading-tight">
+                    Bypass pre-arm checks (Fly without RC)
                   </span>
                 </label>
               </div>
 
-            </div>
-
-            {/* Action Buttons Bar */}
-            <div className="p-3 bg-slate-950 border-t border-slate-800 space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={handleUploadMission}
-                  disabled={!generatedMission || isUploading}
-                  className={`py-2.5 px-3 rounded-xl font-black text-xs uppercase flex items-center justify-center space-x-1.5 transition ${
-                    generatedMission && !isUploading
-                      ? 'bg-sky-600 hover:bg-sky-500 text-white shadow-lg shadow-sky-600/30 cursor-pointer'
-                      : 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
-                  }`}
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>{isUploading ? 'SENDING...' : 'UPLOAD'}</span>
-                </button>
+              {/* Card 5: Clear / Actions */}
+              <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 shrink-0 w-36 h-full flex flex-col justify-between">
+                <span className="text-[11px] text-slate-300 uppercase font-extrabold mb-1 block">
+                  5. ACTIONS
+                </span>
 
                 <button
                   type="button"
-                  onClick={() => setIsArmingModalOpen(true)}
-                  disabled={!generatedMission || (telemetry.isArmed && missionState !== 'IDLE')}
-                  className={`py-2.5 px-3 rounded-xl font-black text-xs uppercase flex items-center justify-center space-x-1.5 transition ${
-                    generatedMission
-                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 cursor-pointer animate-pulse'
-                      : 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
-                  }`}
+                  onClick={handleClearDrawings}
+                  className="w-full py-2 px-2 bg-slate-800 hover:bg-rose-950 border border-slate-700 hover:border-rose-600 text-slate-200 hover:text-rose-200 text-xs font-black uppercase rounded-lg flex items-center justify-center space-x-1 transition cursor-pointer shadow-sm"
+                  title="Clear all waypoints & drawings"
                 >
-                  <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>ARM & FLY</span>
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>CLEAR ALL</span>
                 </button>
+
+                {uploadFeedback && (
+                  <div className={`p-1 rounded text-[8px] font-mono leading-tight ${
+                    uploadFeedback.success ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/50' : 'bg-rose-950 text-rose-300 border border-rose-500/50'
+                  }`}>
+                    {uploadFeedback.message}
+                  </div>
+                )}
+
+                <div className="text-[8px] text-slate-500 font-mono text-center">
+                  RTL ALT: 15.0m
+                </div>
               </div>
 
-              <button
-                type="button"
-                onClick={onEmergencyRTL}
-                className="w-full py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black uppercase tracking-wider flex items-center justify-center space-x-1.5 transition cursor-pointer shadow-lg shadow-rose-600/20"
-              >
-                <ShieldAlert className="w-3.5 h-3.5" />
-                <span>EMERGENCY RTL (RETURN HOME)</span>
-              </button>
             </div>
-
-          </div>
+          )}
         </div>
 
       </div>

@@ -10,7 +10,6 @@ import { audioService } from '../../services/audioService';
 // Stitch AI Tactical Cockpit Components
 import { CockpitInstrumentsPanel } from './CockpitInstrumentsPanel';
 import { TacticalCommandRail } from './TacticalCommandRail';
-import { TacticalSideStack } from './TacticalSideStack';
 import { MissionProfileElevationDock } from './MissionProfileElevationDock';
 
 // Workspace & Visual Feed Components
@@ -90,6 +89,7 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
   // Floating Overlay Toggles
   const [showInstruments, setShowInstruments] = useState<boolean>(true);
   const [isPipVideoVisible, setIsPipVideoVisible] = useState<boolean>(true);
+  const [showTrafficRadar, setShowTrafficRadar] = useState<boolean>(true);
 
   // Modals
   const [isConfigModalOpen, setIsConfigModalOpen] = useState<boolean>(false);
@@ -379,86 +379,196 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
       </div>
 
       {/* ============================================================ */}
-      {/* 2. MAIN COCKPIT VIEWPORT (STITCH AEROSPACE COCKPIT LAYOUT)  */}
+      {/* 2. MAIN COCKPIT VIEWPORT (IMAGE 1 WORKSTATION ARCHITECTURE) */}
+      {/* ============================================================ */}
+      {/* ============================================================ */}
+      {/* 2. MAIN COCKPIT VIEWPORT (UPPER-LEFT GAUGES + MAP + BIG CAM) */}
       {/* ============================================================ */}
       {viewMode === 'COCKPIT' && (
-        <div className="flex-1 relative overflow-hidden">
-          {/* Background Interactive Google Maps Engine Workspace */}
-          <div className="absolute inset-0 z-0">
-            <GoogleMapGroundStation
-              telemetry={telemetry}
-              homePoint={homePoint}
-              pixhawkState={pixhawkState}
-              missionState={missionState}
-              onSetHomePoint={onSetHomePoint}
-              onStartMission={onStartMission}
+        <div className="flex-1 flex overflow-hidden relative">
+          {/* ======================================================== */}
+          {/* A. CENTER / MAIN MAP WORKSPACE WITH FLOATING INSTRUMENTS */}
+          {/* ======================================================== */}
+          <div className="flex-1 relative h-full overflow-hidden">
+            {/* Background Interactive Google Maps Engine Workspace */}
+            <div className="absolute inset-0 z-0">
+              <GoogleMapGroundStation
+                telemetry={telemetry}
+                homePoint={homePoint}
+                pixhawkState={pixhawkState}
+                missionState={missionState}
+                onSetHomePoint={onSetHomePoint}
+                onStartMission={onStartMission}
+                onEmergencyRTL={onEmergencyRTL}
+                isPipVideoVisible={false}
+                isCockpitView={true}
+                className="w-full h-full"
+              />
+            </div>
+
+            {/* Upper-Left Corner: Authentic 6-Pack Flight Instruments Cluster */}
+            {showInstruments && (
+              <div className="absolute left-3 top-3 z-30 w-80 sm:w-84 max-h-[380px] shadow-2xl animate-in fade-in">
+                <CockpitInstrumentsPanel
+                  telemetry={telemetry}
+                  flightTimeStr={formatFlightTime(elapsedSeconds)}
+                  onOpenSettings={() => setIsConfigModalOpen(true)}
+                  className="w-full"
+                />
+              </div>
+            )}
+
+            {/* Tactical Command Rail (Takeoff, Loiter, Land, RTL, Tools) */}
+            <TacticalCommandRail
+              className={`absolute top-3 z-30 transition-all ${
+                showInstruments ? 'left-[360px]' : 'left-3'
+              }`}
+              isArmed={telemetry.isArmed}
+              flightMode={telemetry.flightMode || 'GUIDED'}
+              onTakeoff={handleTakeoff}
+              onLoiter={handleLoiter}
+              onLand={handleLand}
               onEmergencyRTL={onEmergencyRTL}
-              isPipVideoVisible={false}
-              className="w-full h-full"
+              onOpenSettings={() => setIsConfigModalOpen(true)}
+              onTogglePlayMission={handleStartMissionClick}
             />
+
+            {/* Live Arm/Disarm Feedback Alert Banner */}
+            {armFeedback && !isArmed && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-[#93000a]/90 border border-[#ffb4ab] text-white px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 text-xs font-sans">
+                <AlertTriangle className="w-4 h-4 text-[#ffb4ab] shrink-0" />
+                <span>{armFeedback}</span>
+                <button
+                  type="button"
+                  onClick={() => setArmFeedback(null)}
+                  className="ml-2 text-white/80 hover:text-white"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
           </div>
 
-          {/* Left: Stitch Tactical Command Rail (Takeoff, Loiter, Land, RTL, Drop) */}
-          <TacticalCommandRail
-            className="absolute left-3 top-3 z-30"
-            isArmed={telemetry.isArmed}
-            flightMode={telemetry.flightMode || 'GUIDED'}
-            onTakeoff={handleTakeoff}
-            onLoiter={handleLoiter}
-            onLand={handleLand}
-            onEmergencyRTL={onEmergencyRTL}
-            onDropPayload={handleDropPayload}
-          />
+          {/* ======================================================== */}
+          {/* B. RIGHT SIDEBAR: BIG SCREEN CAMERA LIVE RECON FEED      */}
+          {/* ======================================================== */}
+          {isPipVideoVisible && (
+            <aside className="w-88 md:w-96 lg:w-[440px] xl:w-[480px] 2xl:w-[540px] h-full flex flex-col bg-[#141518]/95 backdrop-blur-md border-l border-[#2d2e33] shrink-0 z-20 shadow-2xl overflow-hidden select-none">
+              {/* 1. Header Bar */}
+              <div className="px-3 py-2 bg-[#1b1c20] border-b border-[#2d2e33] flex items-center justify-between text-slate-200">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shadow-sm shadow-rose-500" />
+                  <span className="font-sans text-xs uppercase font-extrabold tracking-wider text-white">
+                    OPTICAL RECON FEED
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 font-bold">
+                    LIVE 1080P
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-sky-950/80 border border-sky-500/50 text-sky-300">
+                    30 FPS
+                  </span>
+                  <button
+                    onClick={() => setViewMode('SPLIT')}
+                    className="w-6 h-6 rounded hover:bg-[#2a2b30] flex items-center justify-center text-slate-400 hover:text-white transition cursor-pointer"
+                    title="Expand / Fullscreen Feed"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">fullscreen</span>
+                  </button>
+                </div>
+              </div>
 
-          {/* Left Upper Overlay: Floating Cockpit Instruments Panel */}
-          {showInstruments && (
-            <CockpitInstrumentsPanel
-              className="absolute left-16 top-3 z-30 shadow-2xl animate-in fade-in slide-in-from-left-4"
-              telemetry={telemetry}
-              flightTimeStr={formatFlightTime(elapsedSeconds)}
-              onOpenSettings={() => setIsConfigModalOpen(true)}
-            />
-          )}
+              {/* 2. Big Screen Video Canvas */}
+              <div className="flex-1 relative bg-black overflow-hidden flex items-center justify-center min-h-[300px]">
+                <LiveVideoFeed className="w-full h-full object-cover" />
 
-          {/* Right Upper Overlay: Floating Tactical Side Stack */}
-          <TacticalSideStack
-            className="absolute right-3 top-3 z-30 shadow-2xl"
-            telemetry={telemetry}
-            pixhawkState={pixhawkState}
-            checklist={checklist}
-            onSetAltitude={handleSetAltitude}
-            onOpenCircleTest={() => setIsCircleTestOpen(true)}
-            onOpenLoiterTest={() => setIsLoiterTestOpen(true)}
-            onArmToggle={handleArmToggle}
-            isArming={isArming || isDisarming}
-          />
+                {/* Tactical HUD Crosshair Overlay */}
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="w-16 h-16 border border-emerald-500/50 rounded-full flex items-center justify-center">
+                    <div className="w-2 h-2 bg-emerald-400 rounded-full animate-ping" />
+                  </div>
+                  <div className="absolute w-28 h-px bg-emerald-500/30" />
+                  <div className="absolute h-28 w-px bg-emerald-500/30" />
+                </div>
 
-          {/* Bottom Dock: Mission Profile & Elevation Cross-Section + Recon Feed */}
-          <MissionProfileElevationDock
-            className="absolute bottom-3 left-16 right-3 sm:right-76 z-30 shadow-2xl"
-            telemetry={telemetry}
-            flightTimeStr={formatFlightTime(elapsedSeconds)}
-            isMissionRunning={isMissionActive}
-            onStartResumeMission={handleStartMissionClick}
-            onHoldMission={handleLoiter}
-            onAbortRTL={onEmergencyRTL}
-            isPipVisible={isPipVideoVisible}
-            onTogglePip={() => setIsPipVideoVisible(!isPipVideoVisible)}
-          />
+                {/* Target Lock Bounding Box (HUD Overlay - Bottom Left of Video) */}
+                <div className="absolute bottom-11 left-2 px-2.5 py-1 rounded-lg bg-black/85 backdrop-blur-sm border border-emerald-500/70 flex flex-col text-[10px] pointer-events-none z-10 shadow-lg">
+                  <div className="flex items-center gap-1.5 font-sans font-black text-emerald-400 uppercase">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>TARGET BOX 42</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 text-[9px] font-mono text-slate-300 mt-0.5">
+                    <span>CONFIDENCE: <strong className="text-emerald-300">94%</strong></span>
+                    <span>LOCK: <strong className="text-sky-300">ACQUIRED</strong></span>
+                  </div>
+                </div>
 
-          {/* Live Arm/Disarm Feedback Alert Banner */}
-          {armFeedback && !isArmed && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-[#93000a]/90 border border-[#ffb4ab] text-white px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 text-xs font-sans">
-              <AlertTriangle className="w-4 h-4 text-[#ffb4ab] shrink-0" />
-              <span>{armFeedback}</span>
-              <button
-                type="button"
-                onClick={() => setArmFeedback(null)}
-                className="ml-2 text-white/80 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
+                {/* QR Code Decoded Badge (HUD Overlay - Bottom Right of Video) */}
+                <div className="absolute bottom-11 right-2 px-2.5 py-1 rounded-lg bg-black/85 backdrop-blur-sm border border-sky-500/70 flex flex-col text-[10px] pointer-events-none z-10 shadow-lg">
+                  <div className="flex items-center gap-1.5 font-sans font-black text-sky-400 uppercase">
+                    <span className="material-symbols-outlined text-[12px] text-sky-400">qr_code_2</span>
+                    <span>QR PAYLOAD</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 text-[9px] font-mono text-slate-300 mt-0.5">
+                    <span>CODE: <strong className="text-sky-300 text-xs font-bold">42</strong></span>
+                    <span className="text-emerald-400 font-bold">ACK OK</span>
+                  </div>
+                </div>
+
+                {/* Flight Telemetry HUD Tape (Bottom of Video Feed) */}
+                <div className="absolute bottom-2 left-2 right-2 px-2.5 py-1.5 rounded-lg bg-black/80 backdrop-blur-sm border border-slate-700/80 flex items-center justify-between text-[10px] font-mono text-slate-200 pointer-events-none z-10">
+                  <div className="flex items-center gap-1">
+                    <span className="text-slate-400">ALT:</span>
+                    <span className="text-white font-bold">{(telemetry.altitude || 0).toFixed(1)}m</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-slate-400">SPD:</span>
+                    <span className="text-white font-bold">{(telemetry.groundSpeed || 0).toFixed(1)}m/s</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-slate-400">HDG:</span>
+                    <span className="text-sky-300 font-bold">{Math.round(((telemetry.heading || 0) % 360 + 360) % 360)}°</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-slate-400">MODE:</span>
+                    <span className="text-emerald-400 font-bold">{telemetry.flightMode || 'GUIDED'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Recon Status & Mission Target Summary */}
+              <div className="p-2.5 bg-[#17181c] border-t border-[#2d2e33] flex flex-col gap-2 font-mono text-[11px]">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-[#0f1013] p-2 rounded-xl border border-[#27282e] flex flex-col">
+                    <span className="text-[9px] text-slate-400 uppercase font-sans font-bold">Runner P2P Link</span>
+                    <span className="text-emerald-400 font-bold text-xs mt-0.5">DISPATCH READY</span>
+                    <span className="text-[8px] text-slate-500 font-mono">10-15m Range • Field Unit</span>
+                  </div>
+                  <div className="bg-[#0f1013] p-2 rounded-xl border border-[#27282e] flex flex-col">
+                    <span className="text-[9px] text-slate-400 uppercase font-sans font-bold">Optical Servoing</span>
+                    <span className="text-sky-300 font-bold text-xs mt-0.5">TRACKING ACTIVE</span>
+                    <span className="text-[8px] text-slate-500 font-mono">Center Deviation &lt; 5px</span>
+                  </div>
+                </div>
+
+                {/* Bottom Action Controls */}
+                <div className="flex items-center justify-between pt-1 border-t border-[#25262c]">
+                  <button
+                    type="button"
+                    onClick={() => setIsConfigModalOpen(true)}
+                    className="px-2.5 py-1 rounded-lg bg-[#222329] hover:bg-[#2c2d35] text-slate-300 hover:text-white border border-[#34353d] text-[10px] font-sans font-bold flex items-center gap-1 transition cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">tune</span>
+                    <span>Camera Settings</span>
+                  </button>
+                  <div className="flex items-center gap-1.5 text-[9px] text-slate-400">
+                    <span>RECON LATENCY:</span>
+                    <span className="text-emerald-400 font-bold">38ms</span>
+                  </div>
+                </div>
+              </div>
+            </aside>
           )}
         </div>
       )}

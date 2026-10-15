@@ -190,8 +190,8 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // If frontend dist is available, serve static files (SPA fallback to index.html)
-  if (DIST_PATH) {
+  // If frontend dist is available, serve static files (SPA fallback to index.html for GET/HEAD only)
+  if (DIST_PATH && (req.method === 'GET' || req.method === 'HEAD')) {
     let reqPath = parsedUrl.pathname || '/';
     let safePath = path.normalize(reqPath).replace(/^(\.\.[\/\\])+/, '');
     let filePath = path.join(DIST_PATH, safePath);

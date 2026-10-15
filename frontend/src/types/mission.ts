@@ -135,6 +135,7 @@ export interface DroneTelemetry {
   altitude: number;
   targetAltitude: number;
   groundSpeed: number;
+  airSpeed?: number;
   verticalSpeed: number;
   heading: number;
   pitch?: number;
@@ -149,7 +150,15 @@ export interface DroneTelemetry {
   vehicleState?: 'ARMED' | 'DISARMED' | 'ARMING' | 'DISARMING' | 'UNKNOWN';
   controlMode?: 'RC' | 'NO_RC';
   rcSignalDetected?: boolean;
+  rcOverrideEnabled?: boolean;
   rcRssi?: number;
+  magHeading?: number;
+  magFieldStrength?: number;
+  magX?: number;
+  magY?: number;
+  magZ?: number;
+  isCompassHealthy?: boolean;
+  isCompassCalibrated?: boolean;
   pixhawkConnected: boolean;
   cameraReady: boolean;
   runnerConnected?: boolean;

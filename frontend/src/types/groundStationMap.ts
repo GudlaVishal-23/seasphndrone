@@ -2,9 +2,25 @@ import { LatLngPoint } from './mission';
 
 export type MapLayerType = 'street' | 'satellite' | 'topo' | 'dark';
 
-export type MissionDrawingTool = 'select' | 'point' | 'path' | 'polygon' | 'circle' | 'set_home';
+export type MissionDrawingTool =
+  | 'select'
+  | 'point'
+  | 'path'
+  | 'polygon'
+  | 'circle'
+  | 'concentric_circle'
+  | 'draw'
+  | 'set_home';
 
-export type MissionType = 'WAYPOINTS' | 'PATH' | 'POLYGON_GRID' | 'CIRCLE' | 'SEARCH' | 'CUSTOM_ROUTE';
+export type MissionType =
+  | 'WAYPOINTS'
+  | 'PATH'
+  | 'POLYGON_GRID'
+  | 'CIRCLE'
+  | 'CONCENTRIC_CIRCLE'
+  | 'DRAWN_PATH'
+  | 'SEARCH'
+  | 'CUSTOM_ROUTE';
 
 export type ReturnBehavior = 'DIRECT_RTL' | 'SAME_PATH_BACK' | 'CUSTOM_RETURN_PATH' | 'LAND_AT_HOME';
 

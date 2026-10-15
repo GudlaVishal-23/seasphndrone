@@ -21,7 +21,8 @@
     "test": "npx tsx tests/test-all-systems.ts",
     "test:sitl": "npx tsx tests/test-sitl-scenarios.ts",
     "test:smoke": "npx tsx tests/test-backend-smoke.ts",
-    "test:all": "npx tsx tests/test-all-systems.ts && npx tsx tests/test-sitl-scenarios.ts && npx tsx tests/test-backend-smoke.ts",
+    "test:backend": "npx tsx tests/test-backend-full-workflows.ts",
+    "test:all": "npx tsx tests/test-all-systems.ts && npx tsx tests/test-sitl-scenarios.ts && npx tsx tests/test-backend-smoke.ts && npx tsx tests/test-backend-full-workflows.ts",
     "test:e2e": "node test-e2e.cjs"
   },
   "dependencies": {

@@ -10,6 +10,7 @@ import { authService, UserSession } from './services/authService';
 import { Header } from './components/common/Header';
 import { LoginScreen } from './components/Auth/LoginScreen';
 import { GroundStationDashboard } from './components/GroundStation/GroundStationDashboard';
+import { DashboardPage } from './features/dashboard/DashboardPage';
 import { DroneDashboard } from './components/Drone/DroneDashboard';
 import { RunnerDashboard } from './components/Runner/RunnerDashboard';
 import { MultiRoleSimBench } from './components/Testbench/MultiRoleSimBench';
@@ -123,12 +124,27 @@ export const App: React.FC = () => {
     authService.logout();
   };
 
+  // Check for Dev-only fixture mode (?fixture=reference)
+  const isFixtureMode =
+    import.meta.env.DEV &&
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('fixture') === 'reference';
+
+  if (isFixtureMode) {
+    return <DashboardPage onLogout={handleLogout} />;
+  }
+
   // If not logged in, show secure Role Access Login Portal
   if (!session) {
     return <LoginScreen onLoginSuccess={(role) => {}} />;
   }
 
   const currentRole = session.role;
+
+  // Commander Fly Ground Station Dashboard (Exact reproduction of reference)
+  if (currentRole === 'GROUND_STATION') {
+    return <DashboardPage onLogout={handleLogout} />;
+  }
 
   return (
     <div className="min-h-screen bg-sae-dark text-slate-100 flex flex-col font-sans select-none">
@@ -145,23 +161,7 @@ export const App: React.FC = () => {
       />
 
       {/* Main Authenticated Dashboard Screen Based on Active Role */}
-      <main className={`flex-1 ${currentRole === 'GROUND_STATION' ? 'overflow-hidden' : 'pb-10'}`}>
-        {currentRole === 'GROUND_STATION' && (
-          <GroundStationDashboard
-            telemetry={telemetry}
-            homePoint={homePoint}
-            missionState={missionState}
-            remainingSeconds={remainingSeconds}
-            elapsedSeconds={elapsedSeconds}
-            checklist={preFlight.checklist}
-            isReadyForMission={preFlight.isReady}
-            pixhawkState={pixhawkState}
-            runnerLink={runnerLink}
-            onSetHomePoint={handleSetHomePoint}
-            onStartMission={handleStartMission}
-            onEmergencyRTL={handleEmergencyRTL}
-          />
-        )}
+      <main className="flex-1 pb-10">
 
         {currentRole === 'DRONE' && (
           <DroneDashboard

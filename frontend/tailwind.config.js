@@ -41,9 +41,26 @@ export default {
         'on-error-container': '#ffdad6',
         'on-surface': '#e3e2e4',
         'on-surface-variant': '#c2c6d5',
-        'stitch-outline': '#8c909e'
+        uav: {
+          bg: 'var(--uav-bg)',
+          header: 'var(--uav-header)',
+          card: 'var(--uav-card)',
+          border: 'var(--uav-card-border)',
+          text: 'var(--uav-text)',
+          muted: 'var(--uav-muted)',
+          primary: 'var(--uav-primary-blue)',
+          icon: 'var(--uav-icon-blue)',
+          green: 'var(--uav-green)',
+          'green-fill': 'var(--uav-green-fill)',
+          amber: 'var(--uav-amber)',
+          red: 'var(--uav-red)',
+          'red-dark': 'var(--uav-red-dark)',
+          'red-border': 'var(--uav-red-border)',
+          purple: 'var(--uav-purple)',
+        },
       },
       fontFamily: {
+        orbitron: ['Orbitron', 'sans-serif'],
         mono: ['JetBrains Mono', 'Menlo', 'Monaco', 'Courier New', 'monospace'],
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif']
       },

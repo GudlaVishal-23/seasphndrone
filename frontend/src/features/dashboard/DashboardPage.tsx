@@ -582,6 +582,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             if (activeTab === 'Logs') setActiveTab('Fly');
           }}
           connectionState={telemetry.rawConnectionState}
+          telemetry={telemetry.rawTelemetry}
+          runnerLink={runnerCommService.getState()}
         />
       )}
 

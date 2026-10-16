@@ -9,6 +9,7 @@ interface ConnectionStatusDeckProps {
   runnerLink: RunnerLinkState;
   telemetry: DroneTelemetry;
   videoState?: 'LIVE' | 'CONNECTING' | 'DISCONNECTED';
+  className?: string;
 }
 
 interface StatusItemProps {
@@ -52,6 +53,7 @@ export const ConnectionStatusDeck: React.FC<ConnectionStatusDeckProps> = ({
   runnerLink,
   telemetry,
   videoState = 'DISCONNECTED',
+  className = '',
 }) => {
   const isWifiOn = typeof navigator !== 'undefined' && navigator.onLine;
   const isEsp32Reachable = pixhawkState.isUsbConnected || pixhawkState.isConnected;
@@ -61,7 +63,7 @@ export const ConnectionStatusDeck: React.FC<ConnectionStatusDeckProps> = ({
   const isRunnerUp = runnerLink.isConnected;
 
   return (
-    <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-2.5 space-y-1.5">
+    <div className={`bg-[#161B22]/90 border border-[var(--uav-card-border)] rounded-xl p-2.5 space-y-1.5 ${className}`}>
       <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 pb-1">
         SYSTEM CONNECTION STATUS
       </div>

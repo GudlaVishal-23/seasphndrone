@@ -37,24 +37,26 @@ import {
   Settings,
   Trash2
 } from 'lucide-react';
-import { SerialDiagnosticsModal } from './SerialDiagnosticsModal';
 
 interface PixhawkConnectionCardProps {
   connectionState: PixhawkConnectionState;
   className?: string;
   onOpenHelp?: () => void;
+  onOpenDiagnostics?: () => void;
+  embedded?: boolean;
 }
 
 export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
   connectionState,
   className = '',
-  onOpenHelp
+  onOpenHelp,
+  onOpenDiagnostics,
+  embedded = false,
 }) => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [isCheckingEsp32, setIsCheckingEsp32] = useState(false);
   const [esp32PingResult, setEsp32PingResult] = useState<{ reachable: boolean; latencyMs?: number; message?: string } | null>(null);
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [showEsp32Guide, setShowEsp32Guide] = useState(false);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [showDevDetails, setShowDevDetails] = useState(false);
@@ -1376,13 +1378,15 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
                   </button>
                 )}
 
-                <button
-                  onClick={() => setShowDiagnostics(true)}
-                  className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-lg text-xs font-bold transition flex items-center space-x-1 border border-slate-700 cursor-pointer"
-                >
-                  <Sliders className="w-3.5 h-3.5" />
-                  <span>Diagnostics</span>
-                </button>
+                {!embedded && onOpenDiagnostics && (
+                  <button
+                    onClick={() => onOpenDiagnostics?.()}
+                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-lg text-xs font-bold transition flex items-center space-x-1 border border-slate-700 cursor-pointer"
+                  >
+                    <Sliders className="w-3.5 h-3.5" />
+                    <span>Diagnostics</span>
+                  </button>
+                )}
 
                 {onOpenHelp && (
                   <button
@@ -1423,12 +1427,14 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
                 >
                   Retry
                 </button>
-                <button
-                  onClick={() => setShowDiagnostics(true)}
-                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg text-[11px] border border-slate-700 cursor-pointer"
-                >
-                  View Logs
-                </button>
+                {!embedded && onOpenDiagnostics && (
+                  <button
+                    onClick={() => onOpenDiagnostics?.()}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg text-[11px] border border-slate-700 cursor-pointer"
+                  >
+                    View Logs
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1454,12 +1460,14 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
                 >
                   Retry
                 </button>
-                <button
-                  onClick={() => setShowDiagnostics(true)}
-                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg text-[11px] border border-slate-700 cursor-pointer"
-                >
-                  Inspect
-                </button>
+                {!embedded && onOpenDiagnostics && (
+                  <button
+                    onClick={() => onOpenDiagnostics?.()}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg text-[11px] border border-slate-700 cursor-pointer"
+                  >
+                    Inspect
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1679,13 +1687,6 @@ export const PixhawkConnectionCard: React.FC<PixhawkConnectionCardProps> = ({
           </div>
         </div>
       )}
-
-      {/* Complete Connection Diagnostics Screen Modal */}
-      <SerialDiagnosticsModal
-        isOpen={showDiagnostics}
-        onClose={() => setShowDiagnostics(false)}
-        connectionState={connectionState}
-      />
     </>
   );
 };

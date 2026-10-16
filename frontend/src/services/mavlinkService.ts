@@ -555,43 +555,54 @@ class MAVLinkService {
     }
   }
 
+  public checkHeartbeatWatchdog(): void {
+    if (this.connectionState.isConnected) {
+      const ageMs = Date.now() - this.connectionState.lastHeartbeat;
+      this.connectionState.diagnostics.lastHeartbeatAgeMs = ageMs;
+
+      const now = Date.now();
+      this.heartbeatTimestamps = this.heartbeatTimestamps.filter(t => now - t < 5000);
+      this.connectionState.heartbeatHz = +(this.heartbeatTimestamps.length / 5.0).toFixed(1);
+      this.connectionState.diagnostics.heartbeatHz = this.connectionState.heartbeatHz;
+
+      // Stable 12-second loss threshold with hysteresis to eliminate rapid on/off flapping
+      if (ageMs > 12000) {
+        if (this.connectionState.isReceivingTelemetry) {
+          this.connectionState.isReceivingTelemetry = false;
+          this.connectionState.phase = 'WAITING_FOR_MAVLINK';
+          this.connectionState.phaseMessage = 'MAVLink Telemetry Paused (No Heartbeat > 12s)';
+          this.logDiagnostic('MAVLINK', '[MAVLINK] Heartbeat stream paused (> 12s since last packet)', 'warn');
+          this.addStatusMessage('WARNING', 4, 'MAVLink Telemetry Stream Paused (No Heartbeat > 12s)');
+          this.telemetry.gps.isLocked = false;
+          this.telemetry.pixhawkConnected = false;
+          this.notifyConnection();
+          this.notifyTelemetry();
+        }
+      } else {
+        if (!this.connectionState.isReceivingTelemetry) {
+          this.connectionState.isReceivingTelemetry = true;
+          this.connectionState.phase = 'PIXHAWK_CONNECTED';
+          this.connectionState.phaseMessage = 'Pixhawk Connected ✓';
+          this.notifyConnection();
+        }
+
+        // Telemetry & GPS stream keeper: If connected and no GPS message received in > 3.5s, refresh stream requests
+        const lastGpsAge = Date.now() - Math.max(this.gps1Data?.lastUpdated || 0, this.gps2Data?.lastUpdated || 0, this.telemetry.gps?.lastUpdated || 0);
+        if (lastGpsAge > 3500) {
+          this.requestMavlinkDataStreams();
+        }
+        if (lastGpsAge > 5000 && this.telemetry.gps.isLocked) {
+          this.telemetry.gps.isLocked = false;
+          this.notifyTelemetry();
+        }
+      }
+    }
+  }
+
   private startHeartbeatWatchdog() {
     if (this.heartbeatWatchdogTimer) clearInterval(this.heartbeatWatchdogTimer);
     this.heartbeatWatchdogTimer = setInterval(() => {
-      if (this.connectionState.isConnected) {
-        const ageMs = Date.now() - this.connectionState.lastHeartbeat;
-        this.connectionState.diagnostics.lastHeartbeatAgeMs = ageMs;
-
-        const now = Date.now();
-        this.heartbeatTimestamps = this.heartbeatTimestamps.filter(t => now - t < 5000);
-        this.connectionState.heartbeatHz = +(this.heartbeatTimestamps.length / 5.0).toFixed(1);
-        this.connectionState.diagnostics.heartbeatHz = this.connectionState.heartbeatHz;
-
-        // Stable 12-second loss threshold with hysteresis to eliminate rapid on/off flapping
-        if (ageMs > 12000) {
-          if (this.connectionState.isReceivingTelemetry) {
-            this.connectionState.isReceivingTelemetry = false;
-            this.connectionState.phase = 'WAITING_FOR_MAVLINK';
-            this.connectionState.phaseMessage = 'MAVLink Telemetry Paused (No Heartbeat > 12s)';
-            this.logDiagnostic('MAVLINK', '[MAVLINK] Heartbeat stream paused (> 12s since last packet)', 'warn');
-            this.addStatusMessage('WARNING', 4, 'MAVLink Telemetry Stream Paused (No Heartbeat > 12s)');
-            this.notifyConnection();
-          }
-        } else {
-          if (!this.connectionState.isReceivingTelemetry) {
-            this.connectionState.isReceivingTelemetry = true;
-            this.connectionState.phase = 'PIXHAWK_CONNECTED';
-            this.connectionState.phaseMessage = 'Pixhawk Connected ✓';
-            this.notifyConnection();
-          }
-
-          // Telemetry & GPS stream keeper: If connected and no GPS message received in > 3.5s, refresh stream requests
-          const lastGpsAge = Date.now() - Math.max(this.gps1Data?.lastUpdated || 0, this.gps2Data?.lastUpdated || 0);
-          if (lastGpsAge > 3500) {
-            this.requestMavlinkDataStreams();
-          }
-        }
-      }
+      this.checkHeartbeatWatchdog();
     }, 500);
   }
 
@@ -1784,14 +1795,15 @@ class MAVLinkService {
             activeInstance
           };
 
-          const hasCoord = Math.abs(bestGps.lat) > 0.001 && Math.abs(bestGps.lon) > 0.001;
-          const is3DFix = bestGps.rawFixType >= 3 || (hasCoord && bestGps.satellites >= 6);
-          this.telemetry.gps.fixType = is3DFix ? (bestGps.fixType === 'NO_GPS' || bestGps.fixType === 'NO_FIX' ? '3D_FIX' : bestGps.fixType) : bestGps.fixType;
-          this.telemetry.gps.isLocked = (is3DFix || bestGps.rawFixType >= 2) && (bestGps.satellites >= 4 || hasCoord);
+          const hasCoord = Math.abs(bestGps.lat) > 0.0001 && Math.abs(bestGps.lon) > 0.0001 && Math.abs(bestGps.lat) <= 90.0 && Math.abs(bestGps.lon) <= 180.0;
+          this.telemetry.gps.fixType = bestGps.fixType || (bestGps.rawFixType >= 3 ? '3D_FIX' : bestGps.rawFixType === 2 ? '2D_FIX' : 'NO_FIX');
+          this.telemetry.gps.isLocked = Boolean(bestGps.rawFixType >= 2 && hasCoord);
           this.telemetry.gps.satellites = bestGps.satellites;
+          this.telemetry.satellitesVisible = bestGps.satellites;
           this.telemetry.gps.hdop = bestGps.hdop;
+          this.telemetry.gps.lastUpdated = now;
 
-          if (hasCoord) {
+          if (hasCoord && bestGps.rawFixType >= 2) {
             this.telemetry.latitude = bestGps.lat;
             this.telemetry.longitude = bestGps.lon;
             this.telemetry.gps.latitude = bestGps.lat;
@@ -1823,6 +1835,7 @@ class MAVLinkService {
         if (payload.length >= 28) {
           const lat = view.getInt32(4, true) / 1e7;
           const lon = view.getInt32(8, true) / 1e7;
+          const mslAlt = view.getInt32(12, true) / 1000;
           const relativeAlt = view.getInt32(16, true) / 1000;
           const vx = view.getInt16(20, true) / 100;
           const vy = view.getInt16(22, true) / 100;
@@ -1839,11 +1852,16 @@ class MAVLinkService {
             this.telemetry.groundSpeed = horizSpeed;
           }
 
-          if (Math.abs(lat) > 0.001 && Math.abs(lon) > 0.001) {
+          const hasEkfCoord = Math.abs(lat) > 0.0001 && Math.abs(lon) > 0.0001 && Math.abs(lat) <= 90.0 && Math.abs(lon) <= 180.0;
+          if (hasEkfCoord) {
             this.telemetry.latitude = lat;
             this.telemetry.longitude = lon;
+            this.telemetry.gps.latitude = lat;
+            this.telemetry.gps.longitude = lon;
+            this.telemetry.gps.altitude = mslAlt;
+            this.telemetry.gps.lastUpdated = now;
             // Valid coordinates from Pixhawk EKF confirms live position lock
-            if (!this.telemetry.gps.isLocked && this.telemetry.gps.satellites >= 6) {
+            if (!this.telemetry.gps.isLocked && this.telemetry.gps.satellites >= 4) {
               this.telemetry.gps.isLocked = true;
               if (this.telemetry.gps.fixType === 'NO_GPS' || this.telemetry.gps.fixType === 'NO_FIX') {
                 this.telemetry.gps.fixType = '3D_FIX';
@@ -1851,15 +1869,19 @@ class MAVLinkService {
             }
           } else {
             // EKF coordinate fallback: If EKF is not blended yet, keep the best raw GPS lat/lon
-            const activeBestGps = (Math.abs(this.gps2Data.lat) > 0.001 && Math.abs(this.gps2Data.lon) > 0.001)
+            const activeBestGps = (Math.abs(this.gps2Data.lat) > 0.0001 && Math.abs(this.gps2Data.lon) > 0.0001 && Math.abs(this.gps2Data.lat) <= 90.0 && Math.abs(this.gps2Data.lon) <= 180.0)
               ? this.gps2Data
-              : (Math.abs(this.gps1Data.lat) > 0.001 && Math.abs(this.gps1Data.lon) > 0.001)
+              : (Math.abs(this.gps1Data.lat) > 0.0001 && Math.abs(this.gps1Data.lon) > 0.0001 && Math.abs(this.gps1Data.lat) <= 90.0 && Math.abs(this.gps1Data.lon) <= 180.0)
                 ? this.gps1Data
                 : (this.gps2Data.satellites > this.gps1Data.satellites ? this.gps2Data : this.gps1Data);
-            if (Math.abs(activeBestGps.lat) > 0.001 && Math.abs(activeBestGps.lon) > 0.001) {
-              if (Math.abs(this.telemetry.latitude) < 0.001 || Math.abs(this.telemetry.longitude) < 0.001) {
+            if (Math.abs(activeBestGps.lat) > 0.0001 && Math.abs(activeBestGps.lon) > 0.0001 && Math.abs(activeBestGps.lat) <= 90.0 && Math.abs(activeBestGps.lon) <= 180.0) {
+              if (Math.abs(this.telemetry.latitude) < 0.0001 || Math.abs(this.telemetry.longitude) < 0.0001) {
                 this.telemetry.latitude = activeBestGps.lat;
                 this.telemetry.longitude = activeBestGps.lon;
+                this.telemetry.gps.latitude = activeBestGps.lat;
+                this.telemetry.gps.longitude = activeBestGps.lon;
+                this.telemetry.gps.altitude = activeBestGps.alt;
+                this.telemetry.gps.lastUpdated = now;
               }
             }
           }
@@ -2555,18 +2577,27 @@ class MAVLinkService {
     const isConnected = this.connectionState.isConnected || this.connectionState.isUsbConnected;
     const clampedAlt = Math.max(1, Math.min(120, Math.round(targetAltitudeMeters * 10) / 10));
     
+    if (!this.telemetry.gps?.isLocked) {
+      const errMsg = 'Cannot command vertical altitude: Pixhawk GPS 3D fix lock required.';
+      this.logDiagnostic('MAVLINK', `[REPOSITION REJECTED] ${errMsg}`, 'warn');
+      this.addStatusMessage('WARNING', 4, errMsg);
+      return false;
+    }
+
     // Acquire current GPS position
     let targetLat = this.telemetry.gps?.latitude || 0;
     let targetLon = this.telemetry.gps?.longitude || 0;
 
-    // Validate coordinates (protect against Null Island)
+    // Validate coordinates (protect against Null Island or invalid fix)
     if (Math.abs(targetLat) < 0.001 || Math.abs(targetLon) < 0.001) {
       if (this.homePoint?.isSet && Math.abs(this.homePoint.latitude) > 0.001) {
         targetLat = this.homePoint.latitude;
         targetLon = this.homePoint.longitude;
       } else {
-        targetLat = 17.3850;
-        targetLon = 78.4867;
+        const errMsg = 'Cannot command vertical altitude: Valid Pixhawk GPS coordinates required.';
+        this.logDiagnostic('MAVLINK', `[REPOSITION REJECTED] ${errMsg}`, 'warn');
+        this.addStatusMessage('WARNING', 4, errMsg);
+        return false;
       }
     }
 

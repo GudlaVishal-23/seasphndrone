@@ -22,6 +22,13 @@ export interface DashboardTelemetryData {
   pitchDeg: number;
   latitude: number;
   longitude: number;
+  gpsAltitudeMeters: number;
+  gpsFixType: string;
+  isGpsLocked: boolean;
+  isGpsValid: boolean;
+  lastGpsUpdate: number;
+  gpsAgeMs: number;
+  gpsStatusMessage: string;
   flightTimeStr: string;
   rcSignalDetected: boolean;
   rcOverrideEnabled: boolean;
@@ -40,23 +47,42 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('fixture') === 'reference';
 
-  const [telemetry, setTelemetry] = useState<DroneTelemetry>(mavlinkService.getTelemetry());
-  const [connState, setConnState] = useState<PixhawkConnectionState>(mavlinkService.getConnectionState());
-  const [elapsedSeconds, setElapsedSeconds] = useState<number>(missionEngine.getElapsedSeconds());
+  const [telemetry, setTelemetry] = useState<DroneTelemetry>(() => mavlinkService.getTelemetry());
+  const [connState, setConnState] = useState<PixhawkConnectionState>(() => mavlinkService.getConnectionState());
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(() => missionEngine.getElapsedSeconds());
   const [isStale, setIsStale] = useState<boolean>(false);
   const [isLinkLost, setIsLinkLost] = useState<boolean>(false);
 
   const lastUpdateRef = useRef<number>(0);
+  const pendingUpdateTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastCoordsRef = useRef<{ lat: number; lon: number }>({ lat: 0, lon: 0 });
 
   useEffect(() => {
     if (isFixtureMode) return;
 
-    // Throttle telemetry listener updates to <= 10Hz (every 100ms)
+    // Intelligent throttle: Immediate dispatch for GPS/coordinate changes; throttled to 100ms for continuous IMU
     const unsubTelemetry = mavlinkService.subscribeTelemetry((t) => {
       const now = Date.now();
-      if (now - lastUpdateRef.current >= 100) {
+      const coordsChanged =
+        Math.abs(t.latitude - lastCoordsRef.current.lat) > 0.000001 ||
+        Math.abs(t.longitude - lastCoordsRef.current.lon) > 0.000001;
+
+      if (coordsChanged || now - lastUpdateRef.current >= 100) {
+        if (pendingUpdateTimerRef.current) {
+          clearTimeout(pendingUpdateTimerRef.current);
+          pendingUpdateTimerRef.current = null;
+        }
         lastUpdateRef.current = now;
+        lastCoordsRef.current = { lat: t.latitude, lon: t.longitude };
         setTelemetry(t);
+      } else if (!pendingUpdateTimerRef.current) {
+        // Trailing edge throttle to guarantee latest data is never dropped
+        pendingUpdateTimerRef.current = setTimeout(() => {
+          lastUpdateRef.current = Date.now();
+          lastCoordsRef.current = { lat: t.latitude, lon: t.longitude };
+          setTelemetry(mavlinkService.getTelemetry());
+          pendingUpdateTimerRef.current = null;
+        }, 100);
       }
     });
 
@@ -86,6 +112,9 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
       unsubConn();
       unsubMission();
       clearInterval(watchdog);
+      if (pendingUpdateTimerRef.current) {
+        clearTimeout(pendingUpdateTimerRef.current);
+      }
     };
   }, [isFixtureMode]);
 
@@ -114,6 +143,13 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
       pitchDeg: 0.0,
       latitude: 17.3850,
       longitude: 78.4867,
+      gpsAltitudeMeters: 540.2,
+      gpsFixType: '3D_FIX',
+      isGpsLocked: true,
+      isGpsValid: true,
+      lastGpsUpdate: Date.now(),
+      gpsAgeMs: 50,
+      gpsStatusMessage: '3D FIX (8 Sats)',
       flightTimeStr: '00:00',
       rcSignalDetected: false,
       rcOverrideEnabled: true,
@@ -127,8 +163,39 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
     };
   }
 
+  const now = Date.now();
   const isConnected = connState.isConnected;
   const isConnecting = connState.phase === 'WAITING_FOR_MAVLINK' || connState.phase === 'SERIAL_OPENING';
+
+  const lat = telemetry.latitude || telemetry.gps?.latitude || 0;
+  const lon = telemetry.longitude || telemetry.gps?.longitude || 0;
+  const hasValidGpsCoords = Boolean(
+    lat !== 0 &&
+    lon !== 0 &&
+    Math.abs(lat) > 0.0001 &&
+    Math.abs(lon) > 0.0001 &&
+    Math.abs(lat) <= 90.0 &&
+    Math.abs(lon) <= 180.0
+  );
+
+  const lastGpsUpdate = telemetry.gps?.lastUpdated || 0;
+  const gpsAgeMs = lastGpsUpdate > 0 ? (now - lastGpsUpdate) : (connState.lastHeartbeat > 0 ? now - connState.lastHeartbeat : 999999);
+  const isGpsFresh = isConnected && !isStale && !isLinkLost && lastGpsUpdate > 0 && gpsAgeMs < 5000;
+  const isGpsLocked = Boolean(isGpsFresh && telemetry.gps?.isLocked && hasValidGpsCoords);
+  const isGpsValid = Boolean(isGpsLocked && isGpsFresh && hasValidGpsCoords);
+  const gpsFixType = telemetry.gps?.fixType || 'NO_GPS';
+  const gpsAltitudeMeters = telemetry.gps?.altitude || 0.0;
+
+  let gpsStatusMessage = 'Pixhawk GPS Signal Unavailable';
+  if (!isConnected) {
+    gpsStatusMessage = 'Pixhawk Disconnected';
+  } else if (isLinkLost || isStale) {
+    gpsStatusMessage = 'MAVLink Telemetry Stale / Paused';
+  } else if (isGpsValid) {
+    gpsStatusMessage = `${gpsFixType} (${telemetry.gps?.satellites ?? 0} Sats)`;
+  } else if ((telemetry.gps?.satellites ?? 0) > 0) {
+    gpsStatusMessage = `Acquiring Fix (${telemetry.gps?.satellites} Sats Visible)`;
+  }
 
   return {
     isFixture: false,
@@ -146,8 +213,15 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
     headingDeg: Math.round(((telemetry.heading ?? 0) % 360 + 360) % 360),
     rollDeg: telemetry.roll ?? 0.0,
     pitchDeg: telemetry.pitch ?? 0.0,
-    latitude: telemetry.latitude || telemetry.gps?.latitude || 0,
-    longitude: telemetry.longitude || telemetry.gps?.longitude || 0,
+    latitude: isGpsValid ? lat : 0,
+    longitude: isGpsValid ? lon : 0,
+    gpsAltitudeMeters,
+    gpsFixType,
+    isGpsLocked,
+    isGpsValid,
+    lastGpsUpdate,
+    gpsAgeMs,
+    gpsStatusMessage,
     flightTimeStr: formatFlightTime(elapsedSeconds),
     rcSignalDetected: Boolean(telemetry.rcSignalDetected),
     rcOverrideEnabled: Boolean(connState.rcOverrideEnabled ?? telemetry.rcOverrideEnabled ?? true),

@@ -147,8 +147,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   };
 
   const handleNudge = async (direction: 'N' | 'S' | 'E' | 'W' | 'UP' | 'DOWN', distanceMeters: number = 5) => {
-    const lat = telemetry.latitude || 17.3850;
-    const lon = telemetry.longitude || 78.4867;
+    if (direction !== 'UP' && direction !== 'DOWN') {
+      if (!telemetry.isGpsValid || !telemetry.latitude || Math.abs(telemetry.latitude) <= 0.001) {
+        showNotification('⚠️ Cannot nudge drone: Pixhawk GPS Signal Unavailable (No Lock)');
+        return;
+      }
+    }
+    const lat = telemetry.latitude;
+    const lon = telemetry.longitude;
     const alt = telemetry.altitudeMeters || 5.0;
 
     let targetLat = lat;

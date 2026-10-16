@@ -207,13 +207,13 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    const droneHasCoord = telemetry.latitude && Math.abs(telemetry.latitude) > 0.001;
+    const droneHasCoord = Boolean(telemetry.isGpsValid && telemetry.latitude && Math.abs(telemetry.latitude) > 0.001);
     const initialLat = droneHasCoord ? telemetry.latitude : 17.3850;
     const initialLon = droneHasCoord ? telemetry.longitude : 78.4867;
 
     const map = L.map(mapContainerRef.current, {
       center: [initialLat, initialLon],
-      zoom: 17,
+      zoom: droneHasCoord ? 17 : 14,
       zoomControl: false,
       attributionControl: false,
     });
@@ -272,13 +272,17 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     const droneMarker = L.marker([initialLat, initialLon], {
       icon: droneIcon,
       zIndexOffset: 1000,
-    }).bindTooltip('🛸 Autonomous Drone (Pixhawk FC)', { direction: 'top', offset: [0, -20] }).addTo(map);
+    }).bindTooltip('🛸 Autonomous Drone (Pixhawk FC)', { direction: 'top', offset: [0, -20] });
     droneMarkerRef.current = droneMarker;
 
-    mapRef.current = map;
+    // Only add drone marker and geofence to the map if Pixhawk has a valid GPS lock
+    if (droneHasCoord) {
+      droneMarker.addTo(map);
+      updateGeofence(map, initialLat, initialLon);
+      hasAutoCenteredRef.current = true;
+    }
 
-    // Create ADDC Competition Arena Geofence (50m x 50m bounding box)
-    updateGeofence(map, initialLat, initialLon);
+    mapRef.current = map;
 
     // Freehand Drawing Listeners on Map
     map.on('mousedown', (e: L.LeafletMouseEvent) => {
@@ -546,14 +550,6 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         deviceAccuracyCircleRef.current.setRadius(Math.max(3, accuracy));
       }
 
-      // First time auto-center: If drone doesn't have valid fix yet, center on device GPS!
-      const droneHasCoord = telemetry.latitude && Math.abs(telemetry.latitude) > 0.001;
-      if (!droneHasCoord && !hasAutoCenteredRef.current) {
-        hasAutoCenteredRef.current = true;
-        map.flyTo([latitude, longitude], 17, { duration: 1.2 });
-        updateGeofence(map, latitude, longitude);
-      }
-
       // If follow mode is active on device, pan map
       if (followMode === 'device') {
         map.panTo([latitude, longitude], { animate: true, duration: 0.4 });
@@ -616,13 +612,6 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             } else {
               deviceMarkerRef.current.setLatLng([data.latitude, data.longitude]);
             }
-
-            const droneHasCoord = telemetry.latitude && Math.abs(telemetry.latitude) > 0.001;
-            if (!droneHasCoord && !hasAutoCenteredRef.current) {
-              hasAutoCenteredRef.current = true;
-              map.flyTo([data.latitude, data.longitude], 16, { duration: 1.2 });
-              updateGeofence(map, data.latitude, data.longitude);
-            }
           }
           return;
         }
@@ -645,55 +634,75 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     };
   }, [followMode, telemetry.latitude]);
 
-  // 4. Update Drone Marker & Heading dynamically
+  // 4. Update Drone Marker & Heading dynamically (Strictly from Pixhawk GPS)
   useEffect(() => {
     const map = mapRef.current;
     const marker = droneMarkerRef.current;
     if (!map || !marker) return;
 
-    const droneHasCoord = telemetry.latitude && Math.abs(telemetry.latitude) > 0.001;
-    const lat = droneHasCoord ? telemetry.latitude : (deviceLocation?.lat ?? 17.3850);
-    const lon = droneHasCoord ? telemetry.longitude : (deviceLocation?.lon ?? 78.4867);
+    const droneHasCoord = Boolean(
+      telemetry.isGpsValid &&
+      telemetry.latitude &&
+      Math.abs(telemetry.latitude) > 0.001 &&
+      Math.abs(telemetry.latitude) <= 90 &&
+      Math.abs(telemetry.longitude) <= 180
+    );
 
-    marker.setLatLng([lat, lon]);
+    if (droneHasCoord) {
+      const lat = telemetry.latitude;
+      const lon = telemetry.longitude;
 
-    // Update heading beam rotation
-    const beamEl = document.getElementById('drone-heading-beam');
-    if (beamEl) {
-      beamEl.style.transform = `translateX(-50%) rotate(${telemetry.headingDeg}deg)`;
-    }
+      if (!map.hasLayer(marker)) {
+        marker.addTo(map);
+      }
+      marker.setLatLng([lat, lon]);
 
-    // Auto-center on first valid Drone fix
-    if (droneHasCoord && !hasAutoCenteredRef.current) {
-      hasAutoCenteredRef.current = true;
-      map.flyTo([lat, lon], 17, { duration: 1.2 });
-      updateGeofence(map, lat, lon);
-    }
+      // Update heading beam rotation
+      const beamEl = document.getElementById('drone-heading-beam');
+      if (beamEl) {
+        beamEl.style.transform = `translateX(-50%) rotate(${telemetry.headingDeg}deg)`;
+      }
 
-    // Follow drone if followMode === 'drone'
-    if (followMode === 'drone' && droneHasCoord) {
-      map.panTo([lat, lon], { animate: true, duration: 0.4 });
-    }
+      // Auto-center on first valid Drone fix
+      if (!hasAutoCenteredRef.current) {
+        hasAutoCenteredRef.current = true;
+        map.flyTo([lat, lon], 17, { duration: 1.2 });
+        updateGeofence(map, lat, lon);
+      }
 
-    // Append to breadcrumb trail if moving
-    if (breadcrumbsRef.current && droneHasCoord && (telemetry.speedMs > 0.2 || telemetry.isArmed)) {
-      breadcrumbsRef.current.addLatLng([lat, lon]);
-    }
+      // Follow drone if followMode === 'drone'
+      if (followMode === 'drone') {
+        map.panTo([lat, lon], { animate: true, duration: 0.4 });
+      }
 
-    // Update range vector line connecting GCS Device and Drone
-    if (droneToDeviceLineRef.current && deviceLocation && droneHasCoord) {
-      const dist = calculateHaversineDistance(deviceLocation.lat, deviceLocation.lon, lat, lon);
-      const bearing = calculateBearing(deviceLocation.lat, deviceLocation.lon, lat, lon);
-      droneToDeviceLineRef.current.setLatLngs([
-        [deviceLocation.lat, deviceLocation.lon],
-        [lat, lon],
-      ]);
-      droneToDeviceLineRef.current.bindTooltip(
-        `↔ Distance to Drone: ${dist.toFixed(1)} m · Az: ${Math.round(bearing)}°`,
-        { direction: 'center', permanent: false }
-      );
-    } else if (droneToDeviceLineRef.current) {
-      droneToDeviceLineRef.current.setLatLngs([]);
+      // Append to breadcrumb trail if moving
+      if (breadcrumbsRef.current && (telemetry.speedMs > 0.2 || telemetry.isArmed)) {
+        breadcrumbsRef.current.addLatLng([lat, lon]);
+      }
+
+      // Update range vector line connecting GCS Device and Drone
+      if (droneToDeviceLineRef.current && deviceLocation) {
+        const dist = calculateHaversineDistance(deviceLocation.lat, deviceLocation.lon, lat, lon);
+        const bearing = calculateBearing(deviceLocation.lat, deviceLocation.lon, lat, lon);
+        droneToDeviceLineRef.current.setLatLngs([
+          [deviceLocation.lat, deviceLocation.lon],
+          [lat, lon],
+        ]);
+        droneToDeviceLineRef.current.bindTooltip(
+          `↔ Distance to Drone: ${dist.toFixed(1)} m · Az: ${Math.round(bearing)}°`,
+          { direction: 'center', permanent: false }
+        );
+      } else if (droneToDeviceLineRef.current) {
+        droneToDeviceLineRef.current.setLatLngs([]);
+      }
+    } else {
+      // GPS signal unavailable or invalid -> remove drone marker from map to prevent showing inaccurate location
+      if (map.hasLayer(marker)) {
+        map.removeLayer(marker);
+      }
+      if (droneToDeviceLineRef.current) {
+        droneToDeviceLineRef.current.setLatLngs([]);
+      }
     }
   }, [
     telemetry.latitude,
@@ -701,6 +710,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     telemetry.headingDeg,
     telemetry.speedMs,
     telemetry.isArmed,
+    telemetry.isGpsValid,
     followMode,
     deviceLocation,
   ]);
@@ -770,8 +780,9 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       if (!map) return;
 
       if (qr && qr.code) {
-        const targetLat = telemetry.latitude || 17.3850;
-        const targetLng = telemetry.longitude || 78.4867;
+        if (!telemetry.isGpsValid || !telemetry.latitude || Math.abs(telemetry.latitude) <= 0.001) return;
+        const targetLat = telemetry.latitude;
+        const targetLng = telemetry.longitude;
 
         if (!targetBoxMarkerRef.current) {
           const targetIcon = L.divIcon({
@@ -869,15 +880,21 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   const handleLocateDrone = () => {
     const map = mapRef.current;
     if (!map) return;
-    const droneHasCoord = telemetry.latitude && Math.abs(telemetry.latitude) > 0.001;
+    const droneHasCoord = Boolean(
+      telemetry.isGpsValid &&
+      telemetry.latitude &&
+      Math.abs(telemetry.latitude) > 0.001 &&
+      Math.abs(telemetry.latitude) <= 90 &&
+      Math.abs(telemetry.longitude) <= 180
+    );
     if (!droneHasCoord) {
-      showTemporaryNotice('Pixhawk FC GPS acquiring satellites... No fix yet.');
+      showTemporaryNotice('⚠️ Pixhawk GPS Signal Unavailable (No Lock)');
       audioService.playBeep(400, 150);
       return;
     }
     map.flyTo([telemetry.latitude, telemetry.longitude], 18, { duration: 1.2 });
     audioService.playBeep(880, 50);
-    showTemporaryNotice('Map centered on Drone GPS');
+    showTemporaryNotice('Map centered on Pixhawk Drone GPS');
   };
 
   const handleLocateDevice = () => {
@@ -1079,7 +1096,13 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     }
   };
 
-  const droneHasValidCoords = Boolean(telemetry.latitude && Math.abs(telemetry.latitude) > 0.001);
+  const droneHasValidCoords = Boolean(
+    telemetry.isGpsValid &&
+    telemetry.latitude &&
+    Math.abs(telemetry.latitude) > 0.001 &&
+    Math.abs(telemetry.latitude) <= 90 &&
+    Math.abs(telemetry.longitude) <= 180
+  );
   const distanceDroneToDevice = (droneHasValidCoords && deviceLocation)
     ? calculateHaversineDistance(deviceLocation.lat, deviceLocation.lon, telemetry.latitude, telemetry.longitude)
     : null;
@@ -1199,7 +1222,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       )}
 
       {/* Top Controls Bar */}
-      <div className="absolute top-2.5 left-2.5 right-2.5 z-20 flex items-center justify-between pointer-events-none">
+      <div className="absolute top-2.5 left-2.5 right-2.5 z-20 flex items-center justify-between gap-2 pointer-events-none flex-wrap sm:flex-nowrap">
         {/* Layer Switcher */}
         <div className="pointer-events-auto">
           <Segmented
@@ -1215,6 +1238,19 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             ]}
           />
         </div>
+
+        {/* Clear GPS Signal Warning / Status Pill */}
+        {!telemetry.isGpsValid ? (
+          <div className="pointer-events-auto px-3 py-1 rounded-full bg-rose-950/90 border border-rose-500/80 text-rose-200 text-[11px] font-sans font-semibold shadow-xl backdrop-blur-md flex items-center gap-2 animate-pulse">
+            <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+            <span>⚠️ Pixhawk GPS Signal Unavailable</span>
+          </div>
+        ) : (
+          <div className="pointer-events-auto px-2.5 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-[10px] font-mono shadow-md backdrop-blur-md flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            <span>PIXHAWK GPS {telemetry.gpsFixType.replace('_', ' ')} · {telemetry.satellites} SATS</span>
+          </div>
+        )}
 
         {/* Search Bar */}
         <form onSubmit={handleSearchSubmit} className="pointer-events-auto flex items-center bg-[#11161D]/90 backdrop-blur-sm border border-[var(--uav-card-border)] rounded-[8px] px-2.5 py-1 w-56 text-[12px]">
@@ -1506,28 +1542,46 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             <div className="space-y-1">
               <div className="flex items-center justify-between text-[10px]">
                 <span className="text-[var(--uav-muted)]">Fix Status:</span>
-                <span className={`font-bold ${droneHasValidCoords ? 'text-emerald-400' : 'text-amber-400'}`}>
+                <span className={`font-bold ${droneHasValidCoords ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {droneHasValidCoords
-                    ? `${telemetry.satellites >= 6 ? '3D FIX' : '2D FIX'} (${telemetry.satellites} Sats)`
-                    : 'Acquiring Satellites...'}
+                    ? `${telemetry.gpsFixType.replace('_', ' ')} (${telemetry.satellites} Sats)`
+                    : 'Pixhawk GPS Unavailable'}
                 </span>
               </div>
               <div className="grid grid-cols-2 text-[10px] text-[var(--uav-muted)]">
+                <span>GPS Link</span>
+                <span className={`text-right font-mono font-medium ${telemetry.isGpsLocked ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {telemetry.isGpsLocked ? 'CONNECTED ✓' : 'NO SIGNAL ✗'}
+                </span>
                 <span>Latitude</span>
                 <span className="text-right text-[var(--uav-text)] font-mono font-medium">
-                  {droneHasValidCoords ? `${telemetry.latitude.toFixed(6)}°` : '--'}
+                  {droneHasValidCoords ? `${telemetry.latitude.toFixed(7)}°` : '--'}
                 </span>
                 <span>Longitude</span>
                 <span className="text-right text-[var(--uav-text)] font-mono font-medium">
-                  {droneHasValidCoords ? `${telemetry.longitude.toFixed(6)}°` : '--'}
+                  {droneHasValidCoords ? `${telemetry.longitude.toFixed(7)}°` : '--'}
                 </span>
-                <span>AMSL Alt</span>
+                <span>GPS MSL Alt</span>
+                <span className="text-right text-[var(--uav-text)] font-mono font-medium">
+                  {droneHasValidCoords ? `${(telemetry.gpsAltitudeMeters ?? telemetry.altitudeMeters).toFixed(1)} m` : '--'}
+                </span>
+                <span>Relative Alt</span>
                 <span className="text-right text-[var(--uav-text)] font-mono font-medium">
                   {telemetry.altitudeMeters.toFixed(1)} m
                 </span>
+                <span>Satellites</span>
+                <span className="text-right text-[var(--uav-text)] font-mono font-medium">
+                  {telemetry.satellites} visible
+                </span>
                 <span>HDOP</span>
                 <span className="text-right text-[var(--uav-text)] font-mono font-medium">
-                  {telemetry.hdop.toFixed(1)}
+                  {telemetry.hdop.toFixed(2)}
+                </span>
+                <span>Last Update</span>
+                <span className="text-right text-[var(--uav-text)] font-mono font-medium">
+                  {telemetry.gpsAgeMs !== undefined
+                    ? (telemetry.gpsAgeMs < 1000 ? '<1s ago' : `${(telemetry.gpsAgeMs / 1000).toFixed(1)}s ago`)
+                    : 'Awaiting Fix'}
                 </span>
               </div>
 

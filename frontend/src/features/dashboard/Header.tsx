@@ -200,10 +200,21 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </div>
 
-        {/* GPS Satellite Count Pill */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border border-[#1b4d36] bg-[#0c2419] text-[11px] font-mono text-[#22C55E]">
-          <Crosshair className="w-3.5 h-3.5 text-[#22C55E]" />
-          <span>GPS: {telemetry.satellites} Sats</span>
+        {/* GPS Satellite Count & Fix Status Pill */}
+        <div
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border text-[11px] font-mono transition-colors ${
+            telemetry.isGpsValid
+              ? 'border-[#1b4d36] bg-[#0c2419] text-[#22C55E]'
+              : 'border-rose-900/60 bg-rose-950/40 text-rose-400'
+          }`}
+          title={
+            telemetry.isGpsValid
+              ? `Pixhawk GPS Locked (${telemetry.gpsFixType.replace('_', ' ')}): ${telemetry.satellites} Sats visible, HDOP ${telemetry.hdop.toFixed(1)}`
+              : 'Pixhawk GPS Signal Unavailable - Awaiting Satellites / 3D Lock'
+          }
+        >
+          <Crosshair className={`w-3.5 h-3.5 ${telemetry.isGpsValid ? 'text-[#22C55E]' : 'text-rose-400 animate-pulse'}`} />
+          <span>{telemetry.isGpsValid ? `GPS: ${telemetry.satellites} Sats` : 'GPS: NO FIX'}</span>
         </div>
 
         {/* Settings Button */}

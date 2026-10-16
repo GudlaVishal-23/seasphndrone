@@ -36,11 +36,18 @@ export const MissionPatterns: React.FC<MissionPatternsProps> = ({
     return groundStationMissionService.subscribeCircleRadius((r) => setCircleRadius(r));
   }, []);
 
-  const getCenterPoint = (): { center: LatLngPoint; home: HomePoint } => {
+  const getCenterPoint = (): { center: LatLngPoint | null; home: HomePoint } => {
     const telem = mavlinkService.getTelemetry();
     const home = mavlinkService.getHomePoint();
-    const lat = telem.latitude && Math.abs(telem.latitude) > 0.001 ? telem.latitude : (home.isSet ? home.latitude : 17.3850);
-    const lon = telem.longitude && Math.abs(telem.longitude) > 0.001 ? telem.longitude : (home.isSet ? home.longitude : 78.4867);
+    const hasPixhawkGps = telem.gps.isLocked && Boolean(telem.latitude && Math.abs(telem.latitude) > 0.001);
+    const hasHome = home.isSet && Math.abs(home.latitude) > 0.001;
+
+    if (!hasPixhawkGps && !hasHome) {
+      return { center: null, home };
+    }
+
+    const lat = hasPixhawkGps ? telem.latitude : home.latitude;
+    const lon = hasPixhawkGps ? telem.longitude : home.longitude;
 
     return {
       center: { lat, lng: lon },
@@ -50,27 +57,36 @@ export const MissionPatterns: React.FC<MissionPatternsProps> = ({
 
   const handlePatternClick = async (patternId: string) => {
     const { center, home } = getCenterPoint();
+
     audioService.playBeep(880, 80);
 
+    if (patternId === 'Takeoff') {
+      const telem = mavlinkService.getTelemetry();
+      if (!telem.isArmed) {
+        await mavlinkService.sendArmCommand(true);
+      }
+      await mavlinkService.commandTakeoff(5.0);
+      return;
+    }
+
+    if (patternId === 'Land') {
+      await mavlinkService.setFlightMode('LAND');
+      return;
+    }
+
+    if (patternId === 'Hover') {
+      await mavlinkService.setFlightMode('LOITER');
+      return;
+    }
+
+    // All subsequent geometric flight patterns require a valid Pixhawk GPS center point
+    if (!center) {
+      audioService.playBeep(400, 150);
+      alert('⚠️ Cannot generate mission pattern: Pixhawk GPS Signal Unavailable (No 3D Lock).');
+      return;
+    }
+
     switch (patternId) {
-      case 'Takeoff': {
-        const telem = mavlinkService.getTelemetry();
-        if (!telem.isArmed) {
-          await mavlinkService.sendArmCommand(true);
-        }
-        await mavlinkService.commandTakeoff(5.0);
-        break;
-      }
-
-      case 'Land': {
-        await mavlinkService.setFlightMode('LAND');
-        break;
-      }
-
-      case 'Hover': {
-        await mavlinkService.setFlightMode('LOITER');
-        break;
-      }
 
       case 'Line': {
         // Generate straight line route with 4 waypoints heading East

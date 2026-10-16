@@ -117,6 +117,7 @@ export interface GPSCoordinates {
   hdop: number;
   isLocked: boolean;
   fixType?: string;
+  lastUpdated?: number;
 }
 
 export type GPSLocation = GPSCoordinates;

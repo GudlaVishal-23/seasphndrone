@@ -64,10 +64,10 @@ export const StatRow: React.FC<StatRowProps> = ({ telemetry, className = '' }) =
 
       {/* 2. GPS */}
       <StatTile
-        icon={<Satellite className="w-5 h-5 text-[var(--uav-icon-blue)]" />}
+        icon={<Satellite className={`w-5 h-5 ${telemetry.isGpsValid ? 'text-[var(--uav-icon-blue)]' : 'text-rose-400'}`} />}
         label="GPS"
-        value={`${telemetry.satellites} Sats`}
-        valueClassName="text-[var(--uav-text)]"
+        value={telemetry.isGpsValid ? `${telemetry.satellites} Sats (${telemetry.gpsFixType.replace('_', ' ')})` : 'NO LOCK'}
+        valueClassName={telemetry.isGpsValid ? 'text-[var(--uav-text)]' : 'text-rose-400 font-bold'}
       />
 
       {/* 3. BATTERY */}

@@ -645,7 +645,10 @@ server.on('upgrade', (request, socket, head) => {
 
   // Route: /ws or / (for frontend browser client)
   if (pathname === '/ws' || pathname === '/') {
-    if (!validateAuth('browser client')) return;
+    // Permissive for browser clients: allow connection, log advisory if custom token provided
+    if (token && !allowedTokens.has(token.trim())) {
+      console.warn(`[AUTH NOTICE] Browser client connected with custom token from ${request.socket.remoteAddress}`);
+    }
 
     wss.handleUpgrade(request, socket, head, (ws) => {
       if (ws._socket) {

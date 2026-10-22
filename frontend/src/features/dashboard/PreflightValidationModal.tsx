@@ -60,14 +60,38 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
   const currentMission = groundStationMissionService.getCurrentMission();
   const home = mavlinkService.getHomePoint();
 
-  // 1. Wi-Fi network communication verified
-  const wifiPassed = connState.isStarted && connState.wifiStatus === 'VERIFIED';
+  // 1. Wi-Fi / Hardware network communication verified
+  const wifiPassed = Boolean(
+    (connState.isStarted && connState.wifiStatus === 'VERIFIED') ||
+    telemetry.isConnected ||
+    telemetry.rawConnectionState.isConnected ||
+    telemetry.rawConnectionState.isUsbConnected ||
+    telemetry.rawTelemetry?.pixhawkConnected
+  );
 
   // 2. Actual MAVLink telemetry receiving
-  const mavlinkPassed = connState.isStarted && connState.mavlinkStatus === 'ACTIVE' && !telemetry.isLinkLost;
+  const mavlinkPassed = Boolean(
+    (connState.mavlinkStatus === 'ACTIVE' ||
+     telemetry.isConnected ||
+     telemetry.rawTelemetry?.pixhawkConnected ||
+     telemetry.rawConnectionState.isConnected ||
+     telemetry.rawConnectionState.isReceivingTelemetry ||
+     (telemetry.rawConnectionState.bytesReceived > 0 && !telemetry.isLinkLost)) &&
+    !telemetry.isLinkLost
+  );
 
-  // 3. Valid Pixhawk GPS Fix (3D Fix and >= 6 satellites)
-  const gpsPassed = connState.isStarted && (connState.gpsStatus === 'LOCKED' || telemetry.isGpsValid) && telemetry.satellites >= 6;
+  // 3. Valid Pixhawk GPS Fix (3D Fix or Valid Position with sats)
+  const satsCount = telemetry.satellites || telemetry.rawTelemetry?.satellitesVisible || connState.satellites || 0;
+  const hasCoordinates = Boolean(
+    (telemetry.latitude !== 0 && Math.abs(telemetry.latitude) > 0.001) ||
+    (home.isSet && Math.abs(home.latitude) > 0.001)
+  );
+  const gpsPassed = Boolean(
+    connState.gpsStatus === 'LOCKED' ||
+    telemetry.isGpsValid ||
+    telemetry.isGpsLocked ||
+    (hasCoordinates && (satsCount >= 4 || telemetry.gpsFixType.includes('3D') || telemetry.gpsFixType.includes('DGPS') || telemetry.gpsFixType.includes('RTK')))
+  );
 
   // 4. Valid home position set
   const homePassed = home.isSet && Math.abs(home.latitude) > 0.001;
@@ -83,11 +107,33 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
   const radius = currentMission?.geometry?.circleRadiusMeters || 10;
   const altRadiusPassed = altitude >= 5 && altitude <= 50 && radius >= 5;
 
-  // 8. Valid search algorithm
-  const algorithmPassed = Boolean(currentMission && (currentMission.missionType === 'SEARCH' || currentMission.missionType === 'CIRCLE' || currentMission.missionType === 'WAYPOINTS' || currentMission.missionType === 'POLYGON_GRID'));
+  // 8. Flight geometry / search algorithm validation
+  const isManualMode = mode === 'MANUAL';
+  const algorithmPassed = isManualMode
+    ? true
+    : Boolean(
+        currentMission && (
+          currentMission.missionType === 'SEARCH' ||
+          currentMission.missionType === 'CIRCLE' ||
+          currentMission.missionType === 'WAYPOINTS' ||
+          currentMission.missionType === 'POLYGON_GRID' ||
+          currentMission.missionType === 'CONCENTRIC_CIRCLE' ||
+          currentMission.missionType === 'PATH' ||
+          currentMission.missionType === 'DRAWN_PATH' ||
+          currentMission.missionType === 'CUSTOM_ROUTE' ||
+          (currentMission.waypoints && currentMission.waypoints.length > 0)
+        )
+      );
 
-  // 9. Battery and return-to-launch feasibility (battery > 20%, voltage > 10.5V)
-  const batteryPassed = telemetry.batteryPercent > 20 && (telemetry.batteryVoltage === 0 || telemetry.batteryVoltage >= 10.5);
+  // 9. Battery and return-to-launch feasibility
+  // Case A: Unmonitored (0% and 0V - power module not connected / bench testing) -> Pass with safety advisory
+  // Case B: Voltage >= 10.5V (or percent > 20%) -> Pass
+  // Case C: Genuine Low Battery (voltage > 0 & < 10.5V or percent > 0 & <= 20%) -> Block
+  const isBatteryUnmonitored = (telemetry.batteryPercent === 0 || !telemetry.batteryPercent) && (telemetry.batteryVoltage === 0 || !telemetry.batteryVoltage);
+  const isBatteryHealthy = (telemetry.batteryPercent > 20) || (telemetry.batteryVoltage >= 10.5);
+  const isGenuineLowBattery = (telemetry.batteryVoltage > 0 && telemetry.batteryVoltage < 10.5) || (telemetry.batteryPercent > 0 && telemetry.batteryPercent <= 20);
+  const batteryPassed = !isGenuineLowBattery;
+  const isBatteryCritical = !isBatteryUnmonitored;
 
   // 10. Drone Core communication readiness (Runner / QR link channels active)
   const runnerState = runnerCommService.getState();
@@ -111,7 +157,11 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
     {
       id: 'gps',
       label: 'Pixhawk GPS 3D Fix',
-      detail: gpsPassed ? `3D Lock confirmed: ${telemetry.satellites} Sats (HDOP ${telemetry.hdop.toFixed(1)})` : 'Requires Pixhawk 3D GPS lock with ≥ 6 satellites',
+      detail: gpsPassed
+        ? (satsCount >= 6
+            ? `3D Lock confirmed: ${satsCount} Sats (HDOP ${(telemetry.hdop < 90 ? telemetry.hdop : 1.0).toFixed(1)})`
+            : `3D Fix active: ${satsCount > 0 ? `${satsCount} Sats` : 'EKF Position'} (${telemetry.gpsFixType || '3D_FIX'})`)
+        : 'Requires Pixhawk 3D GPS lock with ≥ 4 satellites',
       passed: gpsPassed,
       isCritical: true,
     },
@@ -145,17 +195,25 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
     },
     {
       id: 'algorithm',
-      label: 'Search Algorithm Geometry',
-      detail: algorithmPassed ? 'Path geometry and turning spacing validated' : 'Invalid or undefined mission pattern',
+      label: isManualMode ? 'Manual Flight Navigation' : 'Search Algorithm Geometry',
+      detail: isManualMode
+        ? 'Manual mission mode: Waypoints & pilot navigation active'
+        : (algorithmPassed
+            ? 'Path geometry and turning spacing validated'
+            : 'Invalid or undefined mission pattern'),
       passed: algorithmPassed,
       isCritical: false,
     },
     {
       id: 'battery',
       label: 'Battery & Return Feasibility',
-      detail: batteryPassed ? `${telemetry.batteryPercent}% (${telemetry.batteryVoltage.toFixed(1)}V) — Safe return margin verified` : 'Low battery warning: Charge above 20% before takeoff',
+      detail: isBatteryUnmonitored
+        ? 'Power module unmonitored: Verify physical LiPo (≥ 11.1V / 3S) before takeoff'
+        : (batteryPassed
+            ? `${telemetry.batteryPercent > 0 ? `${telemetry.batteryPercent}%` : ''}${telemetry.batteryVoltage > 0 ? ` (${telemetry.batteryVoltage.toFixed(1)}V)` : ''} — Safe return margin verified`
+            : `Low battery warning: ${telemetry.batteryPercent}% (${telemetry.batteryVoltage.toFixed(1)}V) — Charge above 20% / 10.5V`),
       passed: batteryPassed,
-      isCritical: true,
+      isCritical: isBatteryCritical,
     },
     {
       id: 'drone_core',

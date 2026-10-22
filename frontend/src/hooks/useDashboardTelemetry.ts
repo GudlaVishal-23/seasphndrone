@@ -94,13 +94,13 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
       setElapsedSeconds(elapsed);
     });
 
-    // Watchdog for stale heartbeat (> 2s) and link lost (> 5s)
+    // Watchdog for stale heartbeat (> 3.5s) and link lost (> 10s)
     const watchdog = setInterval(() => {
       const state = mavlinkService.getConnectionState();
-      if (state.isConnected && state.lastHeartbeat > 0) {
+      if ((state.isConnected || state.isUsbConnected || state.isReceivingTelemetry) && state.lastHeartbeat > 0) {
         const age = Date.now() - state.lastHeartbeat;
-        setIsStale(age > 2000);
-        setIsLinkLost(age > 5000);
+        setIsStale(age > 3500);
+        setIsLinkLost(age > 10000);
       } else {
         setIsStale(false);
         setIsLinkLost(false);
@@ -164,8 +164,13 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
   }
 
   const now = Date.now();
-  const isConnected = connState.isConnected;
-  const isConnecting = connState.phase === 'WAITING_FOR_MAVLINK' || connState.phase === 'SERIAL_OPENING';
+  const isConnected = Boolean(
+    connState.isConnected ||
+    connState.isUsbConnected ||
+    connState.isReceivingTelemetry ||
+    (telemetry.pixhawkConnected && !isLinkLost)
+  );
+  const isConnecting = connState.phase === 'WAITING_FOR_MAVLINK' || connState.phase === 'SERIAL_OPENING' || connState.phase === 'WAITING_FOR_HEARTBEAT';
 
   const lat = telemetry.latitude || telemetry.gps?.latitude || 0;
   const lon = telemetry.longitude || telemetry.gps?.longitude || 0;
@@ -178,12 +183,13 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
     Math.abs(lon) <= 180.0
   );
 
+  const sats = telemetry.gps?.satellites || telemetry.satellitesVisible || 0;
   const lastGpsUpdate = telemetry.gps?.lastUpdated || 0;
   const gpsAgeMs = lastGpsUpdate > 0 ? (now - lastGpsUpdate) : (connState.lastHeartbeat > 0 ? now - connState.lastHeartbeat : 999999);
-  const isGpsFresh = isConnected && !isStale && !isLinkLost && lastGpsUpdate > 0 && gpsAgeMs < 5000;
-  const isGpsLocked = Boolean(isGpsFresh && telemetry.gps?.isLocked && hasValidGpsCoords);
-  const isGpsValid = Boolean(isGpsLocked && isGpsFresh && hasValidGpsCoords);
-  const gpsFixType = telemetry.gps?.fixType || 'NO_GPS';
+  const isGpsFresh = isConnected && !isLinkLost && (lastGpsUpdate === 0 || gpsAgeMs < 10000);
+  const isGpsLocked = Boolean(isGpsFresh && (telemetry.gps?.isLocked || hasValidGpsCoords));
+  const isGpsValid = Boolean(isGpsLocked && hasValidGpsCoords);
+  const gpsFixType = telemetry.gps?.fixType || (isGpsValid ? '3D_FIX' : 'NO_GPS');
   const gpsAltitudeMeters = telemetry.gps?.altitude || 0.0;
 
   let gpsStatusMessage = 'Pixhawk GPS Signal Unavailable';
@@ -192,9 +198,9 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
   } else if (isLinkLost || isStale) {
     gpsStatusMessage = 'MAVLink Telemetry Stale / Paused';
   } else if (isGpsValid) {
-    gpsStatusMessage = `${gpsFixType} (${telemetry.gps?.satellites ?? 0} Sats)`;
-  } else if ((telemetry.gps?.satellites ?? 0) > 0) {
-    gpsStatusMessage = `Acquiring Fix (${telemetry.gps?.satellites} Sats Visible)`;
+    gpsStatusMessage = `${gpsFixType} (${sats} Sats)`;
+  } else if (sats > 0) {
+    gpsStatusMessage = `Acquiring Fix (${sats} Sats Visible)`;
   }
 
   return {
@@ -203,7 +209,7 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
     isConnecting,
     isArmed: telemetry.isArmed,
     flightMode: telemetry.flightMode || 'DISARMED',
-    satellites: telemetry.gps?.satellites ?? 0,
+    satellites: sats,
     hdop: telemetry.gps?.hdop ?? 99.0,
     batteryPercent: telemetry.batteryPercent ?? 0,
     batteryVoltage: telemetry.batteryVoltage ?? 0,

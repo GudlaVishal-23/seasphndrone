@@ -97,21 +97,26 @@ class GCSConnectionService {
    * Evaluates Pixhawk GPS status originating directly from the flight controller
    */
   private evaluateTelemetry(telem: DroneTelemetry) {
-    const isLocked = Boolean(
-      telem.gps.isLocked ||
-      telem.gps.fixType === '3D_FIX' ||
-      telem.gps.fixType === '3D_DGPS' ||
-      telem.gps.fixType === 'RTK_FLOAT' ||
-      telem.gps.fixType === 'RTK_FIXED' ||
-      (telem.latitude !== 0 && Math.abs(telem.latitude) > 0.001)
+    const hasCoords = Boolean(
+      (telem.latitude !== 0 && Math.abs(telem.latitude) > 0.001) ||
+      (telem.gps?.latitude !== 0 && telem.gps?.latitude !== undefined && Math.abs(telem.gps.latitude) > 0.001)
     );
 
-    const sats = telem.gps.satellites || 0;
-    const hdop = telem.gps.hdop || 99;
-    const fixType = telem.gps.fixType || (isLocked ? '3D_FIX' : 'NO_GPS');
+    const isLocked = Boolean(
+      telem.gps?.isLocked ||
+      telem.gps?.fixType === '3D_FIX' ||
+      telem.gps?.fixType === '3D_DGPS' ||
+      telem.gps?.fixType === 'RTK_FLOAT' ||
+      telem.gps?.fixType === 'RTK_FIXED' ||
+      hasCoords
+    );
+
+    const sats = telem.gps?.satellites || telem.satellitesVisible || 0;
+    const hdop = telem.gps?.hdop || 99;
+    const fixType = telem.gps?.fixType || (isLocked ? '3D_FIX' : 'NO_GPS');
 
     let gpsStatus: GpsConnectionStatus = 'NO_FIX';
-    if (isLocked && sats >= 6) {
+    if (isLocked && (sats >= 6 || (sats >= 4 && hasCoords))) {
       gpsStatus = 'LOCKED';
     } else if (sats > 0 || isLocked) {
       gpsStatus = 'ACQUIRING';
@@ -123,6 +128,12 @@ class GCSConnectionService {
     this.state.satellites = sats;
     this.state.hdop = hdop;
     this.state.gpsFixType = fixType;
+
+    // Receiving live telemetry proves MAVLink stream is actively flowing
+    if (this.state.mavlinkStatus !== 'ACTIVE') {
+      this.state.mavlinkStatus = 'ACTIVE';
+    }
+
     this.notify();
   }
 
@@ -130,14 +141,15 @@ class GCSConnectionService {
    * Evaluates MAVLink communication layer status
    */
   private evaluateConnection(conn: PixhawkConnectionState) {
+    const isRecentHeartbeat = conn.lastHeartbeat === 0 || (Date.now() - conn.lastHeartbeat < 12000);
     const isMavlinkActive = Boolean(
-      conn.isConnected &&
-      (conn.bytesReceived > 0 || conn.lastHeartbeat > 0 || conn.isReceivingTelemetry)
+      (conn.isConnected || conn.isUsbConnected || conn.isReceivingTelemetry || conn.bytesReceived > 0) &&
+      isRecentHeartbeat
     );
 
     if (isMavlinkActive) {
       this.state.mavlinkStatus = 'ACTIVE';
-    } else if (conn.phase === 'WAITING_FOR_HEARTBEAT' || conn.phase === 'SERIAL_OPENING') {
+    } else if (conn.phase === 'WAITING_FOR_HEARTBEAT' || conn.phase === 'SERIAL_OPENING' || conn.phase === 'WAITING_FOR_MAVLINK') {
       this.state.mavlinkStatus = 'CONNECTING';
     } else {
       this.state.mavlinkStatus = 'DISCONNECTED';

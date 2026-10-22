@@ -173,12 +173,17 @@ async function runGroundStationTests() {
   console.log('\n▶ TEST 6: Right Panel Vertical Order of Components');
   {
     const cameraIdx = dashboardPageCode.indexOf('<CameraFeed');
-    const opsIdx = dashboardPageCode.indexOf('<FlightOperationsCard');
+    const validOpsIndices = [
+      dashboardPageCode.indexOf('<FlightOperationsCard'),
+      dashboardPageCode.indexOf('<ManualMissionControlCard'),
+      dashboardPageCode.indexOf('<AutonomousMissionControlCard')
+    ].filter(i => i !== -1);
+    const opsIdx = validOpsIndices.length > 0 ? Math.min(...validOpsIndices) : -1;
     const wpIdx = dashboardPageCode.indexOf('<WaypointManager');
     const paramsIdx = dashboardPageCode.indexOf('<FlightParams');
 
     assert(cameraIdx !== -1, 'Right panel includes Drone CameraFeed');
-    assert(opsIdx !== -1, 'Right panel includes FlightOperationsCard (Arm and Fly & Upload)');
+    assert(opsIdx !== -1, 'Right panel includes FlightOperationsCard / MissionControlCard (Arm and Fly & Upload)');
     assert(wpIdx !== -1, 'Right panel includes WaypointManager');
     assert(paramsIdx !== -1, 'Right panel includes FlightParams');
 

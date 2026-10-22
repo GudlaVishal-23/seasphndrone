@@ -1317,7 +1317,7 @@ class MAVLinkService {
               this.telemetry.batteryCellCount = 3;
             }
 
-            if (batteryRemaining >= 0 && batteryRemaining <= 100) {
+            if (batteryRemaining > 0 && batteryRemaining <= 100) {
               this.telemetry.batteryPercent = batteryRemaining;
             } else if (voltageV > 0) {
               this.telemetry.batteryPercent = this.calculateLiPoPercentage(voltageV, this.telemetry.batteryCellCount);
@@ -1455,7 +1455,7 @@ class MAVLinkService {
 
           if (payload.length >= 36) {
             const batteryRemaining = view.getInt8(35);
-            if (batteryRemaining >= 0 && batteryRemaining <= 100) {
+            if (batteryRemaining > 0 && batteryRemaining <= 100) {
               this.telemetry.batteryPercent = batteryRemaining;
             } else if (this.telemetry.batteryVoltage > 0) {
               this.telemetry.batteryPercent = this.calculateLiPoPercentage(this.telemetry.batteryVoltage, this.telemetry.batteryCellCount);

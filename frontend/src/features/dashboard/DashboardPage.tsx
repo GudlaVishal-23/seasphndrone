@@ -472,7 +472,28 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             mobileView === 'telemetry' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'
           }`}
         >
-          <TelemetryPanel telemetry={telemetry} />
+          <TelemetryPanel
+            telemetry={telemetry}
+            onArm={async (force) => {
+              const ok = await mavlinkService.sendArmCommand(force);
+              if (ok) {
+                showNotification(force ? '⚠️ FORCE ARM Command Dispatched to Pixhawk' : 'MOTOR ARM Command Dispatched to Pixhawk ✓');
+              } else {
+                showNotification('Arm command failed — Check pre-arm safety checks');
+              }
+              return ok;
+            }}
+            onDisarm={async () => {
+              const ok = await mavlinkService.sendDisarmCommand(false);
+              if (ok) {
+                showNotification('MOTOR DISARM Command Dispatched to Pixhawk ✓');
+              } else {
+                showNotification('Disarm command failed — Check MAVLink link');
+              }
+              return ok;
+            }}
+            onNotification={showNotification}
+          />
         </aside>
 
         {/* 2. CENTER PANEL: Live Drone Map (Primary Visual Element, Fills Center Space) */}

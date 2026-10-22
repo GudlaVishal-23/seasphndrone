@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card } from '../../ui/Card';
 import { DashboardTelemetryData } from '../../hooks/useDashboardTelemetry';
 import { 
@@ -11,12 +11,24 @@ import {
   Zap, 
   AlertTriangle,
   Radio,
-  Activity
+  Activity,
+  Shield,
+  ShieldCheck,
+  ShieldAlert,
+  Power,
+  Play,
+  Loader2,
+  CheckCircle2
 } from 'lucide-react';
+import { mavlinkService } from '../../services/mavlinkService';
+import { audioService } from '../../services/audioService';
 
 interface TelemetryPanelProps {
   telemetry: DashboardTelemetryData;
   className?: string;
+  onArm?: (force?: boolean) => Promise<boolean | void>;
+  onDisarm?: () => Promise<boolean | void>;
+  onNotification?: (msg: string) => void;
 }
 
 const getHeadingCardinal = (deg: number): string => {
@@ -31,7 +43,82 @@ const getHeadingCardinal = (deg: number): string => {
   return 'North-West (NW)';
 };
 
-export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({ telemetry, className = '' }) => {
+export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({ 
+  telemetry, 
+  className = '',
+  onArm,
+  onDisarm,
+  onNotification
+}) => {
+  const [isArming, setIsArming] = useState<boolean>(false);
+  const [isDisarming, setIsDisarming] = useState<boolean>(false);
+  const [forceArm, setForceArm] = useState<boolean>(false);
+  const [armFeedback, setArmFeedback] = useState<string | null>(null);
+
+  const isBusy = isArming || isDisarming;
+
+  const handleArm = async () => {
+    if (telemetry.isArmed || isBusy) return;
+    setIsArming(true);
+    setArmFeedback(null);
+    audioService.playBeep(850, 100);
+
+    try {
+      let success = false;
+      if (onArm) {
+        const res = await onArm(forceArm);
+        success = res !== false;
+      } else {
+        success = await mavlinkService.sendArmCommand(forceArm);
+      }
+
+      if (success) {
+        audioService.playBeep(1100, 150);
+        setArmFeedback('Vehicle Armed — Motors spinning ✓');
+        onNotification?.('Vehicle Armed — Motors spinning ✓');
+      } else {
+        setArmFeedback('Arm rejected by Pixhawk. Check safety switch or use Force Arm.');
+        onNotification?.('Arm rejected by Pixhawk. Check safety switch, GPS 3D fix, and compass.');
+      }
+    } catch (err: any) {
+      setArmFeedback(`Arm failed: ${err?.message || 'Check pre-arm conditions'}`);
+      onNotification?.(`Arm failed: ${err?.message || 'Check pre-arm conditions'}`);
+    } finally {
+      setIsArming(false);
+    }
+  };
+
+  const handleDisarm = async () => {
+    if (!telemetry.isArmed || isBusy) return;
+    setIsDisarming(true);
+    setArmFeedback(null);
+    audioService.playBeep(450, 120);
+
+    try {
+      let success = false;
+      if (onDisarm) {
+        const res = await onDisarm();
+        success = res !== false;
+      } else {
+        success = await mavlinkService.sendDisarmCommand(false);
+      }
+
+      if (success) {
+        audioService.playBeep(350, 150);
+        setArmFeedback('Vehicle Disarmed ✓');
+        onNotification?.('Vehicle Disarmed ✓');
+      } else {
+        setArmFeedback('Disarm rejected by Pixhawk');
+        onNotification?.('Disarm rejected by Pixhawk (Confirm vehicle is landed)');
+      }
+    } catch (err: any) {
+      setArmFeedback(`Disarm failed: ${err?.message || 'Check connection'}`);
+      onNotification?.(`Disarm failed: ${err?.message || 'Check connection'}`);
+    } finally {
+      setIsDisarming(false);
+    }
+  };
+
   const alt = Math.max(0, telemetry.altitudeMeters || 0);
   const heading = Math.round(telemetry.headingDeg || 0);
   const spd = Math.max(0, telemetry.speedMs || 0);
@@ -394,6 +481,142 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({ telemetry, class
               </div>
             )}
           </>
+        )}
+      </Card>
+
+      {/* ------------------------------------------------------------- */}
+      {/* E. MOTOR ARM / DISARM CONTROL CARD (Dedicated Flight Control) */}
+      {/* ------------------------------------------------------------- */}
+      <Card
+        title="MOTOR ARM / DISARM"
+        action={
+          <span
+            className={`text-[9.5px] font-mono font-bold px-1.5 py-0.5 rounded tracking-wider ${
+              telemetry.isArmed
+                ? 'bg-rose-950/80 text-rose-300 border border-rose-500 animate-pulse'
+                : 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/40'
+            }`}
+          >
+            {telemetry.isArmed ? '● ARMED (ACTIVE)' : '○ DISARMED (SAFE)'}
+          </span>
+        }
+        className="shrink-0 bg-[#0E131A] border-[var(--uav-card-border)] shadow-md"
+        contentClassName="p-3 flex flex-col gap-2.5"
+      >
+        {/* Dynamic Status Banner */}
+        <div
+          className={`p-2 rounded-lg border text-[11px] font-mono flex items-center justify-between gap-2 ${
+            telemetry.isArmed
+              ? 'bg-rose-950/40 border-rose-500/60 text-rose-200'
+              : 'bg-[#0f291e]/50 border-[#1b4d36] text-emerald-300'
+          }`}
+        >
+          <div className="flex items-center gap-1.5">
+            {telemetry.isArmed ? (
+              <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 animate-pulse" />
+            ) : (
+              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+            )}
+            <span className="font-semibold text-white">
+              {telemetry.isArmed ? 'MOTORS ARMED' : 'MOTORS DISARMED'}
+            </span>
+          </div>
+          <span className="text-[10px] text-slate-400">
+            {telemetry.flightMode || 'DISARMED'}
+          </span>
+        </div>
+
+        {/* Arm / Disarm Action Buttons */}
+        <div className="grid grid-cols-2 gap-2">
+          {/* ARM BUTTON */}
+          <button
+            type="button"
+            onClick={handleArm}
+            disabled={telemetry.isArmed || isBusy}
+            title={
+              telemetry.isArmed
+                ? 'Flight controller already armed'
+                : 'Send MAVLink ARM command (MAV_CMD_COMPONENT_ARM_DISARM param1=1)'
+            }
+            className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg font-bold text-[11px] font-sans tracking-wide uppercase transition shadow-md cursor-pointer ${
+              telemetry.isArmed
+                ? 'bg-slate-800/60 text-slate-500 cursor-not-allowed border border-slate-700/60'
+                : isArming
+                ? 'bg-amber-600 text-white cursor-wait'
+                : 'bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white shadow-emerald-950/50 border border-emerald-400/50'
+            }`}
+          >
+            {isArming ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                <span>ARMING...</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>ARM MOTORS</span>
+              </>
+            )}
+          </button>
+
+          {/* DISARM BUTTON */}
+          <button
+            type="button"
+            onClick={handleDisarm}
+            disabled={!telemetry.isArmed || isBusy}
+            title={
+              !telemetry.isArmed
+                ? 'Flight controller already disarmed'
+                : 'Send MAVLink DISARM command (MAV_CMD_COMPONENT_ARM_DISARM param1=0)'
+            }
+            className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg font-bold text-[11px] font-sans tracking-wide uppercase transition shadow-md cursor-pointer ${
+              !telemetry.isArmed
+                ? 'bg-slate-800/60 text-slate-500 cursor-not-allowed border border-slate-700/60'
+                : isDisarming
+                ? 'bg-amber-600 text-white cursor-wait'
+                : 'bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white shadow-rose-950/50 border border-rose-400/50'
+            }`}
+          >
+            {isDisarming ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                <span>DISARMING...</span>
+              </>
+            ) : (
+              <>
+                <Power className="w-3.5 h-3.5" />
+                <span>DISARM</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Bench / Field Force Arm Bypass Option */}
+        <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
+          <label className="flex items-center gap-1.5 text-[10px] font-mono text-slate-400 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={forceArm}
+              onChange={(e) => setForceArm(e.target.checked)}
+              disabled={telemetry.isArmed || isBusy}
+              className="w-3 h-3 rounded bg-slate-900 border-slate-700 text-amber-500 focus:ring-0 cursor-pointer"
+            />
+            <span className={forceArm ? 'text-amber-300 font-bold' : ''}>
+              Force Arm (Bench / Bypass)
+            </span>
+          </label>
+
+          <span className="text-[9px] font-mono text-slate-500">
+            {telemetry.isArmed ? 'PROPELLERS ACTIVE' : 'SAFE STANDBY'}
+          </span>
+        </div>
+
+        {/* Feedback / Alert Notice */}
+        {armFeedback && (
+          <div className="p-1.5 rounded bg-slate-900/90 border border-slate-700 text-[10px] font-mono text-slate-300 flex items-center gap-1.5">
+            <Activity className="w-3 h-3 text-amber-400 shrink-0" />
+            <span className="truncate">{armFeedback}</span>
+          </div>
         )}
       </Card>
 

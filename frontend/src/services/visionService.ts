@@ -1,6 +1,9 @@
 import jsQR from 'jsqr';
 import { DecodedQRData, PhotoCaptureEvent } from '../types/mission';
 import { audioService } from './audioService';
+import { mavlinkService } from './mavlinkService';
+import { reconDetectionService } from './reconDetectionService';
+import { decodeQRFromImageData } from './qrDecoderService';
 
 export type VisionFilterMode = 'NORMAL' | 'OPENCV_BINARIZED' | 'OPENCV_EDGES' | 'OPENCV_CONTRAST' | 'NIGHT_VISION' | 'CYBER_HUD';
 
@@ -33,9 +36,9 @@ class VisionService {
   private canvasElement: HTMLCanvasElement | null = null;
   private canvasCtx: CanvasRenderingContext2D | null = null;
 
-  // Multi-scale digital super-resolution canvas for long-range QR scanning
-  private zoomCanvas: HTMLCanvasElement | null = null;
-  private zoomCtx: CanvasRenderingContext2D | null = null;
+  // Full-resolution original photo capture canvas
+  private photoCanvasElement: HTMLCanvasElement | null = null;
+  private photoCanvasCtx: CanvasRenderingContext2D | null = null;
 
   private stream: MediaStream | null = null;
   private isRequestingStream: boolean = false;
@@ -53,18 +56,12 @@ class VisionService {
   private cameraError: string | undefined = undefined;
   private permissionGranted: boolean = false;
 
-  // Fully Autonomous Smooth 2-Second Dynamic Zoom Sweep Engine (1.0x to 5.0x)
+  // Strict wide-FOV operation: Locked at 1.0x (No digital/optical zoom sweeping)
+  private readonly fixedZoom: number = 1.0;
   private hasHardwareZoom: boolean = false;
-  private hardwareMaxZoom: number = 3.0;
-  private minZoom: number = 1.0;
-  private maxZoom: number = 5.0;
-  private currentZoom: number = 1.0;
-  private isAutoZoomEnabled: boolean = true;
-  private autoZoomSweepTimer: any = null;
-  private zoomCyclePhase: 'ZOOM_IN' | 'ZOOM_OUT' = 'ZOOM_IN';
-  private zoomCycleStartTime: number = Date.now();
+  private hardwareMaxZoom: number = 1.0;
 
-  // 10-Second Periodic Photo Capture Engine
+  // Event-Driven Capture Engine with Debounce Protection
   private captureIntervalSec: number = 10;
   private countdownSec: number = 10;
   private periodicTimer: any = null;
@@ -74,14 +71,16 @@ class VisionService {
   private latestCaptureEvent: PhotoCaptureEvent | null = null;
   private lastQrAlertTime: number = 0;
   private lastQrNotifyTime: number = 0;
+  private lastCaptureTime: number = 0;
+  private consecutiveDetectionFrames: number = 0;
 
   constructor() {
     if (typeof document !== 'undefined') {
       this.canvasElement = document.createElement('canvas');
       this.canvasCtx = this.canvasElement.getContext('2d', { willReadFrequently: true });
 
-      this.zoomCanvas = document.createElement('canvas');
-      this.zoomCtx = this.zoomCanvas.getContext('2d', { willReadFrequently: true });
+      this.photoCanvasElement = document.createElement('canvas');
+      this.photoCanvasCtx = this.photoCanvasElement.getContext('2d', { willReadFrequently: true });
     }
     this.checkInitialPermissionState();
   }
@@ -136,12 +135,12 @@ class VisionService {
       error: this.cameraError,
       hasTorch: this.hasTorch,
       isTorchOn: this.isTorchOn,
-      hasZoom: this.hasHardwareZoom,
-      hardwareMaxZoom: this.hardwareMaxZoom,
-      currentZoom: this.currentZoom,
-      minZoom: this.minZoom,
-      maxZoom: this.maxZoom,
-      isAutoZoomEnabled: this.isAutoZoomEnabled,
+      hasZoom: false, // Locked wide-angle FOV
+      hardwareMaxZoom: 1.0,
+      currentZoom: 1.0,
+      minZoom: 1.0,
+      maxZoom: 1.0,
+      isAutoZoomEnabled: false, // Auto-zoom strictly disabled
       permissionGranted: this.permissionGranted
     };
   }
@@ -154,31 +153,13 @@ class VisionService {
     return this.activeFilter;
   }
 
-  public setAutoZoom(enabled: boolean) {
-    this.isAutoZoomEnabled = enabled;
-    if (!enabled) {
-      this.setHardwareZoom(1.0);
-    }
+  public setAutoZoom(_enabled: boolean) {
+    // Intentionally no-op: AERORECON requires wide-angle fixed FOV without digital zoom sweeps
     this.notifyCameraState();
   }
 
-  public async setHardwareZoom(zoomValue: number): Promise<boolean> {
-    const clamped = Math.max(1.0, Math.min(5.0, zoomValue));
-    this.currentZoom = parseFloat(clamped.toFixed(2));
-
-    if (this.stream && this.hasHardwareZoom) {
-      try {
-        const track = this.stream.getVideoTracks()[0];
-        if (track && track.readyState === 'live') {
-          const hwZoom = Math.min(this.hardwareMaxZoom, this.currentZoom);
-          await (track as any).applyConstraints({
-            advanced: [{ zoom: hwZoom }]
-          });
-        }
-      } catch (e) {
-        // zoom constraints applied
-      }
-    }
+  public async setHardwareZoom(_zoomValue: number): Promise<boolean> {
+    // Intentionally locked to 1.0x wide-angle
     this.notifyCameraState();
     return true;
   }
@@ -219,7 +200,7 @@ class VisionService {
 
   /**
    * Safe, Non-Repetitive Android Camera Initializer
-   * Reuses existing active media streams and never repeatedly spams permission prompts.
+   * Operates wide field of view at native resolution without zoom sweeps.
    */
   public async startCamera(videoRef: HTMLVideoElement, facing: 'environment' | 'user' = this.currentFacingMode): Promise<boolean> {
     this.videoElement = videoRef;
@@ -236,7 +217,6 @@ class VisionService {
         this.notifyCameraState();
         this.startContinuousStreamScanning();
         this.startPeriodicCaptureLoop();
-        this.startSmooth2SecAutoZoomLoop();
         return true;
       } catch (e) {
         console.warn('Re-attaching active stream failed', e);
@@ -273,27 +253,12 @@ class VisionService {
         if (track) {
           const capabilities: any = track.getCapabilities ? track.getCapabilities() : {};
           this.hasTorch = !!capabilities.torch;
-
-          if (capabilities.zoom) {
-            this.hasHardwareZoom = true;
-            this.hardwareMaxZoom = capabilities.zoom.max || 3.0;
-            this.minZoom = 1.0;
-            this.maxZoom = 5.0;
-            this.currentZoom = 1.0;
-          } else {
-            this.hasHardwareZoom = false;
-            this.hardwareMaxZoom = 1.0;
-            this.minZoom = 1.0;
-            this.maxZoom = 5.0;
-            this.currentZoom = 1.0;
-          }
         }
 
         this.useSimulatedFeed = false;
         this.notifyCameraState();
         this.startContinuousStreamScanning();
         this.startPeriodicCaptureLoop();
-        this.startSmooth2SecAutoZoomLoop();
         return true;
       }
     } catch (err: any) {
@@ -350,10 +315,8 @@ class VisionService {
     if (this.animFrameId) cancelAnimationFrame(this.animFrameId);
     if (this.periodicTimer) clearInterval(this.periodicTimer);
     if (this.countdownTimer) clearInterval(this.countdownTimer);
-    if (this.autoZoomSweepTimer) clearInterval(this.autoZoomSweepTimer);
     this.periodicTimer = null;
     this.countdownTimer = null;
-    this.autoZoomSweepTimer = null;
     this.animFrameId = null;
 
     if (this.stream) {
@@ -366,42 +329,12 @@ class VisionService {
     this.notifyCameraState();
   }
 
-  /**
-   * Smooth Fully Autonomous Dynamic Zoom Sweep Cycle (1.0x -> 5.0x -> 1.0x)
-   * Automatically and continuously sweeps: 1.0x -> 5.0x -> 1.0x without any manual input.
-   * If a QR code is detected, the cycle locks on the optimal zoom immediately.
-   */
-  private startSmooth2SecAutoZoomLoop() {
-    if (this.autoZoomSweepTimer) clearInterval(this.autoZoomSweepTimer);
-
-    this.isAutoZoomEnabled = true;
-    this.zoomCycleStartTime = Date.now();
-    const cycleDurationMs = 2400; // 2.4 second full auto cycle
-
-    this.autoZoomSweepTimer = setInterval(() => {
-      if (!this.isScanning || !this.isAutoZoomEnabled) return;
-
-      // If QR code is already found, maintain lock
-      if (this.latestResult && this.latestResult.isValidTwoDigit) {
-        return;
-      }
-
-      const elapsed = (Date.now() - this.zoomCycleStartTime) % cycleDurationMs;
-      const progress = elapsed / cycleDurationMs; // 0.0 -> 1.0
-
-      // Smooth cosine oscillation: 0.0 -> 1.0 (peaks at 5.0x) -> 0.0 (returns to 1.0x)
-      const wave = (1 - Math.cos(progress * 2 * Math.PI)) / 2;
-      const targetSweepZoom = 1.0 + wave * 4.0; // 1.0x to 5.0x
-
-      this.setHardwareZoom(targetSweepZoom);
-    }, 60); // 60ms ultra-smooth 16Hz updates
-  }
-
   private startContinuousStreamScanning() {
     let frame = 0;
     const loop = () => {
       if (!this.isScanning) return;
       frame++;
+      // Process every 2nd frame for 15-30 FPS scanning without blocking UI thread
       if (frame % 2 === 0) {
         this.scanLiveFrameEdgeToEdge();
       }
@@ -411,10 +344,11 @@ class VisionService {
   }
 
   /**
-   * 100% Full-Screen Edge-to-Edge QR Scanner
-   * Scans across 100% of the entire video frame + multi-scale digital zoom crops.
+   * Continuous Full-Screen Edge-to-Edge QR Scanner:
+   * Scans across 100% of the entire video frame with native wide FOV.
+   * Identifies QR codes anywhere in the field of view without digital zoom or cropping.
    */
-  private scanLiveFrameEdgeToEdge() {
+  private async scanLiveFrameEdgeToEdge() {
     if (this.useSimulatedFeed || !this.videoElement || this.videoElement.readyState < 2 || !this.canvasElement || !this.canvasCtx) {
       return;
     }
@@ -428,54 +362,23 @@ class VisionService {
       this.canvasElement.height = height;
       this.canvasCtx.drawImage(video, 0, 0, width, height);
 
-      // --- PASS 1: FULL 100% SCREEN SCAN ---
+      // Extract uncropped full-frame image data
       const fullImageData = this.canvasCtx.getImageData(0, 0, width, height);
       this.applyOpenCVPreprocessing(fullImageData);
 
+      // Full-frame edge-to-edge detection with jsQR
       let qrCode = jsQR(fullImageData.data, fullImageData.width, fullImageData.height, {
         inversionAttempts: 'attemptBoth'
       });
 
-      // --- PASS 2: MULTI-SCALE DIGITAL ZOOM ROI (For 15-20m distant QR codes) ---
-      if (!qrCode && this.zoomCanvas && this.zoomCtx) {
-        this.zoomCanvas.width = 640;
-        this.zoomCanvas.height = 480;
-        this.zoomCtx.drawImage(video, width * 0.15, height * 0.15, width * 0.7, height * 0.7, 0, 0, 640, 480);
+      if (qrCode) {
+        this.consecutiveDetectionFrames++;
+        reconDetectionService.setVisualStatus('QR_DETECTED');
+        reconDetectionService.setDroneCoreStatus('QR DETECTED');
 
-        const zoomImgData = this.zoomCtx.getImageData(0, 0, 640, 480);
-        this.applyOpenCVPreprocessing(zoomImgData);
-
-        const zoomedQR = jsQR(zoomImgData.data, zoomImgData.width, zoomImgData.height, {
-          inversionAttempts: 'attemptBoth'
-        });
-
-        if (zoomedQR && zoomedQR.data) {
-          qrCode = zoomedQR;
-        }
-      }
-
-      // --- PASS 3: 5.0x CENTER SUPER-RESOLUTION ROI (For high altitude distant QR codes) ---
-      if (!qrCode && this.zoomCanvas && this.zoomCtx) {
-        this.zoomCanvas.width = 640;
-        this.zoomCanvas.height = 480;
-        // 5x center crop (20% width/height window at center)
-        this.zoomCtx.drawImage(video, width * 0.35, height * 0.35, width * 0.3, height * 0.3, 0, 0, 640, 480);
-
-        const zoom5xImgData = this.zoomCtx.getImageData(0, 0, 640, 480);
-        this.applyOpenCVPreprocessing(zoom5xImgData);
-
-        const zoomed5xQR = jsQR(zoom5xImgData.data, zoom5xImgData.width, zoom5xImgData.height, {
-          inversionAttempts: 'attemptBoth'
-        });
-
-        if (zoomed5xQR && zoomed5xQR.data) {
-          qrCode = zoomed5xQR;
-        }
-      }
-
-      if (qrCode && qrCode.data) {
-        const rawText = qrCode.data;
-        const isValid = this.validateTwoDigitCode(rawText);
+        const rawText = qrCode.data || '';
+        const hasData = rawText.trim().length > 0;
+        const isValidTwoDigit = this.validateTwoDigitCode(rawText);
 
         const tl = qrCode.location.topLeftCorner;
         const tr = qrCode.location.topRightCorner;
@@ -506,15 +409,16 @@ class VisionService {
           bottomLeft: { x: bl.x, y: bl.y, xPercent: (bl.x / width) * 100, yPercent: (bl.y / height) * 100 }
         };
 
-        const snapshot = this.canvasElement.toDataURL('image/jpeg', 0.85);
+        // Capture Original Full-Resolution Photo (no digital zoom, native camera resolution)
+        const snapshot = this.canvasElement.toDataURL('image/jpeg', 0.90);
         this.latestVerifiedPhoto = snapshot;
 
         const data: DecodedQRData = {
           rawText,
           code: rawText.trim(),
-          isValidTwoDigit: isValid,
+          isValidTwoDigit,
           detectedAt: Date.now(),
-          confidence: 0.99,
+          confidence: hasData ? 0.99 : 0.70,
           photoSnapshotUrl: snapshot,
           boundingBox: { x: minX, y: minY, width: boxW, height: boxH },
           normalizedBox,
@@ -524,15 +428,37 @@ class VisionService {
         const now = Date.now();
         const prevCode = this.latestResult?.code;
         this.latestResult = data;
-        if (isValid && (now - this.lastQrAlertTime > 1500 || prevCode !== data.code)) {
+
+        // Check deduplication: avoid saving duplicate photos continuously for the same QR code
+        const isDuplicate = hasData && reconDetectionService.isDuplicateDetection(rawText.trim());
+
+        if (!isDuplicate && (now - this.lastCaptureTime > 2500 || prevCode !== data.code)) {
+          this.lastCaptureTime = now;
+          this.photosAnalyzedCount++;
+          reconDetectionService.setDroneCoreStatus('CAPTURING PHOTO');
+
+          // Dispatch event-driven original photo capture to Recon Detection Service
+          reconDetectionService.handleRawDetectionEvent({
+            photoDataUrl: snapshot,
+            thumbnailDataUrl: snapshot,
+            rawImageData: fullImageData,
+            initialPayload: hasData ? rawText.trim() : null,
+            boundingBox: { x: minX, y: minY, width: boxW, height: boxH }
+          });
+        }
+
+        if (hasData && (now - this.lastQrAlertTime > 1500 || prevCode !== data.code)) {
           this.lastQrAlertTime = now;
           audioService.playQrDetected();
           audioService.triggerHaptic('success');
         }
+
         if (now - this.lastQrNotifyTime > 200 || prevCode !== data.code) {
           this.lastQrNotifyTime = now;
           this.notifyListeners(data);
         }
+      } else {
+        this.consecutiveDetectionFrames = 0;
       }
     } catch (e) {
       // scan error
@@ -551,15 +477,16 @@ class VisionService {
       if (this.countdownSec <= 0) {
         this.countdownSec = this.captureIntervalSec;
       }
+      const telem = mavlinkService.getTelemetry();
       this.notifyPhotoListeners(this.latestCaptureEvent || {
         id: '',
         timestamp: Date.now(),
         intervalSec: this.captureIntervalSec,
         qrFound: false,
         autoPurged: false,
-        altitudeMeters: 25,
-        latitude: 12.9715987,
-        longitude: 77.5945627
+        altitudeMeters: telem.altitude || 10.0,
+        latitude: telem.latitude || 0,
+        longitude: telem.longitude || 0
       }, this.countdownSec);
     }, 1000);
 
@@ -604,12 +531,20 @@ class VisionService {
     }
   }
 
+  /**
+   * Captures the full original image at native camera resolution and performs synchronized Pixhawk telemetry association
+   */
   public captureAndAnalyzePhoto(): PhotoCaptureEvent {
     this.photosAnalyzedCount++;
     const photoId = `PHOTO_SNAP_${Date.now()}_${this.photosAnalyzedCount}`;
 
     let qrResult: DecodedQRData | null = null;
     let retainedPhotoUrl: string | undefined = undefined;
+
+    const telem = mavlinkService.getTelemetry();
+    const lat = telem.latitude || 0;
+    const lon = telem.longitude || 0;
+    const alt = telem.altitude || 10.0;
 
     if (!this.useSimulatedFeed && this.videoElement && this.videoElement.readyState >= 2 && this.canvasElement && this.canvasCtx) {
       const video = this.videoElement;
@@ -627,54 +562,43 @@ class VisionService {
         inversionAttempts: 'attemptBoth'
       });
 
+      retainedPhotoUrl = this.canvasElement.toDataURL('image/jpeg', 0.90);
+
       if (qrCode && qrCode.data) {
         const rawText = qrCode.data;
         const isValid = this.validateTwoDigitCode(rawText);
 
-        if (isValid) {
-          this.canvasCtx.strokeStyle = '#10b981';
-          this.canvasCtx.lineWidth = 6;
-          this.canvasCtx.strokeRect(
-            qrCode.location.topLeftCorner.x - 10,
-            qrCode.location.topLeftCorner.y - 10,
-            Math.abs(qrCode.location.topRightCorner.x - qrCode.location.topLeftCorner.x) + 20,
-            Math.abs(qrCode.location.bottomLeftCorner.y - qrCode.location.topLeftCorner.y) + 20
-          );
+        this.latestVerifiedPhoto = retainedPhotoUrl;
 
-          retainedPhotoUrl = this.canvasElement.toDataURL('image/jpeg', 0.85);
-          this.latestVerifiedPhoto = retainedPhotoUrl;
+        qrResult = {
+          rawText,
+          code: rawText.trim(),
+          isValidTwoDigit: isValid,
+          detectedAt: Date.now(),
+          confidence: 0.98,
+          photoSnapshotUrl: retainedPhotoUrl,
+          boundingBox: {
+            x: qrCode.location.topLeftCorner.x,
+            y: qrCode.location.topLeftCorner.y,
+            width: Math.abs(qrCode.location.topRightCorner.x - qrCode.location.topLeftCorner.x),
+            height: Math.abs(qrCode.location.bottomLeftCorner.y - qrCode.location.topLeftCorner.y)
+          }
+        };
 
-          qrResult = {
-            rawText,
-            code: rawText.trim(),
-            isValidTwoDigit: true,
-            detectedAt: Date.now(),
-            confidence: 0.98,
-            photoSnapshotUrl: retainedPhotoUrl,
-            boundingBox: {
-              x: qrCode.location.topLeftCorner.x,
-              y: qrCode.location.topLeftCorner.y,
-              width: Math.abs(qrCode.location.topRightCorner.x - qrCode.location.topLeftCorner.x),
-              height: Math.abs(qrCode.location.bottomLeftCorner.y - qrCode.location.topLeftCorner.y)
-            }
-          };
-        }
-      }
-
-      if (!qrResult) {
-        this.photosPurgedCount++;
-        this.canvasCtx.clearRect(0, 0, width, height);
-        this.canvasElement.width = 1;
-        this.canvasElement.height = 1;
+        // Forward to Recon Detection Service
+        reconDetectionService.handleRawDetectionEvent({
+          photoDataUrl: retainedPhotoUrl,
+          thumbnailDataUrl: retainedPhotoUrl,
+          rawImageData: imageData,
+          initialPayload: rawText.trim()
+        });
       }
     } else {
-      if (this.latestResult && this.latestResult.isValidTwoDigit) {
+      if (this.latestResult) {
         qrResult = this.latestResult;
         retainedPhotoUrl = this.generateSyntheticTargetSnapshot(this.latestResult.code);
         qrResult.photoSnapshotUrl = retainedPhotoUrl;
         this.latestVerifiedPhoto = retainedPhotoUrl;
-      } else {
-        this.photosPurgedCount++;
       }
     }
 
@@ -684,11 +608,11 @@ class VisionService {
       intervalSec: this.captureIntervalSec,
       qrFound: !!qrResult,
       qrCode: qrResult?.code,
-      autoPurged: !qrResult,
+      autoPurged: false, // Never discard captured image
       photoDataUrl: retainedPhotoUrl,
-      altitudeMeters: 25.0,
-      latitude: 12.9715987,
-      longitude: 77.5945627
+      altitudeMeters: alt,
+      latitude: lat,
+      longitude: lon
     };
 
     this.latestCaptureEvent = event;
@@ -709,6 +633,11 @@ class VisionService {
     const valid = this.validateTwoDigitCode(code);
     const snapshot = this.generateSyntheticTargetSnapshot(code);
     this.latestVerifiedPhoto = snapshot;
+
+    const telem = mavlinkService.getTelemetry();
+    const lat = telem.latitude || 17.385044;
+    const lon = telem.longitude || 78.486671;
+    const alt = telem.altitude || 10.0;
 
     const data: DecodedQRData = {
       rawText: code,
@@ -734,22 +663,27 @@ class VisionService {
     };
 
     this.latestResult = data;
-    if (valid) {
-      audioService.playQrDetected();
-      audioService.triggerHaptic('success');
-    }
+    audioService.playQrDetected();
+    audioService.triggerHaptic('success');
+
+    // Forward to Recon Detection Service
+    reconDetectionService.handleRawDetectionEvent({
+      photoDataUrl: snapshot,
+      thumbnailDataUrl: snapshot,
+      initialPayload: code
+    });
 
     const event: PhotoCaptureEvent = {
       id: `PHOTO_SNAP_${Date.now()}_SIM`,
       timestamp: Date.now(),
       intervalSec: this.captureIntervalSec,
-      qrFound: valid,
+      qrFound: true,
       qrCode: code,
-      autoPurged: !valid,
-      photoDataUrl: valid ? snapshot : undefined,
-      altitudeMeters: 25.0,
-      latitude: 12.9715987,
-      longitude: 77.5945627
+      autoPurged: false,
+      photoDataUrl: snapshot,
+      altitudeMeters: alt,
+      latitude: lat,
+      longitude: lon
     };
 
     this.latestCaptureEvent = event;
@@ -763,6 +697,8 @@ class VisionService {
     const valid = this.validateTwoDigitCode(trimmed);
     const snapshot = this.generateSyntheticTargetSnapshot(trimmed);
     this.latestVerifiedPhoto = snapshot;
+
+    const telem = mavlinkService.getTelemetry();
 
     const data: DecodedQRData = {
       rawText: trimmed,
@@ -791,6 +727,11 @@ class VisionService {
     if (hasContent) {
       audioService.playQrDetected();
       audioService.triggerHaptic('success');
+      reconDetectionService.handleRawDetectionEvent({
+        photoDataUrl: snapshot,
+        thumbnailDataUrl: snapshot,
+        initialPayload: trimmed
+      });
     }
 
     const event: PhotoCaptureEvent = {
@@ -799,11 +740,11 @@ class VisionService {
       intervalSec: this.captureIntervalSec,
       qrFound: hasContent,
       qrCode: trimmed,
-      autoPurged: !hasContent,
+      autoPurged: false,
       photoDataUrl: hasContent ? snapshot : undefined,
-      altitudeMeters: 25.0,
-      latitude: 12.9715987,
-      longitude: 77.5945627
+      altitudeMeters: telem.altitude || 10.0,
+      latitude: telem.latitude || 0,
+      longitude: telem.longitude || 0
     };
 
     this.latestCaptureEvent = event;
@@ -817,7 +758,7 @@ class VisionService {
     return /^[0-9]{2}$/.test(trimmed);
   }
 
-  private generateSyntheticTargetSnapshot(code: string): string {
+  public generateSyntheticTargetSnapshot(code: string): string {
     if (typeof document === 'undefined') return '';
     const canvas = document.createElement('canvas');
     canvas.width = 640;

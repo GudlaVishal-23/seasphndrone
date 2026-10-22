@@ -111,6 +111,16 @@ export default defineConfig({
   plugins: [react(), ipCamProxyPlugin()],
   server: {
     host: true,
-    port: 5173
+    port: 5174,
+    proxy: {
+      '/api/recon': {
+        target: 'http://localhost:8443',
+        changeOrigin: true
+      },
+      '/ws': {
+        target: 'ws://localhost:8443',
+        ws: true
+      }
+    }
   }
 });

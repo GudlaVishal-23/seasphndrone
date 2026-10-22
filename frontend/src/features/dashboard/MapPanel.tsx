@@ -36,6 +36,8 @@ import { mavlinkService } from '../../services/mavlinkService';
 import { GroundStationMission, MissionDrawingTool } from '../../types/groundStationMap';
 import { LatLngPoint, HomePoint } from '../../types/mission';
 import { audioService } from '../../services/audioService';
+import { reconDetectionService } from '../../services/reconDetectionService';
+import { TargetLocation, QRDetectionRecord } from '../../types/recon';
 
 interface MapPanelProps {
   telemetry: DashboardTelemetryData;
@@ -130,6 +132,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   const homeMarkerRef = useRef<L.Marker | null>(null);
   const droneToDeviceLineRef = useRef<L.Polyline | null>(null);
   const targetBoxMarkerRef = useRef<L.Marker | null>(null);
+  const captureSiteMarkerRef = useRef<L.Marker | null>(null);
+  const targetVectorLineRef = useRef<L.Polyline | null>(null);
   const breadcrumbsRef = useRef<L.Polyline | null>(null);
   const waypointsGroupRef = useRef<L.LayerGroup | null>(null);
   const missionPolylineRef = useRef<L.Polyline | null>(null);
@@ -429,7 +433,18 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       map.invalidateSize();
     }, 200);
 
+    const resizeObserver = new ResizeObserver(() => {
+      if (mapRef.current) {
+        mapRef.current.invalidateSize();
+      }
+    });
+
+    if (mapContainerRef.current) {
+      resizeObserver.observe(mapContainerRef.current);
+    }
+
     return () => {
+      resizeObserver.disconnect();
       window.removeEventListener('mouseup', handleMouseUpFinish);
       map.remove();
       mapRef.current = null;
@@ -772,49 +787,115 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     }
   }, [showGeofence]);
 
-  // 7. Target Box / QR Detection Marker
+  // 7. AERORECON: Target Location Marker (Case A) & QR Capture Site Marker
   useEffect(() => {
-    const unsub = missionEngine.subscribeState(() => {
-      const qr = missionEngine.getDecodedQR();
+    const unsubTarget = reconDetectionService.subscribeActiveTarget((target, dist, bearing) => {
       const map = mapRef.current;
       if (!map) return;
 
-      if (qr && qr.code) {
-        if (!telemetry.isGpsValid || !telemetry.latitude || Math.abs(telemetry.latitude) <= 0.001) return;
-        const targetLat = telemetry.latitude;
-        const targetLng = telemetry.longitude;
+      if (target && target.isValid) {
+        const targetLat = target.latitude;
+        const targetLng = target.longitude;
 
         if (!targetBoxMarkerRef.current) {
           const targetIcon = L.divIcon({
             className: 'target-box-icon',
             html: `
-              <div style="position: relative; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;">
-                <div style="position: absolute; inset: 0; border-radius: 6px; border: 2px solid #22C55E; background: rgba(34, 197, 94, 0.25); animation: pulse 1.5s infinite;"></div>
-                <div style="font-weight: 900; font-family: monospace; font-size: 13px; color: #22C55E;">${qr.code}</div>
+              <div style="position: relative; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;">
+                <div style="position: absolute; inset: 0; border-radius: 50%; border: 2.5px solid #10B981; background: rgba(16, 185, 129, 0.25); animation: pulse 1.5s infinite;"></div>
+                <div style="position: absolute; width: 14px; height: 14px; border-radius: 50%; background: #10B981;"></div>
+                <div style="position: absolute; width: 2px; height: 38px; background: rgba(16, 185, 129, 0.6);"></div>
+                <div style="position: absolute; width: 38px; height: 2px; background: rgba(16, 185, 129, 0.6);"></div>
               </div>
             `,
-            iconSize: [34, 34],
-            iconAnchor: [17, 17],
+            iconSize: [38, 38],
+            iconAnchor: [19, 19],
           });
+
           const m = L.marker([targetLat, targetLng], { icon: targetIcon })
-            .bindTooltip(`🎯 Intelligence Cache (QR: ${qr.code})`, { permanent: true, direction: 'top', offset: [0, -18] })
+            .bindTooltip(`🎯 CONFIRMED TARGET [${targetLat.toFixed(5)}, ${targetLng.toFixed(5)}]${dist !== null ? ` — ${dist}m` : ''}`, {
+              permanent: true,
+              direction: 'top',
+              offset: [0, -20],
+              className: 'target-tooltip'
+            })
             .addTo(map);
           targetBoxMarkerRef.current = m;
         } else {
           targetBoxMarkerRef.current.setLatLng([targetLat, targetLng]);
+          targetBoxMarkerRef.current.setTooltipContent(
+            `🎯 CONFIRMED TARGET [${targetLat.toFixed(5)}, ${targetLng.toFixed(5)}]${dist !== null ? ` — ${dist}m` : ''}`
+          );
+        }
+
+        // Draw dynamic vector tracking line from Drone -> Target
+        if (telemetry.isGpsValid && telemetry.latitude && telemetry.longitude && Math.abs(telemetry.latitude) > 0.001) {
+          const lineCoords: [number, number][] = [
+            [telemetry.latitude, telemetry.longitude],
+            [targetLat, targetLng]
+          ];
+          if (!targetVectorLineRef.current) {
+            targetVectorLineRef.current = L.polyline(lineCoords, {
+              color: '#10B981',
+              weight: 2.5,
+              dashArray: '6, 6',
+              opacity: 0.85
+            }).addTo(map);
+          } else {
+            targetVectorLineRef.current.setLatLngs(lineCoords);
+          }
         }
       } else {
         if (targetBoxMarkerRef.current && map) {
           map.removeLayer(targetBoxMarkerRef.current);
           targetBoxMarkerRef.current = null;
         }
+        if (targetVectorLineRef.current && map) {
+          map.removeLayer(targetVectorLineRef.current);
+          targetVectorLineRef.current = null;
+        }
+      }
+    });
+
+    const unsubDetections = reconDetectionService.subscribeDetections((detections, latest) => {
+      const map = mapRef.current;
+      if (!map) return;
+
+      if (latest && latest.gpsFixValid && latest.droneLatitude && latest.droneLongitude) {
+        if (!captureSiteMarkerRef.current) {
+          const captureIcon = L.divIcon({
+            className: 'capture-site-icon',
+            html: `
+              <div style="position: relative; width: 28px; height: 28px; border-radius: 6px; background: rgba(14, 165, 233, 0.85); border: 1.5px solid #38BDF8; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);">
+                <span style="font-size: 13px;">📷</span>
+              </div>
+            `,
+            iconSize: [28, 28],
+            iconAnchor: [14, 14],
+          });
+
+          captureSiteMarkerRef.current = L.marker([latest.droneLatitude, latest.droneLongitude], { icon: captureIcon })
+            .bindTooltip(`📷 Photo Capture Site (${latest.detectionId})`, {
+              permanent: false,
+              direction: 'bottom',
+              offset: [0, 16]
+            })
+            .addTo(map);
+        } else {
+          captureSiteMarkerRef.current.setLatLng([latest.droneLatitude, latest.droneLongitude]);
+          captureSiteMarkerRef.current.setTooltipContent(`📷 Photo Capture Site (${latest.detectionId})`);
+        }
+      } else if (!latest && captureSiteMarkerRef.current && map) {
+        map.removeLayer(captureSiteMarkerRef.current);
+        captureSiteMarkerRef.current = null;
       }
     });
 
     return () => {
-      unsub();
+      unsubTarget();
+      unsubDetections();
     };
-  }, [telemetry.latitude, telemetry.longitude]);
+  }, [telemetry.latitude, telemetry.longitude, telemetry.isGpsValid]);
 
   // 8. Switch Tile Layer
   useEffect(() => {
@@ -1111,7 +1192,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
   return (
     <div
-      className={`rounded-[10px] border border-[var(--uav-card-border)] bg-[#0D1117] h-[540px] relative overflow-hidden select-none flex flex-col ${className}`}
+      className={`border border-[var(--uav-card-border)] bg-[#0D1117] h-full w-full min-h-0 flex-1 relative overflow-hidden select-none flex flex-col ${className}`}
     >
       {/* Top Notification / Active Tool Status Pill */}
       {statusMessage && (

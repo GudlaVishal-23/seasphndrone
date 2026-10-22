@@ -11,10 +11,19 @@ export interface DroneQRDispatchPayload {
   type: 'QR_DISPATCH';
   missionId: string;
   messageId: string;
-  qrCode: string; // 2-digit e.g. "27"
+  detectionId?: string;
+  qrCode: string; // Decoded QR payload (arbitrary string or 2-digit)
   timestamp: number;
-  altitudeMeters: number;
-  droneBatteryPercent: number;
+  altitudeMeters?: number;
+  droneBatteryPercent?: number;
+  droneLatitude?: number;
+  droneLongitude?: number;
+  gpsFixValid?: boolean;
+  status?: string;
+  photoDataUrl?: string;
+  thumbnailDataUrl?: string;
+  rtlInitiated?: boolean;
+  rtlConfirmed?: boolean;
 }
 
 export interface RunnerAckPayload {

@@ -128,8 +128,13 @@ class MissionEngine {
       }
       this.restoreAutonomousConfig();
     }
-    this.restorePersistentState();
-    this.initListeners();
+    if (typeof setTimeout !== 'undefined') {
+      setTimeout(() => {
+        this.initListeners();
+      }, 0);
+    } else {
+      this.initListeners();
+    }
     this.startFailsafeWatchdog();
   }
 

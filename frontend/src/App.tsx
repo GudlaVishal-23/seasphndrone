@@ -146,7 +146,6 @@ export const App: React.FC = () => {
     return (
       <DashboardPage
         onLogout={handleLogout}
-        onSwitchRole={(role) => authService.switchRole(role)}
         currentRole={currentRole}
       />
     );
@@ -175,16 +174,6 @@ export const App: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => authService.switchRole('GROUND_STATION')}
-              className="px-3 py-1.5 rounded-lg bg-sky-950/60 hover:bg-sky-900/60 border border-sky-500/40 text-sky-300 hover:text-white text-[11px] font-sans font-bold flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-sm"
-              title="Switch to Ground Control Station (GCS) Cockpit"
-            >
-              <span>🛰️</span>
-              <span>SWITCH TO GROUND STATION</span>
-            </button>
-
-            <button
-              type="button"
               onClick={handleLogout}
               className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-red-950/60 hover:text-red-300 border border-slate-800 text-slate-400 text-[11px] font-sans font-semibold transition cursor-pointer"
               title="Log Out"
@@ -200,7 +189,58 @@ export const App: React.FC = () => {
             missionState={missionState}
             remainingSeconds={remainingSeconds}
             elapsedSeconds={elapsedSeconds}
-            onSwitchToGroundStation={() => authService.switchRole('GROUND_STATION')}
+          />
+        </main>
+      </div>
+    );
+  }
+
+  // Dedicated Drone Core Experience (Matches Field Unit & GCS Design System)
+  if (currentRole === 'DRONE') {
+    return (
+      <div className="h-[100dvh] w-full bg-sae-dark text-slate-100 flex flex-col font-sans select-none overflow-hidden">
+        {/* Dedicated Minimal Drone Core Top Bar (Matching Field Unit & GCS) */}
+        <header className="h-[52px] px-3 sm:px-6 bg-[#0c1322] border-b border-slate-800 flex items-center justify-between select-none z-40 shadow-lg shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-amber-950/60 border border-amber-500/50 flex items-center justify-center text-amber-400 font-black">
+              📷
+            </div>
+            <div>
+              <span className="font-orbitron font-extrabold text-[13px] tracking-wide text-white block leading-none">
+                DRONE CORE INTELLIGENCE
+              </span>
+              <span className="text-[10px] text-slate-400 font-mono">
+                SAE INDIA ADDC 2026 • OPTICAL QR RECON & AUTO-RTL
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-red-950/60 hover:text-red-300 border border-slate-800 text-slate-400 text-[11px] font-sans font-semibold transition cursor-pointer"
+              title="Log Out"
+            >
+              LOGOUT
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 p-2 sm:p-4 min-h-0 flex flex-col overflow-hidden">
+          <DroneDashboard
+            telemetry={telemetry}
+            missionState={missionState}
+            remainingSeconds={remainingSeconds}
+            elapsedSeconds={elapsedSeconds}
+            decodedQR={decodedQR}
+            pixhawkState={pixhawkState}
+            runnerLink={runnerLink}
+            runnerAckReceived={runnerAckReceived}
+            runnerAckLatencyMs={runnerAckLatencyMs}
+            onQRDetected={handleQRDetected}
+            onEmergencyRTL={handleEmergencyRTL}
+            className="flex-1 min-h-0"
           />
         </main>
       </div>
@@ -223,22 +263,6 @@ export const App: React.FC = () => {
 
       {/* Main Authenticated Dashboard Screen Based on Active Role */}
       <main className="flex-1 pb-10">
-
-        {currentRole === 'DRONE' && (
-          <DroneDashboard
-            telemetry={telemetry}
-            missionState={missionState}
-            remainingSeconds={remainingSeconds}
-            elapsedSeconds={elapsedSeconds}
-            decodedQR={decodedQR}
-            pixhawkState={pixhawkState}
-            runnerLink={runnerLink}
-            runnerAckReceived={runnerAckReceived}
-            runnerAckLatencyMs={runnerAckLatencyMs}
-            onQRDetected={handleQRDetected}
-            onEmergencyRTL={handleEmergencyRTL}
-          />
-        )}
 
         {currentRole === 'TESTBENCH' && (
           <MultiRoleSimBench

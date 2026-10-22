@@ -65,6 +65,46 @@ let currentUploadJob = {
   errorMessage: null
 };
 
+// AERORECON Database Persistence: Durable File-Based Storage in backend/data/
+const DATA_DIR = path.resolve(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) {
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
+}
+
+const MISSIONS_FILE = path.join(DATA_DIR, 'missions.json');
+const DETECTIONS_FILE = path.join(DATA_DIR, 'detections.json');
+
+function loadJsonSafe(filePath, fallback) {
+  try {
+    if (fs.existsSync(filePath)) {
+      const data = fs.readFileSync(filePath, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.warn(`[PERSISTENCE] Error loading ${filePath}:`, err.message);
+  }
+  return fallback;
+}
+
+function saveJsonAtomic(filePath, data) {
+  try {
+    const tmp = `${filePath}.tmp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(tmp, filePath);
+  } catch (err) {
+    console.error(`[PERSISTENCE] Error saving ${filePath}:`, err.message);
+  }
+}
+
+// In-Memory caches backed by durable disk storage
+let missions = loadJsonSafe(MISSIONS_FILE, []);
+const MAX_RECON_DETECTIONS = 50;
+let reconDetections = loadJsonSafe(DETECTIONS_FILE, []);
+
+function getActiveMission() {
+  return missions.find(m => m.status === 'EXECUTING' || m.status === 'ACTIVE' || m.status === 'DEADLINE_REACHED') || null;
+}
+
 // Create HTTP server for health checks, static frontend, and WebSocket upgrades
 const server = http.createServer((req, res) => {
   const parsedUrl = parse(req.url, true);
@@ -167,6 +207,228 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
       res.end(JSON.stringify({ success: false }));
     }
+    return;
+  }
+
+  // AERORECON: Ingest New QR Detection Record (with Deduplication & Atomic Persistence)
+  if (parsedUrl.pathname === '/api/recon/detections' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const detection = JSON.parse(body || '{}');
+        if (!detection.detectionId) {
+          detection.detectionId = `DET_${Date.now()}`;
+        }
+        detection.serverReceivedTime = Date.now();
+
+        // Idempotency & Deduplication check:
+        let isDuplicate = false;
+        const existingIdx = reconDetections.findIndex(d => d.detectionId === detection.detectionId);
+        if (existingIdx !== -1) {
+          reconDetections[existingIdx] = { ...reconDetections[existingIdx], ...detection };
+          isDuplicate = true;
+        } else {
+          // Check if same payload received within 5 seconds to suppress duplicate triggers
+          const duplicateRecent = reconDetections.find(d => 
+            d.payload && detection.payload && 
+            d.payload === detection.payload && 
+            Math.abs(detection.serverReceivedTime - (d.serverReceivedTime || d.timestamp || 0)) < 5000
+          );
+          if (duplicateRecent) {
+            isDuplicate = true;
+          } else {
+            reconDetections = [detection, ...reconDetections.slice(0, MAX_RECON_DETECTIONS - 1)];
+          }
+        }
+
+        // Persist to disk atomically
+        saveJsonAtomic(DETECTIONS_FILE, reconDetections);
+
+        // Broadcast to all connected GCS browsers & Runner units (only for non-duplicate events)
+        if (!isDuplicate) {
+          const broadcastMsg = JSON.stringify({
+            type: 'RECON_DETECTION_EVENT',
+            detection,
+            timestamp: Date.now()
+          });
+          for (const browser of browserSockets) {
+            if (browser.readyState === WebSocket.OPEN) {
+              try { browser.send(broadcastMsg, noop); } catch (e) {}
+            }
+          }
+        }
+
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({ 
+          success: true, 
+          detectionId: detection.detectionId, 
+          count: reconDetections.length,
+          duplicate: isDuplicate
+        }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ success: false, error: 'Invalid JSON payload' }));
+      }
+    });
+    return;
+  }
+
+  // AERORECON: Query Detections
+  if (parsedUrl.pathname === '/api/recon/detections' && req.method === 'GET') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-cache, no-store'
+    });
+    res.end(JSON.stringify({
+      success: true,
+      count: reconDetections.length,
+      detections: reconDetections
+    }));
+    return;
+  }
+
+  // AERORECON: Query Latest Detection
+  if (parsedUrl.pathname === '/api/recon/detections/latest' && req.method === 'GET') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-cache, no-store'
+    });
+    res.end(JSON.stringify({
+      success: true,
+      detection: reconDetections[0] || null
+    }));
+    return;
+  }
+
+  // AERORECON: Clear Detections
+  if (parsedUrl.pathname === '/api/recon/detections' && req.method === 'DELETE') {
+    reconDetections = [];
+    saveJsonAtomic(DETECTIONS_FILE, reconDetections);
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({ success: true, message: 'Detections cleared' }));
+    return;
+  }
+
+  // AERORECON: Create or Update Mission Record (Persisted in missions.json)
+  if (parsedUrl.pathname === '/api/missions' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const missionId = payload.missionId || `MISS_${Date.now()}`;
+        const timeLimitMinutes = Number(payload.timeLimitMinutes) || 10;
+        const startTime = payload.startTime || Date.now();
+        const deadline = payload.deadline || (startTime + timeLimitMinutes * 60 * 1000);
+
+        const missionRecord = {
+          missionId,
+          mode: payload.mode || 'AUTONOMOUS', // MANUAL | AUTONOMOUS
+          algorithm: payload.algorithm || 'TANGENTIAL_CIRCULAR', // TANGENTIAL_CIRCULAR | SPIRAL | MANUAL_PATH
+          searchCenter: payload.searchCenter || null,
+          searchRadiusMeters: Number(payload.searchRadiusMeters) || 10,
+          plannedAltitudeMeters: Number(payload.plannedAltitudeMeters) || 10,
+          timeLimitMinutes,
+          startTime,
+          deadline,
+          waypoints: payload.waypoints || [],
+          status: payload.status || 'PLANNED', // PLANNED | EXECUTING | COMPLETED | DEADLINE_REACHED | ABORTED
+          abortReason: payload.abortReason || null,
+          rtlStatus: payload.rtlStatus || 'IDLE', // IDLE | RETURN_REQUESTED | RETURNING | HOME_REACHED
+          terminalStatus: payload.terminalStatus || 'IN_FLIGHT', // IN_FLIGHT | LANDED | TERMINATED
+          lastUpdated: Date.now()
+        };
+
+        const existingIdx = missions.findIndex(m => m.missionId === missionId);
+        if (existingIdx !== -1) {
+          missions[existingIdx] = { ...missions[existingIdx], ...missionRecord };
+        } else {
+          // If a new active mission is started, mark previous executing missions as aborted
+          if (missionRecord.status === 'EXECUTING') {
+            missions.forEach(m => {
+              if (m.status === 'EXECUTING') m.status = 'ABORTED';
+            });
+          }
+          missions = [missionRecord, ...missions.slice(0, 99)];
+        }
+
+        saveJsonAtomic(MISSIONS_FILE, missions);
+
+        // Broadcast mission update to all connected clients
+        const broadcastMsg = JSON.stringify({
+          type: 'MISSION_STATUS_EVENT',
+          mission: missionRecord,
+          timestamp: Date.now()
+        });
+        for (const browser of browserSockets) {
+          if (browser.readyState === WebSocket.OPEN) {
+            try { browser.send(broadcastMsg, noop); } catch (e) {}
+          }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ success: true, mission: missionRecord }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ success: false, error: 'Invalid mission JSON' }));
+      }
+    });
+    return;
+  }
+
+  // AERORECON: Query Active Mission (Survives GCS Page Refresh)
+  if (parsedUrl.pathname === '/api/missions/active' && req.method === 'GET') {
+    const active = getActiveMission();
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-cache, no-store'
+    });
+
+    if (active) {
+      const now = Date.now();
+      const elapsedSeconds = Math.max(0, Math.floor((now - active.startTime) / 1000));
+      const remainingSeconds = Math.max(0, Math.floor((active.deadline - now) / 1000));
+      res.end(JSON.stringify({
+        success: true,
+        active: true,
+        mission: {
+          ...active,
+          elapsedSeconds,
+          remainingSeconds
+        }
+      }));
+    } else {
+      res.end(JSON.stringify({
+        success: true,
+        active: false,
+        mission: null
+      }));
+    }
+    return;
+  }
+
+  // AERORECON: Query Mission History
+  if (parsedUrl.pathname === '/api/missions' && req.method === 'GET') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-cache, no-store'
+    });
+    res.end(JSON.stringify({
+      success: true,
+      count: missions.length,
+      missions
+    }));
     return;
   }
 
@@ -619,6 +881,34 @@ function handleBrowserConnection(ws) {
     ws.send(initialStatus, noop);
   } catch (e) {}
 
+  // Synchronize recent recon detections if any exist
+  if (reconDetections.length > 0) {
+    try {
+      ws.send(JSON.stringify({
+        type: 'RECON_DETECTIONS_SYNC',
+        detections: reconDetections.slice(0, 20)
+      }), noop);
+    } catch (e) {}
+  }
+
+  // Synchronize active mission if one is in flight
+  const activeMission = getActiveMission();
+  if (activeMission) {
+    try {
+      const now = Date.now();
+      const elapsedSeconds = Math.max(0, Math.floor((now - activeMission.startTime) / 1000));
+      const remainingSeconds = Math.max(0, Math.floor((activeMission.deadline - now) / 1000));
+      ws.send(JSON.stringify({
+        type: 'ACTIVE_MISSION_SYNC',
+        mission: {
+          ...activeMission,
+          elapsedSeconds,
+          remainingSeconds
+        }
+      }), noop);
+    } catch (e) {}
+  }
+
   ws.on('message', (data, isBinary) => {
     if (isBinary) {
       txBytesTotal += data.length;
@@ -631,6 +921,25 @@ function handleBrowserConnection(ws) {
       if (connectorSocket && connectorSocket.readyState === WebSocket.OPEN) {
         connectorSocket.send(data, { binary: true, mask: false }, noop);
       }
+    } else {
+      // JSON message from browser client
+      try {
+        const text = data.toString();
+        const msg = JSON.parse(text);
+        if (msg.type === 'RECON_DETECTION_BROADCAST' && msg.detection) {
+          reconDetections = [msg.detection, ...reconDetections.slice(0, MAX_RECON_DETECTIONS - 1)];
+          const broadcastMsg = JSON.stringify({
+            type: 'RECON_DETECTION_EVENT',
+            detection: msg.detection,
+            timestamp: Date.now()
+          });
+          for (const client of browserSockets) {
+            if (client !== ws && client.readyState === WebSocket.OPEN) {
+              try { client.send(broadcastMsg, noop); } catch (e) {}
+            }
+          }
+        }
+      } catch (e) {}
     }
   });
 
@@ -694,6 +1003,34 @@ if (PING_TARGET_URL && !process.env.DISABLE_KEEP_ALIVE) {
   }, 240000); // Every 4 minutes (Render sleep threshold is 15 minutes)
   keepAliveInterval.unref();
 }
+
+// AERORECON Mission Deadline Watchdog (Enforced server-side every second)
+const missionDeadlineTimer = setInterval(() => {
+  const active = getActiveMission();
+  if (active && active.status === 'EXECUTING' && active.deadline && Date.now() >= active.deadline) {
+    active.status = 'DEADLINE_REACHED';
+    active.rtlStatus = 'DEADLINE_RETURN_INITIATED';
+    active.deadlineReachedTime = Date.now();
+    saveJsonAtomic(MISSIONS_FILE, missions);
+
+    console.warn(`[MISSION DEADLINE] Mission ${active.missionId} reached deadline (${active.timeLimitMinutes}m). Initiating return-to-launch.`);
+
+    const deadlineNotice = JSON.stringify({
+      type: 'MISSION_DEADLINE_EVENT',
+      missionId: active.missionId,
+      status: active.status,
+      rtlStatus: active.rtlStatus,
+      timestamp: Date.now()
+    });
+
+    for (const browser of browserSockets) {
+      if (browser.readyState === WebSocket.OPEN) {
+        try { browser.send(deadlineNotice, noop); } catch (e) {}
+      }
+    }
+  }
+}, 1000);
+missionDeadlineTimer.unref();
 
 server.listen(PORT, () => {
   console.log(`=======================================================`);

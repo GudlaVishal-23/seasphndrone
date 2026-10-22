@@ -1,22 +1,26 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  Calendar,
-  Send,
-  BarChart3,
-  FileText,
   Satellite,
   Gamepad2,
   Battery,
   Crosshair,
-  Smartphone,
   Settings,
   LogOut,
+  Play,
+  Loader2,
+  Wifi,
+  Radio,
+  CheckCircle2,
+  AlertTriangle
 } from 'lucide-react';
 import { DashboardTelemetryData } from '../../hooks/useDashboardTelemetry';
 import { AppRole } from '../../types/mission';
+import { gcsConnectionService, GCSConnectionState } from '../../services/gcsConnectionService';
 
 interface HeaderProps {
   telemetry: DashboardTelemetryData;
+  missionMode?: 'MANUAL' | 'AUTONOMOUS';
+  onModeChange?: (mode: 'MANUAL' | 'AUTONOMOUS') => void;
   activeTab?: string;
   onTabChange?: (tab: string) => void;
   onOpenSettings?: () => void;
@@ -24,12 +28,13 @@ interface HeaderProps {
   onArmClick?: () => void;
   onToggleRC?: () => void;
   rcOverrideEnabled?: boolean;
-  onSwitchRole?: (role: AppRole) => void;
   currentRole?: AppRole;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   telemetry,
+  missionMode = 'MANUAL',
+  onModeChange,
   activeTab = 'Fly',
   onTabChange,
   onOpenSettings,
@@ -37,17 +42,160 @@ export const Header: React.FC<HeaderProps> = ({
   onArmClick,
   onToggleRC,
   rcOverrideEnabled = true,
-  onSwitchRole,
   currentRole = 'GROUND_STATION',
 }) => {
   const isArmed = telemetry.isArmed;
+  const [connState, setConnState] = useState<GCSConnectionState>(() => gcsConnectionService.getState());
+
+  useEffect(() => {
+    const unsub = gcsConnectionService.subscribe((st) => {
+      setConnState(st);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleStartConnections = async () => {
+    await gcsConnectionService.start();
+  };
+
+  // Helper styles for Wi-Fi Indicator (Connected / Connecting / Disconnected)
+  const getWifiBadgeConfig = () => {
+    if (!connState.isStarted) {
+      return {
+        bg: 'bg-[#161B22] border-[var(--uav-card-border)] text-slate-400',
+        dot: 'bg-slate-500',
+        label: 'Wi-Fi: Disconnected',
+        pulse: false
+      };
+    }
+    switch (connState.wifiStatus) {
+      case 'VERIFIED':
+        return {
+          bg: 'bg-[#0f291e] border-[#1b4d36] text-[#22C55E]',
+          dot: 'bg-[#22C55E]',
+          label: 'Wi-Fi: Connected',
+          pulse: true
+        };
+      case 'CONNECTING':
+        return {
+          bg: 'bg-[#2d2208] border-[#785412] text-amber-300',
+          dot: 'bg-amber-400',
+          label: 'Wi-Fi: Connecting',
+          pulse: true
+        };
+      case 'FAILED':
+      default:
+        return {
+          bg: 'bg-[#3b1212] border-[#7f1d1d] text-rose-300',
+          dot: 'bg-rose-500',
+          label: 'Wi-Fi: Disconnected',
+          pulse: false
+        };
+    }
+  };
+
+  // Helper styles for MAVLink Indicator (Connected / Connecting / Disconnected)
+  const getMavlinkBadgeConfig = () => {
+    if (!connState.isStarted) {
+      return {
+        bg: 'bg-[#161B22] border-[var(--uav-card-border)] text-slate-400',
+        dot: 'bg-slate-500',
+        label: 'MAVLink: Disconnected',
+        pulse: false
+      };
+    }
+    switch (connState.mavlinkStatus) {
+      case 'ACTIVE':
+        return {
+          bg: 'bg-[#0f291e] border-[#1b4d36] text-[#22C55E]',
+          dot: 'bg-[#22C55E]',
+          label: 'MAVLink: Connected',
+          pulse: true
+        };
+      case 'CONNECTING':
+        return {
+          bg: 'bg-[#2d2208] border-[#785412] text-amber-300',
+          dot: 'bg-amber-400',
+          label: 'MAVLink: Connecting',
+          pulse: true
+        };
+      case 'DISCONNECTED':
+      default:
+        return {
+          bg: 'bg-[#3b1212] border-[#7f1d1d] text-rose-300',
+          dot: 'bg-rose-500',
+          label: 'MAVLink: Disconnected',
+          pulse: false
+        };
+    }
+  };
+
+  // Helper styles for GPS Indicator (GPS Fix Valid / Acquiring GPS / GPS Unavailable)
+  const getGpsBadgeConfig = () => {
+    if (!connState.isStarted) {
+      return {
+        bg: 'bg-[#161B22] border-[var(--uav-card-border)] text-slate-400',
+        dot: 'bg-slate-500',
+        label: 'GPS: GPS Unavailable',
+        pulse: false
+      };
+    }
+    switch (connState.gpsStatus) {
+      case 'LOCKED':
+        return {
+          bg: 'bg-[#0f291e] border-[#1b4d36] text-[#22C55E]',
+          dot: 'bg-[#22C55E]',
+          label: `GPS: GPS Fix Valid (${connState.satellites} Sats)`,
+          pulse: false
+        };
+      case 'ACQUIRING':
+        return {
+          bg: 'bg-[#2d2208] border-[#785412] text-amber-300',
+          dot: 'bg-amber-400',
+          label: `GPS: Acquiring GPS (${connState.satellites} Sats)`,
+          pulse: true
+        };
+      case 'NO_FIX':
+      default:
+        return {
+          bg: 'bg-[#3b1212] border-[#7f1d1d] text-rose-300',
+          dot: 'bg-rose-500',
+          label: 'GPS: GPS Unavailable',
+          pulse: false
+        };
+    }
+  };
+
+  const wifiConfig = getWifiBadgeConfig();
+  const mavlinkConfig = getMavlinkBadgeConfig();
+  const gpsConfig = getGpsBadgeConfig();
+
+  // Short status diagnostic string if Wi-Fi is connected but telemetry or GPS is not ready:
+  // e.g. "Wi-Fi Connected | MAVLink Disconnected | GPS Acquiring"
+  const isWifiConnected = connState.isStarted && connState.wifiStatus === 'VERIFIED';
+  const isMavlinkConnected = connState.isStarted && connState.mavlinkStatus === 'ACTIVE';
+  const isGpsLocked = connState.isStarted && connState.gpsStatus === 'LOCKED';
+  const showDiagnosticMessage = isWifiConnected && (!isMavlinkConnected || !isGpsLocked);
+
+  const diagnosticWifiText = 'Wi-Fi Connected';
+  const diagnosticMavText = connState.mavlinkStatus === 'ACTIVE'
+    ? 'MAVLink Connected'
+    : connState.mavlinkStatus === 'CONNECTING'
+    ? 'MAVLink Connecting'
+    : 'MAVLink Disconnected';
+  const diagnosticGpsText = connState.gpsStatus === 'LOCKED'
+    ? 'GPS Fix Valid'
+    : connState.gpsStatus === 'ACQUIRING'
+    ? 'GPS Acquiring'
+    : 'GPS Unavailable';
+  const shortDiagnosticString = `${diagnosticWifiText} | ${diagnosticMavText} | ${diagnosticGpsText}`;
 
   return (
-    <header className="h-[65px] w-full px-3 bg-[var(--uav-header)] border-b border-[var(--uav-card-border)] flex items-center justify-between select-none shrink-0 z-40">
-      {/* 1. Left: Brand & Wordmark + Role Mode Switcher */}
-      <div className="flex items-center gap-3">
+    <header className="h-[68px] w-full px-3 sm:px-4 bg-[var(--uav-header)] border-b border-[var(--uav-card-border)] flex items-center justify-between select-none shrink-0 z-40 shadow-sm gap-2">
+      {/* 1. Left: Brand, Wordmark & Mode Tabs */}
+      <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
         {/* Custom Quadcopter Glyph */}
-        <div className="w-8 h-8 rounded-[8px] bg-[#161B22] border border-[#262C36] flex items-center justify-center text-emerald-400">
+        <div className="w-8 h-8 rounded-[8px] bg-[#161B22] border border-[#262C36] flex items-center justify-center text-emerald-400 shrink-0">
           <svg
             width="20"
             height="20"
@@ -72,69 +220,137 @@ export const Header: React.FC<HeaderProps> = ({
 
         <div className="flex flex-col justify-center">
           <div className="flex items-center gap-2">
-            <span className="font-orbitron font-black text-[17px] tracking-[0.14em] text-white leading-none text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-200 to-amber-300">
-              SKYCON
+            <span className="font-orbitron font-black text-[16px] sm:text-[17px] tracking-[0.14em] text-white leading-none text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-200 to-amber-300">
+              AERORECON
             </span>
-            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-400/30 text-[9px] font-mono font-bold text-emerald-300 tracking-wider">
+            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-400/30 text-[9px] font-mono font-bold text-emerald-300 tracking-wider hidden md:inline-block">
               TACTICAL GCS
             </span>
           </div>
-          <span className="text-[10px] font-mono text-[var(--uav-muted)] tracking-wider mt-0.5">
+          <span className="text-[10px] font-mono text-[var(--uav-muted)] tracking-wider mt-0.5 hidden md:block">
             SAE INDIA ADDC 2026 • AUTONOMOUS RESCUE SYSTEM
           </span>
         </div>
 
-        {/* Dedicated Operational Role Switcher (Separating Ground Station & Field Runner) */}
-        {onSwitchRole && (
-          <div className="hidden sm:flex items-center ml-2 rounded-[8px] border border-[var(--uav-card-border)] bg-[#0D1117] p-[2px] gap-[2px]">
-            <div
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[11px] font-sans font-bold bg-[#10B981] text-black shadow-sm cursor-default"
-              title="Ground Station Cockpit Active"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-black animate-pulse" />
-              <span>GROUND STATION</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => onSwitchRole('RUNNER')}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[11px] font-sans font-medium text-slate-400 hover:text-emerald-300 hover:bg-[#21262D] transition cursor-pointer"
-              title="Switch to Dedicated Field Runner Unit"
-            >
-              <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
-              <span>FIELD RUNNER</span>
-            </button>
+        {/* Section 3: TWO PRIMARY MISSION MODES (MANUAL vs AUTONOMOUS) */}
+        <div className="flex items-center bg-[#11161F] p-1 rounded-lg border border-[var(--uav-card-border)] ml-1 sm:ml-2">
+          <button
+            type="button"
+            onClick={() => onModeChange?.('MANUAL')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-[6px] text-[11px] font-bold font-sans tracking-wide transition cursor-pointer ${
+              missionMode === 'MANUAL'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white hover:bg-[#161B22]'
+            }`}
+            title="Manual Mission Planning: Draw and customize search path on map"
+          >
+            <span>🧭</span>
+            <span>MANUAL</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onModeChange?.('AUTONOMOUS')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-[6px] text-[11px] font-bold font-sans tracking-wide transition cursor-pointer ${
+              missionMode === 'AUTONOMOUS'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white hover:bg-[#161B22]'
+            }`}
+            title="Autonomous Search Mission: Generate search mission from altitude, radius, and algorithm"
+          >
+            <span>🤖</span>
+            <span>AUTONOMOUS</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 2. Center: START Button, Indicators & Short Diagnostic Status */}
+      <div className="flex flex-col items-center justify-center gap-1 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* START BUTTON: Operator initiates connection verification workflow */}
+          <button
+            type="button"
+            onClick={handleStartConnections}
+            disabled={connState.isInitializing}
+            title={
+              connState.isStarted
+                ? 'Re-verify connections (Wi-Fi, MAVLink, Pixhawk GPS)'
+                : 'Start GCS: Initialize and verify Wi-Fi, MAVLink, and Pixhawk GPS connections'
+            }
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[11px] font-bold font-sans tracking-wide transition shadow-sm cursor-pointer ${
+              connState.isInitializing
+                ? 'bg-amber-600/80 text-white cursor-wait'
+                : connState.isStarted
+                ? 'bg-[#161B22] border border-emerald-500/50 text-emerald-400 hover:bg-[#21262D]'
+                : 'bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white shadow-emerald-950/50'
+            }`}
+          >
+            {connState.isInitializing ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                <span>INITIALIZING...</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>{connState.isStarted ? 'RE-VERIFY' : 'START'}</span>
+              </>
+            )}
+          </button>
+
+          {/* Indicator A: Wi-Fi / Network Status */}
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border text-[10px] sm:text-[11px] font-mono transition-colors ${wifiConfig.bg}`}
+            title={
+              !connState.isStarted
+                ? 'Wi-Fi: Disconnected. Click START to initialize.'
+                : `Network Connectivity: ${connState.wifiStatus}`
+            }
+          >
+            <Wifi className="w-3.5 h-3.5 shrink-0" />
+            <span className={`w-1.5 h-1.5 rounded-full ${wifiConfig.dot} ${wifiConfig.pulse ? 'animate-pulse' : ''}`} />
+            <span className="font-semibold">{wifiConfig.label}</span>
+          </div>
+
+          {/* Indicator B: MAVLink Connection Status */}
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border text-[10px] sm:text-[11px] font-mono transition-colors ${mavlinkConfig.bg}`}
+            title={
+              !connState.isStarted
+                ? 'MAVLink: Disconnected. Click START to connect.'
+                : `MAVLink Telemetry Bridge: ${connState.mavlinkStatus}`
+            }
+          >
+            <Radio className="w-3.5 h-3.5 shrink-0" />
+            <span className={`w-1.5 h-1.5 rounded-full ${mavlinkConfig.dot} ${mavlinkConfig.pulse ? 'animate-pulse' : ''}`} />
+            <span className="font-semibold">{mavlinkConfig.label}</span>
+          </div>
+
+          {/* Indicator C: Pixhawk GPS / Satellites Status */}
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border text-[10px] sm:text-[11px] font-mono transition-colors ${gpsConfig.bg}`}
+            title={
+              !connState.isStarted
+                ? 'GPS: GPS Unavailable. Click START to monitor Pixhawk GPS.'
+                : `Pixhawk GPS Fix: ${connState.gpsFixType} (${connState.satellites} Sats, HDOP ${connState.hdop})`
+            }
+          >
+            <Satellite className="w-3.5 h-3.5 shrink-0" />
+            <span className={`w-1.5 h-1.5 rounded-full ${gpsConfig.dot} ${gpsConfig.pulse ? 'animate-pulse' : ''}`} />
+            <span className="font-semibold">{gpsConfig.label}</span>
+          </div>
+        </div>
+
+        {/* Short Status Message Pill when Wi-Fi is connected but telemetry or GPS is not ready */}
+        {showDiagnosticMessage && (
+          <div className="flex items-center gap-1.5 text-[10px] font-mono text-amber-300 bg-amber-950/60 border border-amber-600/40 px-2 py-0.5 rounded animate-in fade-in">
+            <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+            <span className="font-semibold tracking-tight">{shortDiagnosticString}</span>
           </div>
         )}
       </div>
 
-      {/* 2. Center: Segmented Navigation Group (Streamlined: Plan, Fly, Logs) */}
-      <nav aria-label="Main Navigation" className="flex items-center rounded-[8px] border border-[var(--uav-card-border)] bg-[#0D1117] p-[2px] gap-[2px]">
-        {[
-          { id: 'Plan', label: 'Plan', icon: <Calendar className="w-3.5 h-3.5" /> },
-          { id: 'Fly', label: 'Fly', icon: <Send className="w-3.5 h-3.5" /> },
-          { id: 'Logs', label: 'Logs', icon: <FileText className="w-3.5 h-3.5" /> },
-        ].map((tab) => {
-          const isActive = tab.id === activeTab;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => onTabChange?.(tab.id)}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-[6px] text-[12px] font-sans transition-all cursor-pointer ${
-                isActive
-                  ? 'bg-[#10B981] text-black font-bold'
-                  : 'text-[var(--uav-muted)] hover:text-[var(--uav-text)] hover:bg-[#21262D]'
-              }`}
-            >
-              <span>{tab.icon}</span>
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
-      </nav>
-
-      {/* 3. Right: Status Pills & Settings */}
-      <div className="flex items-center gap-2">
+      {/* 3. Right: Vehicle State Pills & Settings */}
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
         {/* Arm State Pill */}
         <button
           type="button"
@@ -154,16 +370,6 @@ export const Header: React.FC<HeaderProps> = ({
           <span>{isArmed ? 'ARMED' : 'DISARMED'}</span>
         </button>
 
-        {/* Satellites & HDOP Pill */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border border-[var(--uav-card-border)] bg-[#161B22] text-[11px] font-mono text-[var(--uav-text)]">
-          <Satellite className="w-3.5 h-3.5 text-[var(--uav-muted)]" />
-          <span>
-            {telemetry.isFixture
-              ? '0 (99)'
-              : `${telemetry.satellites} (${Math.round(telemetry.hdop)})`}
-          </span>
-        </div>
-
         {/* RC Gamepad Link Toggle Button */}
         <button
           type="button"
@@ -173,7 +379,7 @@ export const Header: React.FC<HeaderProps> = ({
               ? 'RC Manual Control: ENABLED (Click to Disable RC Override)'
               : 'RC Manual Control: DISABLED (Click to Enable RC Override)'
           }
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border text-[11px] font-mono transition-all active:scale-95 cursor-pointer ${
+          className={`hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border text-[11px] font-mono transition-all active:scale-95 cursor-pointer ${
             rcOverrideEnabled
               ? 'border-[#1b4d36] bg-[#0c2419] text-[#22C55E] hover:bg-[#123826]'
               : 'border-[var(--uav-card-border)] bg-[#161B22] text-slate-400 hover:text-white hover:bg-[#21262D]'
@@ -190,7 +396,7 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         {/* Battery Percent & Voltage Pill */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border border-[var(--uav-card-border)] bg-[#161B22] text-[11px] font-mono">
+        <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border border-[var(--uav-card-border)] bg-[#161B22] text-[11px] font-mono">
           <Battery className="w-3.5 h-3.5 text-[var(--uav-amber)]" />
           <span className="text-[var(--uav-amber)] font-bold">
             {telemetry.batteryPercent}%
@@ -198,23 +404,6 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="text-[var(--uav-muted)]">
             {telemetry.batteryVoltage.toFixed(1)}V
           </span>
-        </div>
-
-        {/* GPS Satellite Count & Fix Status Pill */}
-        <div
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border text-[11px] font-mono transition-colors ${
-            telemetry.isGpsValid
-              ? 'border-[#1b4d36] bg-[#0c2419] text-[#22C55E]'
-              : 'border-rose-900/60 bg-rose-950/40 text-rose-400'
-          }`}
-          title={
-            telemetry.isGpsValid
-              ? `Pixhawk GPS Locked (${telemetry.gpsFixType.replace('_', ' ')}): ${telemetry.satellites} Sats visible, HDOP ${telemetry.hdop.toFixed(1)}`
-              : 'Pixhawk GPS Signal Unavailable - Awaiting Satellites / 3D Lock'
-          }
-        >
-          <Crosshair className={`w-3.5 h-3.5 ${telemetry.isGpsValid ? 'text-[#22C55E]' : 'text-rose-400 animate-pulse'}`} />
-          <span>{telemetry.isGpsValid ? `GPS: ${telemetry.satellites} Sats` : 'GPS: NO FIX'}</span>
         </div>
 
         {/* Settings Button */}
@@ -244,3 +433,5 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
+
+export default Header;

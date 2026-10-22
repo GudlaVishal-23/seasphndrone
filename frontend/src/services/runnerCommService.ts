@@ -79,20 +79,23 @@ class RunnerCommService {
   // Drone Dispatches QR to Runner (Direct Local Link)
   public sendQRToRunner(
     qrCode: string,
-    missionId: string,
+    missionId: string = 'MISSION_RESCUE_01',
     altitudeMeters: number = 25,
     droneBattery: number = 88,
+    extraMeta?: Partial<DroneQRDispatchPayload>,
     onAckReceived?: (ack: RunnerAckPayload) => void
   ): string {
-    const messageId = `MSG_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+    const messageId = extraMeta?.detectionId || `MSG_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
     const payload: DroneQRDispatchPayload = {
       type: 'QR_DISPATCH',
       missionId,
       messageId,
+      detectionId: extraMeta?.detectionId || messageId,
       qrCode,
       timestamp: Date.now(),
       altitudeMeters,
-      droneBatteryPercent: droneBattery
+      droneBatteryPercent: droneBattery,
+      ...extraMeta
     };
 
     this.pendingPayload = payload;
@@ -153,6 +156,8 @@ class RunnerCommService {
         // trigger storage event across windows/tabs
         window.localStorage.setItem('SAE_P2P_SYNC_PACKET', JSON.stringify({ ...data, _ts: Math.random() }));
       }
+      // Notify in-process listeners immediately for local subscribers / test runners
+      this.handleIncomingMessage(data);
     } catch (e) {
       console.warn('Broadcast send error', e);
     }

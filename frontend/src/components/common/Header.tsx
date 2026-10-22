@@ -119,64 +119,29 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* "Widgets" Menu */}
+        {/* "Tools" Menu */}
         <div className="relative group">
           <button className="px-2 py-1 rounded text-slate-300 hover:text-white hover:bg-[#1e1f24] font-sans text-xs font-semibold flex items-center gap-1 transition cursor-pointer">
-            <span>Widgets</span>
+            <span>Tools</span>
             <span className="material-symbols-outlined text-[13px] text-slate-500">expand_more</span>
           </button>
-          <div className="hidden group-hover:flex flex-col absolute top-full left-0 bg-[#18191d] border border-[#303138] rounded-lg shadow-2xl py-1 min-w-[160px] z-50">
-            <button onClick={() => authService.switchRole('GROUND_STATION')} className="px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-[#2563eb] hover:text-white transition">
-              Ground Station
+          <div className="hidden group-hover:flex flex-col absolute top-full left-0 bg-[#18191d] border border-[#303138] rounded-lg shadow-2xl py-1 min-w-[140px] z-50">
+            <button onClick={onOpenHistory} className="px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-[#2563eb] hover:text-white transition">
+              Blackbox Logs
             </button>
-            <button onClick={() => authService.switchRole('DRONE')} className="px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-[#2563eb] hover:text-white transition">
-              Drone Onboard Cam
-            </button>
-            <button onClick={() => authService.switchRole('RUNNER')} className="px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-[#2563eb] hover:text-white transition">
-              Runner P2P Link
-            </button>
-            <button onClick={() => authService.switchRole('TESTBENCH')} className="px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-[#2563eb] hover:text-white transition">
-              SITL Testbench
+            <button onClick={() => setShowTeamInfo(true)} className="px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-[#2563eb] hover:text-white transition">
+              About Skycon
             </button>
           </div>
         </div>
       </div>
 
-      {/* Center: Segmented Navigation Pills: Plan / Fly / Analyze (Matching Image 1) */}
-      <nav className="flex items-center bg-[#141518] p-1 rounded-xl border border-[#2a2b30] shadow-inner gap-1">
-        {/* Plan Mode */}
-        <button
-          type="button"
-          onClick={() => authService.switchRole('GROUND_STATION')}
-          className="px-3.5 py-1 rounded-lg font-sans text-xs font-semibold text-slate-400 hover:text-white hover:bg-[#1f2025] flex items-center gap-1.5 transition cursor-pointer"
-          title="Mission Planning & Waypoint Corridors"
-        >
-          <span className="material-symbols-outlined text-[15px]">edit_calendar</span>
-          <span>Plan</span>
-        </button>
-
-        {/* Fly Mode (Active in Image 1 with Dark Highlighted Pill) */}
-        <button
-          type="button"
-          onClick={() => authService.switchRole('GROUND_STATION')}
-          className="px-4 py-1 rounded-lg font-sans text-xs font-bold bg-[#222329] text-white border border-[#383a42] shadow-sm flex items-center gap-1.5 transition cursor-pointer"
-          title="Flight Cockpit & Tactical Execution"
-        >
-          <span className="material-symbols-outlined text-[16px] text-[#38bdf8]">flight</span>
-          <span>Fly</span>
-        </button>
-
-        {/* Analyze Mode */}
-        <button
-          type="button"
-          onClick={onOpenHistory}
-          className="px-3.5 py-1 rounded-lg font-sans text-xs font-semibold text-slate-400 hover:text-white hover:bg-[#1f2025] flex items-center gap-1.5 transition cursor-pointer"
-          title="Flight Logs, Telemetry & Sensor Analytics"
-        >
-          <span className="material-symbols-outlined text-[15px]">analytics</span>
-          <span>Analyze</span>
-        </button>
-      </nav>
+      {/* Center: Clean Tactical Cockpit Designation */}
+      <div className="flex items-center gap-2">
+        <span className="font-orbitron font-extrabold text-[12px] tracking-widest text-slate-200 uppercase">
+          AERORECON MISSION INTERFACE
+        </span>
+      </div>
 
       {/* Right: Live Telemetry Badges & Instrument Controls */}
       <div className="flex items-center gap-1.5 shrink-0 font-mono text-[11px]">

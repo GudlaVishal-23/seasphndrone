@@ -151,6 +151,19 @@ export class GroundStationMissionService {
     return this.activeDrawingTool;
   }
 
+  public updateMissionAltitude(alt: number): void {
+    if (this.currentMission) {
+      this.currentMission.altitude = alt;
+      this.currentMission.waypoints.forEach((wp) => {
+        if (wp.action !== 'RTL' && wp.action !== 'LAND') {
+          wp.altitude = alt;
+        }
+      });
+      this.notify();
+    }
+    missionEngine.updateSearchAltitude(alt);
+  }
+
   public subscribeDrawingTool(fn: (tool: MissionDrawingTool) => void): () => void {
     this.toolSubscribers.add(fn);
     fn(this.activeDrawingTool);
@@ -639,6 +652,191 @@ export class GroundStationMissionService {
     this.currentMission = mission;
     this.notify();
     return mission;
+  }
+
+  /**
+   * AERORECON Section 4: MODE B — AUTONOMOUS SEARCH MISSION
+   * Generates a validated, executable search mission from 4 configurable values:
+   * 1. Search Altitude: default 10m (safe envelope 5m–50m)
+   * 2. Search Radius: 5m, 10m, 50m, or custom
+   * 3. Search Algorithm:
+   *    A. Tangential / Circular Search
+   *    B. Spiral Search (Archimedean expanding spiral)
+   * 4. Mission Time Limit: duration in minutes
+   * 
+   * Calculates search distance, return-to-launch distance, and reserves safe return time.
+   */
+  public generateAutonomousSearchMission(
+    center: LatLngPoint,
+    radiusMeters: number = 10,
+    algorithm: 'TANGENTIAL_CIRCULAR' | 'SPIRAL' = 'TANGENTIAL_CIRCULAR',
+    homePoint: HomePoint,
+    altitude: number = 10,
+    timeLimitMinutes: number = 10,
+    speed: number = 4.0
+  ): {
+    mission: GroundStationMission;
+    searchDuration: number;
+    returnDuration: number;
+    totalDuration: number;
+    isFeasible: boolean;
+    feasibilityReason?: string;
+  } {
+    const validAlt = Math.max(5, Math.min(50, altitude || 10));
+    const validRadius = Math.max(5, Math.min(500, radiusMeters || 10));
+    const validSpeed = Math.max(1, Math.min(10, speed || 4.0));
+
+    const homeLat = homePoint.isSet ? homePoint.latitude : center.lat;
+    const homeLon = homePoint.isSet ? homePoint.longitude : center.lng;
+
+    const waypoints: GroundStationWaypoint[] = [];
+    const boundaryCoords: LatLngPoint[] = [];
+    let cumulativeDistance = 0;
+    let prevLat = homeLat;
+    let prevLng = homeLon;
+
+    // Build outer radius boundary polygon for map visual
+    const boundaryPoints = 32;
+    for (let b = 0; b <= boundaryPoints; b++) {
+      const bAngle = (360 / boundaryPoints) * b;
+      boundaryCoords.push(computeDestination(center.lat, center.lng, validRadius, bAngle));
+    }
+
+    if (algorithm === 'TANGENTIAL_CIRCULAR') {
+      // Algorithm A: Tangential / Circular Search
+      // Entry angle calculated relative to home coordinate
+      const homeBearing = homePoint.isSet
+        ? calculateBearing(homeLat, homeLon, center.lat, center.lng)
+        : 0;
+
+      const circumference = 2 * Math.PI * validRadius;
+      const numWaypoints = Math.max(8, Math.min(24, Math.round(circumference / 12)));
+
+      for (let i = 0; i <= numWaypoints; i++) {
+        const stepAngle = (360 / numWaypoints) * i;
+        const angle = (homeBearing + stepAngle) % 360;
+        const wpPos = computeDestination(center.lat, center.lng, validRadius, angle);
+
+        const legDist = calculateHaversineDistance(prevLat, prevLng, wpPos.lat, wpPos.lng);
+        cumulativeDistance += legDist;
+
+        waypoints.push({
+          id: `TANG_WP_${i + 1}`,
+          index: i + 1,
+          lat: wpPos.lat,
+          lng: wpPos.lng,
+          altitude: validAlt,
+          speed: validSpeed,
+          action: 'ORBIT',
+          name: i === 0 ? 'Tangential Entry' : i === numWaypoints ? 'Orbit Final' : `Circle Pt ${i + 1}`,
+          distanceFromPreviousMeters: Math.round(legDist * 10) / 10,
+        });
+
+        prevLat = wpPos.lat;
+        prevLng = wpPos.lng;
+      }
+    } else {
+      // Algorithm B: Spiral Search
+      // Archimedean expanding spiral starting near centre and expanding outward to validRadius
+      const radialStep = Math.max(4, Math.min(10, validRadius / 4));
+      const loops = Math.max(1, Math.ceil(validRadius / radialStep));
+      const pointsPerLoop = 8;
+      const totalSpiralPoints = loops * pointsPerLoop;
+
+      // Start near center (10% radius or 2m)
+      const startR = Math.min(3, validRadius * 0.2);
+
+      for (let k = 1; k <= totalSpiralPoints; k++) {
+        const fraction = k / totalSpiralPoints;
+        const curRadius = Math.min(validRadius, startR + fraction * (validRadius - startR));
+        const angle = (k * 45) % 360;
+        const wpPos = computeDestination(center.lat, center.lng, curRadius, angle);
+
+        const legDist = calculateHaversineDistance(prevLat, prevLng, wpPos.lat, wpPos.lng);
+        cumulativeDistance += legDist;
+
+        waypoints.push({
+          id: `SPRL_WP_${k}`,
+          index: k,
+          lat: wpPos.lat,
+          lng: wpPos.lng,
+          altitude: validAlt,
+          speed: validSpeed,
+          action: 'NAVIGATE',
+          name: k === 1 ? 'Spiral Origin' : k === totalSpiralPoints ? 'Spiral Boundary' : `Spiral Loop ${Math.ceil(k / 8)}`,
+          distanceFromPreviousMeters: Math.round(legDist * 10) / 10,
+        });
+
+        prevLat = wpPos.lat;
+        prevLng = wpPos.lng;
+      }
+    }
+
+    // Always append final Return To Launch (RTL) waypoint
+    const rtlDist = calculateHaversineDistance(prevLat, prevLng, homeLat, homeLon);
+    cumulativeDistance += rtlDist;
+
+    waypoints.push({
+      id: 'AUTO_RTL',
+      index: waypoints.length + 1,
+      lat: homeLat,
+      lng: homeLon,
+      altitude: validAlt,
+      speed: validSpeed,
+      action: 'RTL',
+      name: 'Return To Launch (RTL)',
+      distanceFromPreviousMeters: Math.round(rtlDist * 10) / 10,
+    });
+
+    // Time calculations
+    const searchDuration = Math.round(
+      ((cumulativeDistance - rtlDist) / validSpeed) + (waypoints.length * 1.2) + (validAlt / 2.0)
+    );
+    const returnDuration = Math.round((rtlDist / (validSpeed * 1.2)) + (validAlt / 1.5) + 30);
+    const totalDuration = searchDuration + returnDuration;
+
+    const timeLimitSeconds = (timeLimitMinutes || 10) * 60;
+    const isFeasible = timeLimitSeconds >= totalDuration;
+    const feasibilityReason = isFeasible
+      ? undefined
+      : `Configured mission time limit (${timeLimitMinutes} min / ${timeLimitSeconds}s) is less than required search (${Math.ceil(searchDuration / 60)} min) + return (${Math.ceil(returnDuration / 60)} min) duration of ${Math.ceil(totalDuration / 60)} minutes.`;
+
+    const mission: GroundStationMission = {
+      id: `MSN_AUTO_${Date.now().toString(36).toUpperCase()}`,
+      homePoint: {
+        latitude: homeLat,
+        longitude: homeLon,
+        altitude: homePoint.altitude || 0,
+        isSet: homePoint.isSet,
+      },
+      missionType: 'SEARCH',
+      altitude: validAlt,
+      speed: validSpeed,
+      waypoints,
+      totalDistance: Math.round(cumulativeDistance * 10) / 10,
+      estimatedDuration: totalDuration,
+      geometry: {
+        type: 'circle',
+        circleCenter: center,
+        circleRadiusMeters: validRadius,
+        areaSquareMeters: Math.round(Math.PI * validRadius * validRadius),
+        coordinates: boundaryCoords,
+      },
+      isUploaded: false,
+      createdAt: Date.now(),
+    };
+
+    this.currentMission = mission;
+    this.notify();
+
+    return {
+      mission,
+      searchDuration,
+      returnDuration,
+      totalDuration,
+      isFeasible,
+      feasibilityReason,
+    };
   }
 
   /**

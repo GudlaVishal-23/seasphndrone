@@ -1,1011 +1,557 @@
-import React, { useState, useEffect } from 'react';
-import { DroneTelemetry, DecodedQRData, MissionState, FlightCommandAuthority } from '../../types/mission';
+import React, { useState, useEffect, useRef } from 'react';
+import { DroneTelemetry, DecodedQRData, MissionState } from '../../types/mission';
 import { PixhawkConnectionState } from '../../types/mavlink';
 import { RunnerLinkState } from '../../types/runner';
 import { mavlinkService } from '../../services/mavlinkService';
-import { missionEngine } from '../../services/missionEngine';
-import { ipCameraService, IpCameraStatus } from '../../services/ipCameraService';
-import { CameraVisionHUD } from './CameraVisionHUD';
-import { QRResultCard } from './QRResultCard';
-import { MissionTimer } from '../common/MissionTimer';
-import { AutonomousMissionStatusBar } from '../Mission/AutonomousMissionStatusBar';
-import { AutonomousMissionConfigModal } from '../Mission/AutonomousMissionConfigModal';
-import { DisarmSafetyConfirmModal } from '../common/DisarmSafetyConfirmModal';
-import { BatteryMonitorCard } from '../common/BatteryMonitorCard';
-import { GoogleMapGroundStation } from '../GroundStation/GoogleMapGroundStation';
-import { PixhawkConnectionCard } from './PixhawkConnectionCard';
+import { visionService } from '../../services/visionService';
+import { reconDetectionService } from '../../services/reconDetectionService';
 import {
-  Play,
-  RotateCcw,
-  AlertTriangle,
-  CheckCircle2,
-  ShieldCheck,
-  Zap,
-  Cpu,
+  QRDetectionRecord,
+  DroneCoreQRStatus
+} from '../../types/recon';
+import {
   Camera,
-  Map,
-  Navigation,
-  Battery,
-  Wifi,
-  Radio,
-  Usb,
+  Target,
+  CheckCircle2,
+  AlertTriangle,
+  RotateCcw,
   RefreshCw,
-  X,
-  AlertOctagon,
-  Activity,
-  Power,
-  PowerOff,
-  PlaneTakeoff,
-  Terminal,
-  HelpCircle,
-  Smartphone,
-  Check,
-  Shield,
-  Loader2,
-  CheckCircle,
+  MapPin,
+  VideoOff,
   Settings,
-  Gamepad2,
-  ArrowUp,
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  Hand,
-  Compass,
-  Video
+  Maximize,
+  Minimize,
+  X
 } from 'lucide-react';
 
 interface DroneDashboardProps {
   telemetry: DroneTelemetry;
   missionState: MissionState;
-  remainingSeconds: number;
-  elapsedSeconds: number;
+  remainingSeconds?: number;
+  elapsedSeconds?: number;
   decodedQR: DecodedQRData | null;
   pixhawkState: PixhawkConnectionState;
-  runnerLink: RunnerLinkState;
-  runnerAckReceived: boolean;
+  runnerLink?: RunnerLinkState;
+  runnerAckReceived?: boolean;
   runnerAckLatencyMs?: number;
-  onQRDetected: (data: DecodedQRData) => void;
-  onEmergencyRTL: () => void;
+  onQRDetected?: (data: DecodedQRData) => void;
+  onEmergencyRTL?: () => void;
+  className?: string;
 }
 
 export const DroneDashboard: React.FC<DroneDashboardProps> = ({
   telemetry,
   missionState,
-  remainingSeconds,
-  elapsedSeconds,
   decodedQR,
   pixhawkState,
-  runnerLink,
-  runnerAckReceived,
-  runnerAckLatencyMs,
   onQRDetected,
-  onEmergencyRTL
+  onEmergencyRTL,
+  className = ''
 }) => {
-  const [preArmError, setPreArmError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Real Arm / Disarm & Mission Button States
-  const [isArmingInProgress, setIsArmingInProgress] = useState<boolean>(false);
-  const [isDisarmingInProgress, setIsDisarmingInProgress] = useState<boolean>(false);
-  const [armError, setArmError] = useState<string | null>(null);
-  const [isConfigModalOpen, setIsConfigModalOpen] = useState<boolean>(false);
-  const [forceBypassChecks, setForceBypassChecks] = useState<boolean>(() => missionEngine.getForceBypassChecks());
-
-  // RTL Confirmation Modal State
-  const [isRtlConfirmOpen, setIsRtlConfirmOpen] = useState<boolean>(false);
-  // Disarm Safety Warning Modal State (mid-air protection)
-  const [isDisarmSafetyModalOpen, setIsDisarmSafetyModalOpen] = useState<boolean>(false);
-  // Primary View toggle: Camera Vision vs Tactical Google Map
-  const [primaryView, setPrimaryView] = useState<'CAMERA' | 'MAP'>('CAMERA');
-
-  // Manual Backup Mode & Authority
-  const [commandAuthority, setCommandAuthority] = useState<FlightCommandAuthority>(missionEngine.getCommandAuthority());
-  const [isManualDrawerOpen, setIsManualDrawerOpen] = useState<boolean>(false);
-  const [manualSwitchError, setManualSwitchError] = useState<string | null>(null);
-  // IP Camera Stream state (Coordinated with Ground Station)
-  const [isIpCameraOn, setIsIpCameraOn] = useState<boolean>(() => ipCameraService.isIpCameraEnabled());
-  const [cameraStatus, setCameraStatus] = useState<IpCameraStatus>(() => ipCameraService.getStatus());
-  const [streamUrl, setStreamUrl] = useState<string>(() => ipCameraService.getStreamUrl());
-  const [isEditingStreamUrl, setIsEditingStreamUrl] = useState<boolean>(false);
-  const [streamUrlDraft, setStreamUrlDraft] = useState<string>(streamUrl);
+  // Fullscreen and Settings State
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
   useEffect(() => {
-    const unsubToggle = ipCameraService.subscribeToggle(setIsIpCameraOn);
-    const unsubStatus = ipCameraService.subscribeStatus(setCameraStatus);
-    const unsubUrl = ipCameraService.subscribeUrl((url) => {
-      setStreamUrl(url);
-      setStreamUrlDraft(url);
-    });
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => {
-      unsubToggle();
-      unsubStatus();
-      unsubUrl();
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
   }, []);
 
-  const homePoint = mavlinkService.getHomePoint();
-  const missionValidation = missionEngine.validateMission();
-  const missionConfig = missionEngine.getMissionConfig();
-
-  const isScanning =
-    missionState === 'SEARCHING' ||
-    missionState === 'OBJECT_DETECTED' ||
-    missionState === 'BOX_DETECTED' ||
-    missionState === 'INSPECTING' ||
-    missionState === 'QR_DETECTION' ||
-    missionState === 'QR_DETECTED' ||
-    missionState === 'QR_SCANNING';
-
-  // Live Telemetry & Pre-Arm State
-  const isGpsReady = telemetry.gps.isLocked || (telemetry.gps.satellites >= 6 && telemetry.gps.fixType !== 'NO_GPS' && telemetry.gps.fixType !== 'NO_FIX');
-  const isTelemetryReceiving = pixhawkState.isConnected && pixhawkState.isReceivingTelemetry;
-  const isArmed = telemetry.isArmed;
-  const isMissionRunning =
-    missionState === 'STARTING' ||
-    missionState === 'TAKEOFF' ||
-    missionState === 'CLIMBING' ||
-    missionState === 'CLIMBING_TO_ALTITUDE' ||
-    missionState === 'ALTITUDE_STABILIZING' ||
-    missionState === 'SEARCHING' ||
-    missionState === 'OBJECT_DETECTED' ||
-    missionState === 'INSPECTING' ||
-    missionState === 'QR_SCANNING';
-  const isMissionCompleted = missionState === 'MISSION_COMPLETE' || missionState === 'DATA_CONFIRMED' || missionState === 'LANDED';
-  const isRtlActive = missionState === 'RTL_REQUESTED' || missionState === 'RTL' || missionState === 'RETURNING_HOME' || missionState === 'LANDING';
-  const isMissionAborted =
-    missionState === 'EMERGENCY_RTL' ||
-    missionState === 'MISSION_TIMEOUT' ||
-    missionState === 'CONNECTION_LOST' ||
-    missionState === 'GPS_ERROR' ||
-    missionState === 'CAMERA_ERROR' ||
-    missionState === 'BOUNDARY_ERROR' ||
-    missionState === 'FAILSAFE' ||
-    missionState === 'ERROR';
-
-  useEffect(() => {
-    const unsubAuthority = missionEngine.subscribeAuthority((auth) => {
-      setCommandAuthority(auth);
-    });
-    return () => unsubAuthority();
-  }, []);
-
-  // Watch telemetry and ACK changes to clear in-progress arming state or surface real-time ARM rejections
-  useEffect(() => {
-    if (telemetry.isArmed && isArmingInProgress) {
-      setIsArmingInProgress(false);
-      setArmError(null);
-    }
-    if (!telemetry.isArmed && isDisarmingInProgress) {
-      setIsDisarmingInProgress(false);
-      setArmError(null);
-    }
-    if (isArmingInProgress && !telemetry.isArmed) {
-      const ack = pixhawkState.lastArmCommandAck || pixhawkState.lastCommandAck;
-      if (ack && ack.command === 400 && ack.result !== 0) {
-        setIsArmingInProgress(false);
-        const reason = pixhawkState.preArmFailReason || (pixhawkState.statusHistory && pixhawkState.statusHistory.length > 0 ? pixhawkState.statusHistory[0].text : undefined);
-        const failMsg = `ARM REJECTED by Pixhawk (${ack.resultName || 'FAILED'})${reason ? ` — ${reason}` : ''}`;
-        setArmError(failMsg);
-      } else if (pixhawkState.preArmFailReason) {
-        setIsArmingInProgress(false);
-        setArmError(`ARM BLOCKED: ${pixhawkState.preArmFailReason}`);
-      }
-    }
-  }, [telemetry.isArmed, isArmingInProgress, isDisarmingInProgress, pixhawkState.lastArmCommandAck, pixhawkState.preArmFailReason]);
-
-  // Handler: Explicit Real ARM Command
-  const handleArmClick = async () => {
-    setArmError(null);
-    setPreArmError(null);
-    setIsArmingInProgress(true);
-
+  const toggleFullscreen = async () => {
     try {
-      const res = await mavlinkService.sendArmCommand();
-      if (!res) {
-        setArmError('ARM TRANSMISSION FAILED: Check WebSocket / ESP32 TX Link.');
-        setIsArmingInProgress(false);
-        return;
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (containerRef.current) {
+        await containerRef.current.requestFullscreen();
       }
+    } catch (err) {
+      console.warn('[DRONE FULLSCREEN] Failed to toggle:', err);
+    }
+  };
 
-      setTimeout(() => {
-        if (!mavlinkService.getTelemetry().isArmed) {
-          setIsArmingInProgress(false);
-          const currentPixState = mavlinkService.getConnectionState();
-          const lastAck = currentPixState.lastArmCommandAck || currentPixState.lastCommandAck;
-          const preArmReason = currentPixState.preArmFailReason ||
-            (currentPixState.statusHistory && currentPixState.statusHistory.length > 0 ? currentPixState.statusHistory[0].text : undefined);
+  // AERORECON Drone Core Status (10 Exact Specified States)
+  const [coreStatus, setCoreStatus] = useState<DroneCoreQRStatus>(reconDetectionService.getDroneCoreStatus());
+  const [latestDetection, setLatestDetection] = useState<QRDetectionRecord | null>(reconDetectionService.getLatestDetection());
 
-          if (lastAck && lastAck.command === 400 && lastAck.result !== 0) {
-            let failMsg = `ARM REJECTED (${lastAck.resultName} / Code ${lastAck.result})`;
-            if (preArmReason) {
-              failMsg += ` — ${preArmReason}`;
-            }
-            setArmError(failMsg);
-          } else if (preArmReason) {
-            setArmError(`ARM REJECTED: ${preArmReason}`);
+  // Camera Hardware State
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [cameraErrorMessage, setCameraErrorMessage] = useState<string | null>(null);
+
+  // Active Detection Bounding Box for Live Reticle Overlay
+  const [activeBoundingBox, setActiveBoundingBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  // 1. Camera Initialization (Continuous Scanning with Fixed Wide FOV)
+  useEffect(() => {
+    let isMounted = true;
+
+    const startCamera = async () => {
+      if (!videoRef.current) return;
+      try {
+        const success = await visionService.startCamera(videoRef.current);
+        if (isMounted) {
+          setIsCameraActive(success);
+          if (success) {
+            reconDetectionService.setDroneCoreStatus('SEARCHING FOR QR');
+            setCameraErrorMessage(null);
           } else {
-            setArmError('ARM ACK TIMEOUT (Waiting for vehicle armed confirmation)');
+            reconDetectionService.setDroneCoreStatus('CAMERA ERROR');
+            setCameraErrorMessage('Camera unavailable or permission denied. Check camera access.');
           }
         }
-      }, 4000);
-    } catch (e: any) {
-      setIsArmingInProgress(false);
-      setArmError(`Arm command failed: ${e?.message || e}`);
-    }
-  };
-
-  // Handler: Explicit Real DISARM Command with airborne height check
-  const executeDisarm = async (force: boolean = false) => {
-    setArmError(null);
-    setIsDisarmingInProgress(true);
-    try {
-      await mavlinkService.sendDisarmCommand(force);
-      setTimeout(() => {
-        if (mavlinkService.getTelemetry().isArmed) {
-          setIsDisarmingInProgress(false);
-          setArmError('Disarm command timed out.');
+      } catch (err: any) {
+        if (isMounted) {
+          setIsCameraActive(false);
+          reconDetectionService.setDroneCoreStatus('CAMERA ERROR');
+          setCameraErrorMessage(err?.message || 'Failed to start camera');
         }
-      }, 5000);
-    } catch (e: any) {
-      setIsDisarmingInProgress(false);
-      setArmError(`Disarm failed: ${e?.message || e}`);
-    }
-  };
-
-  const handleDisarmClick = () => {
-    // If airborne (>0.4m), block direct disarm and show warning modal with current altitude
-    if (telemetry.isArmed && telemetry.altitude > 0.4) {
-      setIsDisarmSafetyModalOpen(true);
-      return;
-    }
-    executeDisarm(false);
-  };
-
-  // Handler: Explicit Real START MISSION Command
-  const handleStartMissionClick = () => {
-    setArmError(null);
-    setPreArmError(null);
-
-    if (!forceBypassChecks) {
-      const check = missionEngine.validateMission();
-      if (!check.isValid) {
-        setPreArmError(check.errors.join(' | '));
-        return;
       }
-    }
+    };
 
-    const res = missionEngine.startMission(forceBypassChecks);
-    if (!res) {
-      setArmError('Mission start rejected. Check connection or FC safety switch.');
-    }
-  };
+    startCamera();
 
-  // Handler: Mode Switching (Autonomous <-> Manual Backup)
-  const handleToggleMode = (targetMode: 'AUTONOMOUS' | 'MANUAL') => {
-    setManualSwitchError(null);
-    if (targetMode === 'MANUAL') {
-      const res = missionEngine.switchToManualControl();
-      if (res.success) {
-        setIsManualDrawerOpen(true);
+    const unsubCamera = visionService.subscribeCameraState((state) => {
+      if (isMounted) {
+        setIsCameraActive(state.isActive);
+        if (state.error) {
+          setCameraErrorMessage(state.error);
+          reconDetectionService.setDroneCoreStatus('CAMERA ERROR');
+        }
       }
-    } else {
-      const res = missionEngine.switchToAutonomousControl();
-      if (!res.success && res.errors) {
-        setManualSwitchError(`Cannot switch to Autonomous: ${res.errors.join(' • ')}`);
-        setTimeout(() => setManualSwitchError(null), 5000);
-      } else {
-        setIsManualDrawerOpen(false);
+    });
+
+    return () => {
+      isMounted = false;
+      unsubCamera();
+    };
+  }, []);
+
+  // 2. Subscribe to Recon Detection Service & RTL updates
+  useEffect(() => {
+    const unsubStatus = reconDetectionService.subscribeDroneCoreStatus((status) => {
+      setCoreStatus(status);
+    });
+
+    const unsubDetections = reconDetectionService.subscribeDetections((_list, latest) => {
+      setLatestDetection(latest);
+      if (latest && latest.boundingBox) {
+        setActiveBoundingBox(latest.boundingBox);
+        setTimeout(() => setActiveBoundingBox(null), 2500);
       }
+    });
+
+    // Watch Pixhawk telemetry for RTL flight mode confirmation (Step 7: Confirm RTL)
+    const unsubTelemetry = mavlinkService.subscribeTelemetry((t) => {
+      const mode = (t.flightMode || '').toUpperCase();
+      if (mode === 'RTL') {
+        reconDetectionService.setDroneCoreStatus('RETURNING TO LAUNCH');
+      }
+    });
+
+    return () => {
+      unsubStatus();
+      unsubDetections();
+      unsubTelemetry();
+    };
+  }, []);
+
+  // 3. Forward QR detection events to parent if required
+  useEffect(() => {
+    if (decodedQR && onQRDetected) {
+      onQRDetected(decodedQR);
+    }
+  }, [decodedQR, onQRDetected]);
+
+  // Restart Camera Feed
+  const handleRestartCamera = async () => {
+    setCameraErrorMessage(null);
+    reconDetectionService.setDroneCoreStatus('SEARCHING FOR QR');
+    if (videoRef.current) {
+      const success = await visionService.startCamera(videoRef.current);
+      setIsCameraActive(success);
     }
   };
 
-  const handleConfirmRTL = () => {
-    setIsRtlConfirmOpen(false);
-    missionEngine.triggerEmergencyRTL('Operator Confirmed RTL');
+  // Helper for rendering the 10 exact specified status states
+  const getStatusBadgeConfig = (status: DroneCoreQRStatus) => {
+    switch (status) {
+      case 'RETURNING TO LAUNCH':
+        return {
+          label: 'RETURNING TO LAUNCH',
+          bg: 'bg-rose-950/95',
+          border: 'border-rose-500',
+          text: 'text-rose-100',
+          pulse: true,
+          icon: RotateCcw,
+          hint: 'Pixhawk flight controller executing autonomous return to launch point'
+        };
+      case 'RTL INITIATED':
+        return {
+          label: 'RTL INITIATED',
+          bg: 'bg-red-950/95',
+          border: 'border-red-500',
+          text: 'text-red-100',
+          pulse: true,
+          icon: RotateCcw,
+          hint: 'QR data verified. Pixhawk RTL command dispatched cleanly via MAVLink'
+        };
+      case 'QR DATA RECEIVED':
+        return {
+          label: 'QR DATA RECEIVED',
+          bg: 'bg-emerald-950/90',
+          border: 'border-emerald-500',
+          text: 'text-emerald-100',
+          pulse: false,
+          icon: CheckCircle2,
+          hint: 'Payload verified. Triggering automatic Pixhawk Return-To-Launch...'
+        };
+      case 'PROCESSING QR':
+        return {
+          label: 'PROCESSING QR',
+          bg: 'bg-amber-950/90',
+          border: 'border-amber-500',
+          text: 'text-amber-100',
+          pulse: true,
+          icon: RefreshCw,
+          hint: 'Decoding original-resolution photo & extracting QR payload'
+        };
+      case 'CAPTURING PHOTO':
+        return {
+          label: 'CAPTURING PHOTO',
+          bg: 'bg-sky-950/90',
+          border: 'border-sky-500',
+          text: 'text-sky-100',
+          pulse: true,
+          icon: Camera,
+          hint: 'Saving full-resolution original image without digital zoom or crop'
+        };
+      case 'QR DETECTED':
+        return {
+          label: 'QR DETECTED',
+          bg: 'bg-amber-900/90',
+          border: 'border-amber-400',
+          text: 'text-amber-200',
+          pulse: true,
+          icon: Target,
+          hint: 'QR finder pattern recognized in live camera field of view'
+        };
+      case 'SEARCHING FOR QR':
+        return {
+          label: 'SEARCHING FOR QR',
+          bg: 'bg-slate-900/90',
+          border: 'border-sky-500/40',
+          text: 'text-sky-300',
+          pulse: true,
+          icon: Camera,
+          hint: 'Continuous wide-angle monitoring at 10–15m cruising altitude'
+        };
+      case 'QR PROCESSING FAILED':
+        return {
+          label: 'QR PROCESSING FAILED',
+          bg: 'bg-slate-900/95',
+          border: 'border-rose-500/70',
+          text: 'text-rose-300',
+          pulse: false,
+          icon: AlertTriangle,
+          hint: 'Image undecodable. Original photo preserved for offline inspection'
+        };
+      case 'CAMERA ERROR':
+        return {
+          label: 'CAMERA ERROR',
+          bg: 'bg-rose-950/95',
+          border: 'border-rose-500',
+          text: 'text-rose-200',
+          pulse: false,
+          icon: AlertTriangle,
+          hint: 'Camera feed unavailable. Verify hardware connection or camera permissions'
+        };
+      case 'CAMERA READY':
+      default:
+        return {
+          label: 'CAMERA READY',
+          bg: 'bg-slate-900/90',
+          border: 'border-slate-700',
+          text: 'text-slate-300',
+          pulse: false,
+          icon: Camera,
+          hint: 'Drone-core camera initialized. Wide field of view locked at 1.0x'
+        };
+    }
   };
+
+  const statusConfig = getStatusBadgeConfig(coreStatus);
+  const StatusIcon = statusConfig.icon;
+  const isGpsValid = Boolean(telemetry.gps.isLocked || (telemetry.latitude !== 0 && Math.abs(telemetry.latitude) > 0.001));
+  const isRtlExecuting = (telemetry.flightMode || '').toUpperCase() === 'RTL' || coreStatus === 'RETURNING TO LAUNCH';
 
   return (
-    <div className="space-y-4 font-mono select-none">
-      {/* 0. AUTOMATIC USB-OTG & ESP32-S3 WI-FI / CLOUD WSS RELAY CONNECTION CARD */}
-      <PixhawkConnectionCard connectionState={pixhawkState} />
-
-      {/* 0. RESPONSIVE STATUS HUD HEADER (Requirement #13) */}
-      <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-2xl">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-2 text-xs">
-          {/* DRONE */}
-          <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
-            <span className="text-[10px] text-slate-400 font-bold uppercase">DRONE</span>
-            <span className={`text-[10px] font-black flex items-center space-x-1 ${pixhawkState.isConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${pixhawkState.isConnected ? 'bg-emerald-400' : 'bg-rose-400'}`} />
-              <span>{pixhawkState.isConnected ? 'CONNECTED' : 'OFFLINE'}</span>
+    <div ref={containerRef} className={`w-full h-full flex-1 flex flex-col min-h-0 font-sans select-none ${className}`}>
+      {/* Primary Camera Card: Occupies available screen space */}
+      <div className="relative rounded-2xl bg-[#070b14] border border-slate-800 overflow-hidden shadow-2xl flex-1 flex flex-col min-h-0">
+        {/* Camera View Sub-Header */}
+        <div className="h-10 px-3 sm:px-4 bg-[#0a0f1d] border-b border-slate-800/80 flex items-center justify-between text-xs font-mono shrink-0 gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Camera className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="font-bold text-slate-200 uppercase tracking-wider text-[11px] truncate">
+              DRONE-CORE OPTICAL SENSOR
             </span>
+            <span className="text-[10px] text-slate-500 hidden sm:inline">•</span>
+            <span className="text-[10px] text-slate-400 hidden sm:inline">WIDE FIELD OF VIEW (1.0x)</span>
           </div>
+          <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono shrink-0">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isCameraActive ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+            <span className="hidden md:inline">{isCameraActive ? 'LIVE • NATIVE RESOLUTION' : 'OFFLINE'}</span>
 
-          {/* MAVLink */}
-          <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
-            <span className="text-[10px] text-slate-400 font-bold uppercase">MAVLink</span>
-            <span className={`text-[10px] font-black flex items-center space-x-1 ${pixhawkState.isReceivingTelemetry ? 'text-emerald-400' : 'text-amber-400'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${pixhawkState.isReceivingTelemetry ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-              <span>{pixhawkState.isReceivingTelemetry ? 'HEALTHY' : 'IDLE'}</span>
-            </span>
-          </div>
-
-          {/* GPS */}
-          <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
-            <span className="text-[10px] text-slate-400 font-bold uppercase">GPS</span>
-            <span className={`text-[10px] font-black flex items-center space-x-1 ${isGpsReady ? 'text-emerald-400' : 'text-amber-400'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${isGpsReady ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-              <span>{isGpsReady ? 'READY' : 'ACQUIRING'}</span>
-            </span>
-          </div>
-
-          {/* Heartbeat */}
-          <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
-            <span className="text-[10px] text-slate-400 font-bold uppercase">Heartbeat</span>
-            <span className={`text-[10px] font-black flex items-center space-x-1 ${pixhawkState.heartbeatHz >= 0.5 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${pixhawkState.heartbeatHz >= 0.5 ? 'bg-emerald-400' : 'bg-rose-400'}`} />
-              <span>{pixhawkState.heartbeatHz >= 0.5 ? `${pixhawkState.heartbeatHz.toFixed(1)} Hz` : 'LOST'}</span>
-            </span>
-          </div>
-
-          {/* MODE */}
-          <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
-            <span className="text-[10px] text-slate-400 font-bold uppercase">MODE</span>
-            <span className={`text-[10px] font-extrabold ${commandAuthority === 'MANUAL' ? 'text-amber-400' : 'text-sky-400'}`}>
-              {commandAuthority === 'MANUAL' ? 'MANUAL' : 'AUTONOMOUS'}
-            </span>
-          </div>
-
-          {/* ALTITUDE */}
-          <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
-            <span className="text-[10px] text-slate-400 font-bold uppercase">ALTITUDE</span>
-            <span className="text-[10px] font-extrabold text-amber-300">{telemetry.altitude.toFixed(1)} m</span>
-          </div>
-
-          {/* TARGET */}
-          <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
-            <span className="text-[10px] text-slate-400 font-bold uppercase">TARGET</span>
-            <span className={`text-[10px] font-extrabold ${decodedQR ? 'text-emerald-400' : isScanning ? 'text-sky-300' : 'text-slate-400'}`}>
-              {decodedQR ? 'FOUND ✓' : isScanning ? 'SEARCHING' : 'STANDBY'}
-            </span>
-          </div>
-
-          {/* QR */}
-          <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
-            <span className="text-[10px] text-slate-400 font-bold uppercase">QR</span>
-            <span className={`text-[10px] font-extrabold ${decodedQR ? 'text-emerald-400' : isScanning ? 'text-amber-400 animate-pulse' : 'text-slate-400'}`}>
-              {decodedQR ? `[${decodedQR.code}] ✓` : isScanning ? 'SCANNING' : 'STANDBY'}
-            </span>
-          </div>
-
-          {/* BATTERY */}
-          <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
-            <span className="text-[10px] text-slate-400 font-bold uppercase flex items-center space-x-1">
-              <Battery className="w-3.5 h-3.5 text-amber-400" />
-              <span>BATTERY</span>
-            </span>
-            <span className={`text-[10px] font-black ${
-              telemetry.batteryVoltage > 0
-                ? (telemetry.batteryPercent < 20 ? 'text-rose-400 animate-pulse' : 'text-emerald-400')
-                : 'text-slate-500'
-            }`}>
-              {telemetry.batteryVoltage > 0 ? `${telemetry.batteryVoltage.toFixed(1)}V (${telemetry.batteryPercent}%)` : 'NO SIGNAL'}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* 1. SUCCESS / FAILSAFE STATUS ALERT BANNER */}
-      {isMissionCompleted && (
-        <div className="p-3 bg-emerald-950/90 border-2 border-emerald-500 rounded-xl text-emerald-200 text-xs flex items-center justify-between shadow-2xl shadow-emerald-600/30 animate-in fade-in duration-200">
-          <div className="flex items-center space-x-2.5">
-            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-            <div>
-              <div className="font-black uppercase tracking-wider text-white flex items-center space-x-2">
-                <span>MISSION COMPLETE ✓</span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-900 border border-emerald-400 text-emerald-300">
-                  QR DATA RECEIVED ✓
-                </span>
-              </div>
-              <div className="text-[11px] text-emerald-300/80 mt-0.5">
-                {isRtlActive ? 'Automatic RTL Active: Flight controller returning to Home Reference.' : 'Target verified. Ready for landing or manual control.'}
-              </div>
-            </div>
-          </div>
-          {isRtlActive && (
-            <span className="px-3 py-1 rounded-full bg-emerald-900/80 border border-emerald-400 text-emerald-200 text-[10px] font-black uppercase tracking-wider animate-pulse">
-              RETURNING HOME
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Critical Failure / Failsafe Warning Alert */}
-      {isMissionAborted && (
-        <div className="p-3 bg-rose-950/95 border-2 border-rose-500 rounded-xl text-rose-200 text-xs flex items-center justify-between shadow-2xl shadow-rose-600/30 animate-in fade-in duration-200">
-          <div className="flex items-center space-x-2.5">
-            <AlertOctagon className="w-5 h-5 text-rose-400 shrink-0 animate-bounce" />
-            <div>
-              <div className="font-black uppercase tracking-wider text-rose-100 flex items-center space-x-2">
-                <span>AUTONOMOUS FAILURE → SAFE FAILSAFE</span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-rose-900 border border-rose-400 text-rose-200">
-                  {missionState.replace(/_/g, ' ')}
-                </span>
-              </div>
-              <div className="text-[11px] text-rose-300/90 mt-0.5">
-                Autonomous search halted. Flight controller failsafe active. Automatic RTL requested.
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => handleToggleMode('MANUAL')}
-            className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-black text-[10px] uppercase tracking-wider transition cursor-pointer shadow-lg"
-          >
-            MANUAL OVERRIDE
-          </button>
-        </div>
-      )}
-
-      {/* Manual Switch Error Toast */}
-      {manualSwitchError && (
-        <div className="p-2.5 bg-rose-950/90 border border-rose-500 rounded-lg text-rose-200 text-xs flex items-center space-x-2">
-          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-          <span>{manualSwitchError}</span>
-        </div>
-      )}
-
-      {/* 2. RESPONSIVE AUTONOMOUS MISSION STATUS BAR */}
-      <AutonomousMissionStatusBar
-        telemetry={telemetry}
-        missionState={missionState}
-        pixhawkState={pixhawkState}
-        onOpenConfig={() => setIsConfigModalOpen(true)}
-        isAuthorizedOperator={true}
-      />
-
-      {/* 3. Top Action Grid: Mission Countdown Timer & Command Authority Mode Deck */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch">
-        {/* Left: Mission Countdown Timer */}
-        <div className="md:col-span-6 flex flex-col justify-between">
-          <MissionTimer
-            remainingSeconds={remainingSeconds}
-            elapsedSeconds={elapsedSeconds}
-            missionState={missionState}
-          />
-        </div>
-
-        {/* Right: Command Authority & Mission Actions Deck */}
-        <div className="md:col-span-6 flex flex-col justify-between bg-slate-900/90 p-4 rounded-2xl border border-slate-800 shadow-lg space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-            {/* Mode Switch: Autonomous vs Manual Backup */}
-            <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-              <button
-                type="button"
-                onClick={() => handleToggleMode('AUTONOMOUS')}
-                className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition cursor-pointer ${
-                  commandAuthority !== 'MANUAL'
-                    ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                AUTONOMOUS
-              </button>
-              <button
-                type="button"
-                onClick={() => handleToggleMode('MANUAL')}
-                className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition cursor-pointer ${
-                  commandAuthority === 'MANUAL'
-                    ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                MANUAL BACKUP
-              </button>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <button
-                type="button"
-                onClick={() => setIsConfigModalOpen(true)}
-                className="px-2 py-1 rounded-lg bg-amber-600/80 hover:bg-amber-600 text-white text-[10px] font-bold uppercase flex items-center space-x-1 cursor-pointer transition"
-                title="Configure Autonomous Mission"
-              >
-                <Settings className="w-3 h-3" />
-                <span>CONFIG</span>
-              </button>
-
-              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
-                isArmed
-                  ? 'bg-rose-950/90 text-rose-300 border-rose-500/70 animate-pulse'
-                  : 'bg-slate-950 text-slate-400 border-slate-800'
-              }`}>
-                {isArmed ? 'ARMED' : 'DISARMED'}
-              </span>
-            </div>
-          </div>
-
-          {/* "No problem, Start Mission" Checkbox (Bypasses Pre-Arm & Validation Blocks) */}
-          <div className="mb-2.5">
-            <label className={`flex items-center space-x-2.5 text-xs font-semibold select-none cursor-pointer px-3 py-2 rounded-xl transition border ${
-              forceBypassChecks
-                ? 'bg-amber-950/80 border-amber-500/80 text-amber-200 shadow-md shadow-amber-950/40'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
-            }`}>
-              <input
-                type="checkbox"
-                id="bypass-prearm-checkbox"
-                checked={forceBypassChecks}
-                onChange={(e) => {
-                  setForceBypassChecks(e.target.checked);
-                  missionEngine.setForceBypassChecks(e.target.checked);
-                }}
-                className="w-4 h-4 rounded text-amber-500 accent-amber-500 focus:ring-0 cursor-pointer"
-              />
-              <span className="flex-1 leading-tight">
-                <span className="font-bold text-amber-300">No problem, Start Mission</span>
-                <span className="block text-[10px] text-slate-400 font-mono">Bypass Pre-Arm checks & errors (Drone ready to fly)</span>
-              </span>
-            </label>
-          </div>
-
-          {/* Action Buttons: START MISSION, RTL, ARM/DISARM, and LAND */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {/* START MISSION BUTTON */}
+            {/* Camera Settings Button (Fully visible, unclipped, sufficient padding) */}
             <button
               type="button"
-              onClick={handleStartMissionClick}
-              disabled={
-                isMissionRunning ||
-                isMissionCompleted ||
-                (!pixhawkState.isConnected && !forceBypassChecks) ||
-                (!missionValidation.isValid && !forceBypassChecks) ||
-                commandAuthority === 'MANUAL'
-              }
-              className={`py-3.5 px-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 transition shadow-lg ${
-                missionState === 'STARTING'
-                  ? 'bg-amber-600 text-white animate-pulse'
-                  : isMissionRunning
-                  ? 'bg-sky-600 text-white shadow-sky-600/30 animate-pulse cursor-default'
-                  : isMissionCompleted
-                  ? 'bg-emerald-800 text-emerald-200 border border-emerald-500 cursor-default'
-                  : isMissionAborted
-                  ? 'bg-rose-950 border border-rose-500 text-rose-300'
-                  : (missionValidation.isValid || forceBypassChecks) && commandAuthority !== 'MANUAL'
-                  ? 'bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white shadow-emerald-600/30 cursor-pointer animate-pulse'
-                  : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
-              }`}
-              title={
-                forceBypassChecks
-                  ? 'FORCE START: Pre-arm checks bypassed by user override'
-                  : !missionValidation.isValid
-                  ? 'START DISABLED: Check pre-flight validation conditions (or check "No problem, Start Mission" above)'
-                  : 'Start Autonomous Search & QR Rescue Mission'
-              }
+              onClick={() => setIsSettingsOpen(true)}
+              title="Camera Sensor Settings"
+              aria-label="Camera Sensor Settings"
+              className="w-7 h-7 min-w-[28px] min-h-[28px] p-1 rounded-lg bg-slate-900 hover:bg-slate-800 active:bg-slate-700 border border-slate-700/80 text-slate-300 hover:text-white flex items-center justify-center transition cursor-pointer shrink-0"
             >
-              {missionState === 'STARTING' ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                  <span>STARTING...</span>
-                </>
-              ) : isMissionRunning ? (
-                <>
-                  <Activity className="w-4 h-4 shrink-0 animate-spin" />
-                  <span>RUNNING</span>
-                </>
-              ) : isMissionCompleted ? (
-                <>
-                  <CheckCircle className="w-4 h-4 shrink-0 text-emerald-300" />
-                  <span>COMPLETED</span>
-                </>
-              ) : isMissionAborted ? (
-                <>
-                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
-                  <span>FAILED</span>
-                </>
+              <Settings className="w-4 h-4 shrink-0 block" />
+            </button>
+
+            {/* Exactly One Fullscreen Button (Synchronized with HTML5 Fullscreen API) */}
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+              aria-label={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+              className="w-7 h-7 min-w-[28px] min-h-[28px] p-1 rounded-lg bg-slate-900 hover:bg-slate-800 active:bg-slate-700 border border-slate-700/80 text-slate-300 hover:text-white flex items-center justify-center transition cursor-pointer shrink-0"
+            >
+              {isFullscreen ? (
+                <Minimize className="w-4 h-4 shrink-0 block" />
               ) : (
-                <>
-                  <Play className="w-4 h-4 fill-current shrink-0" />
-                  <span>START MISSION</span>
-                </>
+                <Maximize className="w-4 h-4 shrink-0 block" />
               )}
             </button>
-
-            {/* RTL — RETURN TO LAUNCH BUTTON (Requirement #3) */}
-            <button
-              type="button"
-              onClick={() => setIsRtlConfirmOpen(true)}
-              className="py-3.5 px-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-600/30 transition cursor-pointer"
-              title="Return to Launch: Operator triggers automatic return to Home Reference"
-            >
-              <RotateCcw className="w-4 h-4 shrink-0" />
-              <span>RTL</span>
-            </button>
-
-            {/* LIVE ARM / DISARM TOGGLE BUTTON WITH SAFETY MODAL TRIGGER */}
-            <button
-              type="button"
-              onClick={isArmed ? handleDisarmClick : handleArmClick}
-              disabled={isArmingInProgress || isDisarmingInProgress || (!pixhawkState.isConnected && !pixhawkState.isUsbConnected)}
-              className={`py-3.5 px-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 transition shadow-lg cursor-pointer ${
-                !pixhawkState.isConnected && !pixhawkState.isUsbConnected
-                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                  : isArmingInProgress
-                  ? 'bg-amber-600 text-white animate-pulse'
-                  : isDisarmingInProgress
-                  ? 'bg-amber-700 text-white animate-pulse'
-                  : isArmed
-                  ? 'bg-rose-700 hover:bg-rose-600 text-white ring-2 ring-rose-500/50'
-                  : 'bg-emerald-700 hover:bg-emerald-600 text-white ring-2 ring-emerald-500/50'
-              }`}
-              title={isArmed ? 'Disarm Motors (Prompts safety warning if airborne)' : 'Arm Motors (Spin props)'}
-            >
-              <Power className="w-4 h-4 shrink-0" />
-              <span>{isArmed ? (isDisarmingInProgress ? 'DISARMING...' : 'DISARM') : (isArmingInProgress ? 'ARMING...' : 'ARM MOTORS')}</span>
-            </button>
-
-            {/* DIRECT SAFE LAND COMMAND BUTTON */}
-            <button
-              type="button"
-              onClick={() => mavlinkService.commandLand()}
-              disabled={!pixhawkState.isConnected && !pixhawkState.isUsbConnected}
-              className="py-3.5 px-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 shadow-lg shadow-amber-600/30 transition cursor-pointer"
-              title="Command LAND Mode: Controlled vertical descent with auto-disarm upon touchdown"
-            >
-              <PlaneTakeoff className="w-4 h-4 shrink-0 rotate-180" />
-              <span>LAND NOW</span>
-            </button>
           </div>
-
-          {/* Arm / Command Error Toast */}
-          {armError && (
-            <div className="p-2.5 bg-rose-950/95 border border-rose-500 rounded-lg text-rose-200 text-xs flex items-start justify-between space-x-2 shadow-lg">
-              <div className="flex items-start space-x-2 min-w-0">
-                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                <span className="font-mono break-words leading-tight">{armError}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setArmError(null)}
-                className="text-slate-400 hover:text-white text-xs shrink-0 cursor-pointer p-0.5"
-              >
-                ✕
-              </button>
-            </div>
-          )}
         </div>
-      </div>
 
-      {/* 4. Main Grid: IP Camera + Scanner HUD / Map & Essential Subsystems */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left: 1. IP Camera Option (Before Scanner) + 2. Drone QR Scanner HUD / Tactical Map */}
-        <div className="lg:col-span-7 space-y-3">
-          {/* IP CAMERA OPTION (Before Scanner Option per Requirement 1) */}
-          <div className="bg-slate-900/95 border border-slate-800 rounded-xl p-3.5 shadow-xl font-mono">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-slate-800">
-              <div className="flex items-center space-x-2">
-                <Video className={`w-4 h-4 ${isIpCameraOn ? 'text-sky-400' : 'text-slate-500'}`} />
-                <span className="text-xs font-black uppercase text-white tracking-wider">
-                  IP CAMERA OPTION
-                </span>
-                <span
-                  className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${
-                    isIpCameraOn
-                      ? cameraStatus === 'LIVE'
-                        ? 'bg-emerald-950/80 border-emerald-500/70 text-emerald-300'
-                        : cameraStatus === 'CONNECTING'
-                        ? 'bg-amber-950/80 border-amber-500/70 text-amber-300 animate-pulse'
-                        : 'bg-rose-950/80 border-rose-500/70 text-rose-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-500'
-                  }`}
-                >
-                  {isIpCameraOn ? `CAMERA: ${cameraStatus}` : 'CAMERA: OFF'}
-                </span>
-              </div>
+        {/* Video Canvas Container (Maintains 16:9 Aspect Ratio) */}
+        <div className="relative w-full flex-1 min-h-0 bg-black flex items-center justify-center overflow-hidden">
+          <div className="relative w-full h-full max-w-full max-h-full aspect-video flex items-center justify-center overflow-hidden">
+            {/* Native Live Video Stream */}
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`w-full h-full object-cover transition-opacity duration-300 ${
+                isCameraActive ? 'opacity-100' : 'opacity-0 absolute pointer-events-none'
+              }`}
+            />
 
-              {/* IP Camera ON/OFF Toggle */}
-              <div className="flex items-center space-x-2">
+            {/* Camera Offline / Error State Placeholder */}
+            {!isCameraActive && (
+              <div className="p-6 text-center space-y-3 max-w-sm">
+                <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 mx-auto">
+                  <VideoOff className="w-6 h-6 text-slate-400" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-200 uppercase tracking-wider font-orbitron">
+                    CAMERA FEED UNAVAILABLE
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-1 font-mono">
+                    {cameraErrorMessage || 'Connecting to drone-core optical sensor...'}
+                  </p>
+                </div>
                 <button
                   type="button"
-                  onClick={() => ipCameraService.setIpCameraEnabled(!isIpCameraOn)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center space-x-1.5 border shadow ${
-                    isIpCameraOn
-                      ? 'bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white border-sky-400 shadow-sky-600/30'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
-                  }`}
+                  onClick={handleRestartCamera}
+                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white font-bold text-xs uppercase tracking-wider transition cursor-pointer flex items-center gap-1.5 mx-auto shadow-lg shadow-amber-600/30"
                 >
-                  <span className={`w-2 h-2 rounded-full ${isIpCameraOn ? 'bg-white' : 'bg-slate-500'}`} />
-                  <span>IP CAMERA {isIpCameraOn ? 'ON' : 'OFF'}</span>
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>INITIALIZE CAMERA</span>
                 </button>
+              </div>
+            )}
+
+            {/* TACTICAL HUD OVERLAY: Top Status Indicator */}
+            <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-10 gap-2">
+              <div
+                className={`px-3 py-1.5 rounded-lg border backdrop-blur-md flex items-center gap-2 shadow-xl pointer-events-auto transition-all ${
+                  statusConfig.bg
+                } ${statusConfig.border} ${statusConfig.text}`}
+                title={statusConfig.hint}
+              >
+                <StatusIcon className={`w-3.5 h-3.5 ${statusConfig.pulse ? 'animate-pulse' : ''}`} />
+                <span className="font-orbitron font-extrabold text-[11px] tracking-wider uppercase">
+                  {statusConfig.label}
+                </span>
+              </div>
+
+              {/* FOV & Zoom Lock Indicator */}
+              <div className="px-2.5 py-1 rounded-lg bg-black/75 border border-slate-800 text-[10px] font-mono text-slate-300 backdrop-blur-sm hidden sm:flex items-center gap-1.5 shadow-md">
+                <span className="text-amber-400 font-bold">1.0x FIXED</span>
+                <span className="text-slate-600">•</span>
+                <span>NORMAL FOV</span>
               </div>
             </div>
 
-            {/* Configured IP Camera Stream URL & Status Details */}
-            <div className="mt-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-slate-400">
-              <div className="flex items-center space-x-1.5 truncate">
-                <span className="text-slate-500 shrink-0 font-bold uppercase text-[10px]">Stream URL:</span>
-                {isEditingStreamUrl ? (
-                  <div className="flex items-center space-x-1 w-full max-w-xs">
-                    <input
-                      type="url"
-                      value={streamUrlDraft}
-                      onChange={(e) => setStreamUrlDraft(e.target.value)}
-                      className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-xs text-slate-200 font-mono w-full"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        ipCameraService.setStreamUrl(streamUrlDraft);
-                        setIsEditingStreamUrl(false);
-                      }}
-                      className="px-2 py-0.5 rounded bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] cursor-pointer"
-                    >
-                      SAVE
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingStreamUrl(false)}
-                      className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] cursor-pointer"
-                    >
-                      ✕
-                    </button>
+            {/* TACTICAL HUD OVERLAY: Center Reticle / Target Corners */}
+            {isCameraActive && (
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                <div className="relative w-48 h-48 border border-white/20 rounded-lg">
+                  {/* Corner Brackets */}
+                  <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-amber-400" />
+                  <div className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-amber-400" />
+                  <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-amber-400" />
+                  <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-amber-400" />
+
+                  {/* Subtle Crosshair */}
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-amber-400/60" />
+                </div>
+              </div>
+            )}
+
+            {/* TACTICAL HUD OVERLAY: Dynamic QR Detection Bounding Box */}
+            {activeBoundingBox && (
+              <div
+                className="absolute border-2 border-emerald-400 bg-emerald-500/20 rounded pointer-events-none z-20 animate-pulse shadow-[0_0_15px_rgba(52,211,153,0.8)]"
+                style={{
+                  left: `${activeBoundingBox.x}px`,
+                  top: `${activeBoundingBox.y}px`,
+                  width: `${activeBoundingBox.width}px`,
+                  height: `${activeBoundingBox.height}px`
+                }}
+              >
+                <span className="absolute -top-5 left-0 px-1.5 py-0.5 rounded bg-emerald-600 text-white font-mono text-[9px] font-bold">
+                  QR TARGET
+                </span>
+              </div>
+            )}
+
+            {/* TACTICAL HUD OVERLAY: Bottom Flight Telemetry Strip */}
+            <div className="absolute bottom-2 left-2 right-2 px-3 py-1.5 bg-[#0c1322]/90 border border-slate-800/90 rounded-xl backdrop-blur-md flex flex-wrap items-center justify-between text-[11px] font-mono text-slate-300 pointer-events-none z-10 gap-2">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-500 text-[10px]">ALT:</span>
+                  <span className="text-amber-300 font-bold">{telemetry.altitude.toFixed(1)}m AGL</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-500 text-[10px]">SPD:</span>
+                  <span className="text-sky-300 font-bold">{telemetry.groundSpeed.toFixed(1)} m/s</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-500 text-[10px]">HDG:</span>
+                  <span className="text-slate-300 font-bold">{telemetry.heading}°</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {isGpsValid ? (
+                  <div className="text-[10px] text-emerald-400 flex items-center gap-1">
+                    <MapPin className="w-3 h-3" />
+                    <span>{telemetry.latitude.toFixed(6)}, {telemetry.longitude.toFixed(6)}</span>
                   </div>
                 ) : (
-                  <span className="text-sky-300 font-mono truncate">{streamUrl}</span>
+                  <div className="text-[10px] text-amber-400 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    <span>GPS ACQUIRING</span>
+                  </div>
                 )}
               </div>
-
-              {!isEditingStreamUrl && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStreamUrlDraft(streamUrl);
-                    setIsEditingStreamUrl(true);
-                  }}
-                  className="text-slate-400 hover:text-white text-[10px] font-bold uppercase underline cursor-pointer shrink-0"
-                >
-                  Edit URL
-                </button>
-              )}
             </div>
-
-            {isIpCameraOn && (
-              <div className="mt-2 p-2 bg-slate-950/80 rounded-lg border border-slate-800/80 text-[10px] text-slate-300 flex items-center justify-between">
-                <span>Camera feed available inside Ground Station designated video area.</span>
-                <span className="text-sky-400 font-bold">Auto-streaming</span>
-              </div>
-            )}
-          </div>
-
-          {/* View Segmented Switcher */}
-          <div className="flex items-center justify-between px-1">
-            <div className="flex items-center space-x-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
-              <button
-                type="button"
-                onClick={() => setPrimaryView('CAMERA')}
-                className={`px-3 py-1 rounded-lg text-xs font-mono font-bold flex items-center space-x-1.5 transition cursor-pointer ${
-                  primaryView === 'CAMERA'
-                    ? 'bg-sky-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                <Camera className="w-3.5 h-3.5" />
-                <span>SCANNER / CAMERA HUD</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setPrimaryView('MAP')}
-                className={`px-3 py-1 rounded-lg text-xs font-mono font-bold flex items-center space-x-1.5 transition cursor-pointer ${
-                  primaryView === 'MAP'
-                    ? 'bg-emerald-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                <Map className="w-3.5 h-3.5" />
-                <span>TACTICAL GOOGLE MAP</span>
-              </button>
-            </div>
-            <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
-              {primaryView === 'MAP' ? 'Google Hybrid / Geofence Workspace' : 'Optical QR Scanner'}
-            </span>
-          </div>
-
-          {/* SCANNER OPTION (Follows directly after IP Camera option per Requirement 1) */}
-          <div className="rounded-xl overflow-hidden border border-slate-800 shadow-2xl h-[420px] sm:h-[480px]">
-            {primaryView === 'CAMERA' ? (
-              <CameraVisionHUD
-                onQRDetected={onQRDetected}
-                isScanning={isScanning}
-                decodedQR={decodedQR}
-                telemetry={telemetry}
-                className="w-full h-full"
-              />
-            ) : (
-              <GoogleMapGroundStation
-                telemetry={telemetry}
-                homePoint={homePoint}
-                pixhawkState={pixhawkState}
-                missionState={missionState}
-                onSetHomePoint={(coords) => coords ? missionEngine.setHomePoint(coords.lat, coords.lng) : missionEngine.setHomePoint()}
-                onStartMission={() => missionEngine.startMission()}
-                onEmergencyRTL={onEmergencyRTL}
-                className="h-full w-full"
-              />
-            )}
           </div>
         </div>
 
-        {/* Right: Target Confirmation, Telemetry Deck, & Manual Control (Simplified - Diagnostics Removed) */}
-        <div className="lg:col-span-5 space-y-4">
-          {/* Live Battery Health & Telemetry Deck */}
-          <BatteryMonitorCard
-            batteryPercent={telemetry.batteryPercent}
-            batteryVoltage={telemetry.batteryVoltage}
-            batteryCurrent={telemetry.batteryCurrent}
-            batteryCellCount={telemetry.batteryCellCount}
-          />
-
-          {/* Decoded QR Target Result */}
-          <QRResultCard
-            decodedQR={decodedQR}
-            runnerLink={runnerLink}
-            runnerAckReceived={runnerAckReceived}
-            runnerAckLatencyMs={runnerAckLatencyMs}
-            missionState={missionState}
-          />
-
-          {/* Hidden / Expandable Backup Manual Engineering Control Panel (Requirement #10) */}
-          {commandAuthority === 'MANUAL' && (
-            <div className="bg-slate-900/95 border-2 border-amber-500/80 rounded-2xl p-4 shadow-2xl space-y-3 animate-in fade-in duration-150">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                <div className="flex items-center space-x-2">
-                  <Gamepad2 className="w-4 h-4 text-amber-400" />
-                  <span className="text-xs font-black uppercase text-amber-300 tracking-wider">
-                    MANUAL BACKUP FLIGHT CONTROLLER
+        {/* Automatic RTL Notification Banner (Triggered automatically upon QR receipt) */}
+        {latestDetection && latestDetection.rtlInitiated && (
+          <div className={`shrink-0 p-3 border-t flex items-center justify-between shadow-2xl transition-all ${
+            isRtlExecuting
+              ? 'bg-rose-950/95 border-rose-500 text-rose-100 shadow-rose-950/60'
+              : 'bg-red-950/90 border-red-500 text-red-100 shadow-red-950/40'
+          }`}>
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-rose-900/80 border border-rose-400 flex items-center justify-center text-rose-200 shrink-0">
+                <RotateCcw className="w-4 h-4 animate-spin" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-orbitron font-extrabold text-xs uppercase tracking-wide text-white">
+                    {isRtlExecuting ? 'RETURNING TO LAUNCH (RTL ACTIVE)' : 'AUTOMATIC RTL INITIATED'}
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-rose-900 border border-rose-400 text-rose-200 text-[9px] font-mono font-bold">
+                    QR TRIGGERED
                   </span>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-500/40">
-                  AUTHORITY: MANUAL
-                </span>
-              </div>
-
-              {/* D-Pad Direction Controls for Manual Backup */}
-              <div className="grid grid-cols-3 gap-2 max-w-[220px] mx-auto pt-1">
-                <div />
-                <button
-                  type="button"
-                  onClick={() => mavlinkService.commandManualMove('FORWARD')}
-                  className="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-amber-600 text-white flex items-center justify-center cursor-pointer transition shadow"
-                  title="Forward Pitch"
-                >
-                  <ArrowUp className="w-5 h-5" />
-                </button>
-                <div />
-
-                <button
-                  type="button"
-                  onClick={() => mavlinkService.commandManualMove('LEFT')}
-                  className="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-amber-600 text-white flex items-center justify-center cursor-pointer transition shadow"
-                  title="Roll Left"
-                >
-                  <ArrowLeft className="w-5 h-5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => mavlinkService.commandHold()}
-                  className="p-3 rounded-xl bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white font-black text-xs flex items-center justify-center cursor-pointer transition shadow-lg shadow-amber-600/40"
-                  title="Position Hold (LOITER)"
-                >
-                  HOLD
-                </button>
-                <button
-                  type="button"
-                  onClick={() => mavlinkService.commandManualMove('RIGHT')}
-                  className="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-amber-600 text-white flex items-center justify-center cursor-pointer transition shadow"
-                  title="Roll Right"
-                >
-                  <ArrowRight className="w-5 h-5" />
-                </button>
-
-                <div />
-                <button
-                  type="button"
-                  onClick={() => mavlinkService.commandManualMove('BACKWARD')}
-                  className="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-amber-600 text-white flex items-center justify-center cursor-pointer transition shadow"
-                  title="Backward Pitch"
-                >
-                  <ArrowDown className="w-5 h-5" />
-                </button>
-                <div />
-              </div>
-
-              <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px]">
-                <button
-                  type="button"
-                  onClick={isArmed ? handleDisarmClick : handleArmClick}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition ${
-                    isArmed ? 'bg-rose-700 hover:bg-rose-600 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                  }`}
-                >
-                  {isArmed ? 'DISARM MOTORS' : 'ARM MOTORS'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleToggleMode('AUTONOMOUS')}
-                  className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-black text-xs uppercase cursor-pointer"
-                >
-                  RESUME AUTONOMOUS
-                </button>
+                <p className="text-[10px] text-rose-200/90 font-mono">
+                  {isRtlExecuting
+                    ? `Pixhawk confirmed RTL flight mode. Cruising back to Home Reference at ${telemetry.altitude.toFixed(1)}m.`
+                    : 'QR payload verified. Pixhawk Return-To-Launch triggered automatically. Autonomous search halted.'}
+                </p>
               </div>
             </div>
-          )}
-        </div>
+
+            <div className="font-mono text-right hidden sm:block">
+              <span className="text-[10px] text-rose-300 block">Flight Controller:</span>
+              <span className="text-xs font-black uppercase text-white">{telemetry.flightMode || 'RTL'}</span>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* CONFIRM RTL MODAL (Requirement #3) */}
-      {isRtlConfirmOpen && (
+      {/* Camera Sensor Settings Modal */}
+      {isSettingsOpen && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border-2 border-rose-500 rounded-2xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl shadow-rose-600/30">
-            <div className="w-14 h-14 rounded-full bg-rose-950/80 border border-rose-400 flex items-center justify-center text-rose-400 mx-auto">
-              <RotateCcw className="w-7 h-7 animate-spin" />
-            </div>
-
-            <div className="space-y-1">
-              <h3 className="text-base font-black uppercase text-white tracking-wider">
-                CONFIRM RETURN TO LAUNCH?
-              </h3>
-              <p className="text-xs text-slate-400">
-                The drone will abort the current autonomous path and navigate back to the Home Reference point ({homePoint.latitude.toFixed(5)}, {homePoint.longitude.toFixed(5)}) at {telemetry.altitude.toFixed(1)}m.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5 pt-2">
+          <div className="bg-[#0e1422] border border-slate-700 rounded-xl max-w-sm w-full p-5 text-white shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Settings className="w-4 h-4 text-amber-400" />
+                <h3 className="font-orbitron font-bold text-xs uppercase tracking-wide text-white">
+                  OPTICAL SENSOR SETTINGS
+                </h3>
+              </div>
               <button
                 type="button"
-                onClick={() => setIsRtlConfirmOpen(false)}
-                className="py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs uppercase tracking-wider transition cursor-pointer"
+                onClick={() => setIsSettingsOpen(false)}
+                className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
               >
-                CANCEL
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmRTL}
-                className="py-3 rounded-xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-black text-xs uppercase tracking-wider transition shadow-lg shadow-rose-600/40 cursor-pointer"
-              >
-                RETURN TO LAUNCH
+                <X className="w-4 h-4" />
               </button>
             </div>
+
+            <div className="space-y-2.5 text-xs font-mono">
+              <div className="flex justify-between items-center p-2 rounded bg-slate-900/80 border border-slate-800">
+                <span className="text-slate-400">Sensor Mode:</span>
+                <span className="text-emerald-400 font-bold">16:9 NATIVE</span>
+              </div>
+              <div className="flex justify-between items-center p-2 rounded bg-slate-900/80 border border-slate-800">
+                <span className="text-slate-400">Field of View:</span>
+                <span className="text-amber-400 font-bold">1.0x FIXED WIDE</span>
+              </div>
+              <div className="flex justify-between items-center p-2 rounded bg-slate-900/80 border border-slate-800">
+                <span className="text-slate-400">QR Decoder:</span>
+                <span className="text-sky-300 font-bold">MULTI-PASS ENGINE</span>
+              </div>
+              <div className="flex justify-between items-center p-2 rounded bg-slate-900/80 border border-slate-800">
+                <span className="text-slate-400">Auto RTL Trigger:</span>
+                <span className="text-rose-400 font-bold">ACTIVE ON VERIFY</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsSettingsOpen(false)}
+              className="w-full py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase tracking-wider transition cursor-pointer"
+            >
+              CLOSE SETTINGS
+            </button>
           </div>
         </div>
       )}
-
-      {/* Autonomous Mission Configuration Modal */}
-      <AutonomousMissionConfigModal
-        isOpen={isConfigModalOpen}
-        onClose={() => setIsConfigModalOpen(false)}
-        telemetry={telemetry}
-        homePoint={homePoint}
-        pixhawkState={pixhawkState}
-        missionState={missionState}
-        onStartMission={handleStartMissionClick}
-      />
-
-      {/* Mid-Air Disarm Safety Warning Modal */}
-      <DisarmSafetyConfirmModal
-        isOpen={isDisarmSafetyModalOpen}
-        currentAltitude={telemetry.altitude}
-        verticalSpeed={telemetry.verticalSpeed}
-        flightMode={telemetry.flightMode}
-        onConfirmDisarm={() => {
-          setIsDisarmSafetyModalOpen(false);
-          executeDisarm(true);
-        }}
-        onCommandLand={() => {
-          setIsDisarmSafetyModalOpen(false);
-          mavlinkService.commandLand();
-        }}
-        onCancel={() => setIsDisarmSafetyModalOpen(false)}
-      />
     </div>
   );
 };
+
+export default DroneDashboard;

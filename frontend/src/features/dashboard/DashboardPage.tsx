@@ -18,17 +18,15 @@ import { groundStationMissionService, computeDestination } from '../../services/
 import { runnerCommService } from '../../services/runnerCommService';
 import { audioService } from '../../services/audioService';
 import { Header } from './Header';
-import { Sidebar } from './Sidebar';
-import { StatRow } from './StatRow';
-import { InstrumentColumn } from './instruments/InstrumentColumn';
+import { TelemetryPanel } from './TelemetryPanel';
+import { FlightOperationsCard } from './FlightOperationsCard';
+import { ManualMissionControlCard } from './ManualMissionControlCard';
+import { AutonomousMissionControlCard } from './AutonomousMissionControlCard';
+import { PreflightValidationModal } from './PreflightValidationModal';
 import { MapPanel } from './MapPanel';
 import { CameraFeed } from './CameraFeed';
-import { MissionStatus } from './MissionStatus';
 import { WaypointManager } from './WaypointManager';
 import { FlightParams } from './FlightParams';
-import { MissionPatterns } from './MissionPatterns';
-import { TelemetryLog } from './TelemetryLog';
-import { FlightLogsDeck } from './FlightLogsDeck';
 import { AutonomousMissionConfigModal } from '../../components/Mission/AutonomousMissionConfigModal';
 import { MissionHistoryModal } from '../../components/History/MissionHistoryModal';
 import { SerialDiagnosticsModal } from '../../components/Drone/SerialDiagnosticsModal';
@@ -36,28 +34,74 @@ import { AppRole } from '../../types/mission';
 
 interface DashboardPageProps {
   onLogout?: () => void;
-  onSwitchRole?: (role: AppRole) => void;
   currentRole?: AppRole;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
   onLogout,
-  onSwitchRole,
   currentRole = 'GROUND_STATION',
 }) => {
   const telemetry = useDashboardTelemetry();
+  // Section 3: Two Primary Mission Modes (MANUAL and AUTONOMOUS)
+  const [missionMode, setMissionMode] = useState<'MANUAL' | 'AUTONOMOUS'>('MANUAL');
   const [activeTab, setActiveTab] = useState<'Plan' | 'Fly' | 'Logs'>('Fly');
   const [activeNav, setActiveNav] = useState<string>('Dashboard');
-  const [showArmModal, setShowArmModal] = useState<boolean>(false);
+  const [mobileView, setMobileView] = useState<'telemetry' | 'map' | 'operations'>('map');
+  const [showPreflightModal, setShowPreflightModal] = useState<boolean>(false);
   const [showRtlModal, setShowRtlModal] = useState<boolean>(false);
   const [rtlConfirmPending, setRtlConfirmPending] = useState<boolean>(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+
+  // Synchronized active mission state (survives page refresh via backend /api/missions/active)
+  const [activeMissionData, setActiveMissionData] = useState<{
+    elapsedSeconds: number;
+    remainingSeconds: number;
+    status: string;
+    deadline?: number;
+    isExecuting: boolean;
+  } | null>(null);
 
   const rtlTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     return () => {
       if (rtlTimerRef.current) clearTimeout(rtlTimerRef.current);
+    };
+  }, []);
+
+  // Poll backend for active mission every 2s to survive GCS browser refreshes
+  useEffect(() => {
+    let isMounted = true;
+    const fetchActiveMission = async () => {
+      try {
+        const res = await fetch('/api/missions/active');
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && data.success && data.active && data.mission) {
+            setActiveMissionData({
+              elapsedSeconds: data.mission.elapsedSeconds || 0,
+              remainingSeconds: data.mission.remainingSeconds || 0,
+              status: data.mission.status || 'EXECUTING',
+              deadline: data.mission.deadline,
+              isExecuting: data.mission.status === 'EXECUTING',
+            });
+            if (data.mission.mode === 'AUTONOMOUS' || data.mission.mode === 'MANUAL') {
+              setMissionMode(data.mission.mode);
+            }
+          } else if (isMounted && !data.active) {
+            setActiveMissionData(null);
+          }
+        }
+      } catch (e) {
+        // network silent retry
+      }
+    };
+
+    fetchActiveMission();
+    const interval = setInterval(fetchActiveMission, 2500);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
     };
   }, []);
 
@@ -194,13 +238,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   };
 
   const handleArmAndFly = () => {
-    setShowArmModal(true);
+    setShowPreflightModal(true);
     audioService.playBeep(900, 100);
   };
 
-  const confirmArmAndFly = async () => {
-    setShowArmModal(false);
-    showNotification('Arming flight controller and starting mission...');
+  const confirmArmAndLaunch = async () => {
+    setShowPreflightModal(false);
+    showNotification(`Arming flight controller and starting ${missionMode} mission...`);
     try {
       if (missionEngine?.startMission) {
         await missionEngine.startMission();
@@ -208,10 +252,44 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         await mavlinkService.sendArmCommand(false);
         await mavlinkService.setFlightMode('AUTO');
       }
-      showNotification('Vehicle Armed — Autonomous mission initiated ✓');
+
+      // Register active mission with backend /api/missions (preserves start time & deadline)
+      const m = groundStationMissionService.getCurrentMission();
+      const timeLimitMin = 10;
+      const now = Date.now();
+      const deadline = now + timeLimitMin * 60 * 1000;
+
+      fetch('/api/missions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          missionId: m?.id || `MISS_${now}`,
+          mode: missionMode,
+          algorithm: m?.missionType === 'SEARCH' ? 'SPIRAL' : 'TANGENTIAL_CIRCULAR',
+          searchCenter: m?.geometry?.circleCenter || { lat: telemetry.latitude, lng: telemetry.longitude },
+          searchRadiusMeters: m?.geometry?.circleRadiusMeters || 10,
+          plannedAltitudeMeters: m?.altitude || 10,
+          timeLimitMinutes: timeLimitMin,
+          startTime: now,
+          deadline,
+          waypoints: m?.waypoints || [],
+          status: 'EXECUTING',
+        }),
+      }).catch(() => {});
+
+      setActiveMissionData({
+        elapsedSeconds: 0,
+        remainingSeconds: timeLimitMin * 60,
+        status: 'EXECUTING',
+        deadline,
+        isExecuting: true,
+      });
+
+      showNotification(`Vehicle Armed — ${missionMode} mission initiated ✓`);
       audioService.playBeep(1000, 120);
     } catch (err: any) {
       showNotification(`Mission start failed: ${err?.message || 'Check pre-arm conditions'}`);
+      throw err;
     }
   };
 
@@ -283,68 +361,42 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   };
 
   return (
-    <div className="min-h-screen w-full bg-[var(--uav-bg)] text-[var(--uav-text)] flex flex-col font-sans select-none overflow-x-hidden">
-      {/* 1. Header (65px) */}
+    <div className="h-[100dvh] w-full bg-[var(--uav-bg)] text-[var(--uav-text)] flex flex-col font-sans select-none overflow-hidden">
+      {/* 1. Header (Fixed 68px) */}
       <Header
         telemetry={telemetry}
+        missionMode={missionMode}
+        onModeChange={(mode) => {
+          setMissionMode(mode);
+          showNotification(`${mode} MISSION MODE ACTIVE`);
+        }}
         activeTab={activeTab}
         onTabChange={handleTabChange}
         onOpenSettings={() => setIsConfigModalOpen(true)}
         onLogout={onLogout}
-        onSwitchRole={onSwitchRole}
         currentRole={currentRole}
         onArmClick={() => {
           if (telemetry.isArmed) {
             handleToggleArm();
           } else {
-            handleArmAndFly();
+            setShowPreflightModal(true);
           }
         }}
         onToggleRC={handleToggleRC}
         rcOverrideEnabled={telemetry.rcOverrideEnabled}
       />
 
-      {/* Plan Mode Tactical Planning Banner */}
-      {activeTab === 'Plan' && (
-        <div className="w-full bg-[#161B22] border-b border-[var(--uav-card-border)] text-white px-4 py-2 flex items-center justify-between z-20 shadow-md">
-          <div className="flex items-center gap-2 text-[12px] font-semibold text-emerald-300">
-            <Calendar className="w-4 h-4 text-emerald-400" />
-            <span>MISSION PLANNER ACTIVE: Click map to plot waypoints or configure autonomous search patterns in the right panel.</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleUploadWaypoints}
-              className="px-3 py-1 bg-[#10B981] hover:bg-[#059669] text-emerald-950 text-[11px] font-bold rounded flex items-center gap-1.5 transition cursor-pointer"
-            >
-              <Send className="w-3 h-3" />
-              <span>Upload Plan</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab('Fly');
-                setActiveNav('Dashboard');
-              }}
-              className="px-3 py-1 bg-[#21262D] hover:bg-[#262C36] text-slate-300 hover:text-white text-[11px] font-bold rounded transition cursor-pointer"
-            >
-              Switch to Fly Cockpit
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 2. Alert Banners (Link Lost / Stale Heartbeat / Connecting) */}
+      {/* Alert Banners (Link Lost / Stale Heartbeat / Connecting) */}
       {telemetry.isLinkLost && (
-        <div className="w-full bg-red-600/95 border-b border-red-500 text-white px-4 py-2 flex items-center justify-between z-30 shadow-lg">
+        <div className="w-full bg-red-600/95 border-b border-red-500 text-white px-4 py-1.5 flex items-center justify-between z-30 shrink-0 shadow-lg">
           <div className="flex items-center gap-2 text-[12px] font-bold tracking-wide">
-            <AlertTriangle className="w-5 h-5 animate-pulse text-amber-300" />
+            <AlertTriangle className="w-4 h-4 animate-pulse text-amber-300" />
             <span>CRITICAL LINK LOST: No MAVLink heartbeat from Pixhawk for &gt; 5 seconds. Use RC transmitter switch to RTL or LAND immediately.</span>
           </div>
           <button
             type="button"
             onClick={handleEmergencyRTL}
-            className={`px-3 py-1 font-bold text-[11px] rounded uppercase tracking-wider cursor-pointer ${
+            className={`px-3 py-0.5 font-bold text-[11px] rounded uppercase tracking-wider cursor-pointer ${
               rtlConfirmPending ? 'bg-red-600 text-white animate-pulse border-2 border-white' : 'bg-white text-red-700 hover:bg-red-50'
             }`}
           >
@@ -354,14 +406,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       )}
 
       {!telemetry.isLinkLost && telemetry.isStale && (
-        <div className="w-full bg-amber-600/90 border-b border-amber-500 text-white px-4 py-1.5 flex items-center gap-2 text-[12px] font-semibold z-30">
+        <div className="w-full bg-amber-600/90 border-b border-amber-500 text-white px-4 py-1 flex items-center gap-2 text-[12px] font-semibold z-30 shrink-0">
           <AlertTriangle className="w-4 h-4 text-white" />
           <span>STALE HEARTBEAT: Telemetry stream delayed (&gt; 2s). Check wireless signal strength or USB connection.</span>
         </div>
       )}
 
       {telemetry.isConnecting && (
-        <div className="w-full bg-[var(--uav-primary-blue)]/90 border-b border-blue-400 text-white px-4 py-1.5 flex items-center gap-2 text-[12px] font-semibold z-30">
+        <div className="w-full bg-[var(--uav-primary-blue)]/90 border-b border-blue-400 text-white px-4 py-1 flex items-center gap-2 text-[12px] font-semibold z-30 shrink-0">
           <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
           <span>CONNECTING: Establishing MAVLink bridge to Pixhawk flight controller...</span>
         </div>
@@ -375,133 +427,124 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
       )}
 
-      {/* 3. Main Body: Sidebar + Dashboard Panels Grid */}
-      <div className="flex flex-1 overflow-hidden w-full">
-        {/* Left Sidebar (185px) */}
-        <Sidebar
-          activeNav={activeNav}
-          onNavChange={handleNavChange}
-          onEmergencyRTL={handleEmergencyRTL}
-          rtlConfirmPending={rtlConfirmPending}
-          onToggleRC={handleToggleRC}
-          rcOverrideEnabled={telemetry.rcOverrideEnabled}
-          isArmed={telemetry.isArmed}
-          onToggleArm={handleToggleArm}
-        />
-
-        {/* Right Dashboard Content */}
-        <main className="flex-1 flex flex-col p-3 gap-3 overflow-y-auto overflow-x-hidden min-w-0">
-          {activeTab === 'Logs' ? (
-            <FlightLogsDeck
-              telemetry={telemetry}
-              onReturnToCockpit={() => {
-                setActiveTab('Fly');
-                setActiveNav('Dashboard');
-              }}
-            />
-          ) : (
-            <>
-              {/* Stat Row (66px) */}
-              <StatRow telemetry={telemetry} />
-
-              {/* Middle Row (540px) */}
-              <div className="grid grid-cols-[287px_1fr_419px] gap-3 h-[540px] items-stretch">
-                {/* Column 1: Instruments (287px) */}
-                <InstrumentColumn telemetry={telemetry} />
-
-                {/* Column 2: Map Panel (1fr) */}
-                <MapPanel
-                  telemetry={telemetry}
-                  onWaypointAdded={(_lat, _lon) => showNotification('Waypoint added to mission')}
-                />
-
-                {/* Column 3: Camera & Mission Status (419px) */}
-                <div className="flex flex-col gap-3 h-[540px] w-[419px] shrink-0">
-                  <CameraFeed telemetry={telemetry} />
-                  <MissionStatus
-                    isArmed={telemetry.isArmed}
-                    onUploadWaypoints={handleUploadWaypoints}
-                    onArmAndFly={handleArmAndFly}
-                  />
-                </div>
-              </div>
-
-              {/* Bottom Row (205px) */}
-              <div className="grid grid-cols-[1.32fr_1.02fr_0.88fr_1fr] gap-3 h-[205px] items-stretch">
-                <WaypointManager
-                  onClearAll={() => showNotification('Mission waypoints cleared')}
-                  onSaveKml={() => showNotification('Mission KML downloaded')}
-                  onLoadKml={() => showNotification('Mission KML loaded')}
-                />
-                <FlightParams />
-                <MissionPatterns
-                  onSelectPattern={(pat) => showNotification(`${pat} pattern generated`)}
-                />
-                <TelemetryLog
-                  isFixture={telemetry.isFixture}
-                  onExpandLogs={() => {
-                    setActiveTab('Logs');
-                    setActiveNav('Logs');
-                  }}
-                />
-              </div>
-            </>
-          )}
-        </main>
+      {/* Responsive View Switcher for Small Screens (< lg) */}
+      <div className="lg:hidden w-full bg-[#11161F] border-b border-[var(--uav-card-border)] px-3 py-1.5 flex items-center justify-between shrink-0 z-20">
+        <span className="text-[11px] font-mono font-bold text-slate-400 uppercase">
+          GROUND STATION VIEW:
+        </span>
+        <div className="flex items-center gap-1 bg-[#161B22] p-0.5 rounded-lg border border-[var(--uav-card-border)] text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() => setMobileView('telemetry')}
+            className={`px-2.5 py-1 rounded transition cursor-pointer ${
+              mobileView === 'telemetry' ? 'bg-[#10B981] text-emerald-950 font-bold' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            📊 Telemetry
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileView('map')}
+            className={`px-2.5 py-1 rounded transition cursor-pointer ${
+              mobileView === 'map' ? 'bg-[#10B981] text-emerald-950 font-bold' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            🗺️ Live Map
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileView('operations')}
+            className={`px-2.5 py-1 rounded transition cursor-pointer ${
+              mobileView === 'operations' ? 'bg-[#10B981] text-emerald-950 font-bold' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            🎮 Controls
+          </button>
+        </div>
       </div>
 
-      {/* 4. Safety Confirmation Modal: ARM & FLY */}
-      {showArmModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#161B22] border-2 border-emerald-500 rounded-[12px] max-w-md w-full p-6 text-white shadow-2xl space-y-4">
-            <div className="flex items-center gap-3 text-emerald-400">
-              <ShieldAlert className="w-8 h-8" />
-              <div>
-                <h3 className="font-orbitron font-bold text-[16px] tracking-wide text-white">
-                  CONFIRM ARM &amp; FLY
-                </h3>
-                <p className="text-[11px] text-[var(--uav-muted)]">Autonomous Mission Execution Safety Gate</p>
-              </div>
-            </div>
+      {/* 3-Section Full-Screen Fixed Viewport Grid */}
+      <div className="flex-1 min-h-0 w-full grid grid-cols-1 lg:grid-cols-[280px_1fr_400px] xl:grid-cols-[300px_1fr_420px] overflow-hidden">
+        
+        {/* 1. LEFT PANEL: Live Drone Telemetry (Fixed Position, Internal Scroll Only) */}
+        <aside
+          className={`h-full min-h-0 overflow-y-auto overflow-x-hidden p-3 bg-[var(--uav-header)] border-r border-[var(--uav-card-border)] scrollbar-thin scrollbar-thumb-slate-800 ${
+            mobileView === 'telemetry' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'
+          }`}
+        >
+          <TelemetryPanel telemetry={telemetry} />
+        </aside>
 
-            <p className="text-[12px] text-slate-300 leading-relaxed">
-              You are about to arm vehicle motors and initiate autonomous mission navigation. Ensure all personnel are clear of spinning propellers, GPS 3D fix is locked, and flight boundaries are secure.
-            </p>
+        {/* 2. CENTER PANEL: Live Drone Map (Primary Visual Element, Fills Center Space) */}
+        <section
+          className={`h-full min-h-0 w-full relative overflow-hidden bg-[#0D1117] flex flex-col ${
+            mobileView === 'map' ? 'flex' : 'hidden lg:flex'
+          }`}
+        >
+          <MapPanel
+            telemetry={telemetry}
+            className="h-full w-full min-h-0 flex-1 border-0 rounded-none"
+            onWaypointAdded={(_lat, _lon) => showNotification('Waypoint added to mission plan')}
+          />
+        </section>
 
-            <div className="bg-[#11161D] p-3 rounded-lg border border-[var(--uav-card-border)] space-y-1 text-[11px]">
-              <div className="flex justify-between">
-                <span className="text-[var(--uav-muted)]">GPS Satellites:</span>
-                <span className="font-mono font-bold text-white">{telemetry.satellites} Sats (HDOP {telemetry.hdop.toFixed(1)})</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[var(--uav-muted)]">Battery Voltage:</span>
-                <span className="font-mono font-bold text-[#22C55E]">{telemetry.batteryVoltage.toFixed(1)}V ({telemetry.batteryPercent}%)</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[var(--uav-muted)]">Flight Mode Target:</span>
-                <span className="font-mono font-bold text-emerald-400">AUTO / GUIDED</span>
-              </div>
-            </div>
+        {/* 3. RIGHT PANEL: Camera & Operations (Adapts between MODE A and MODE B) */}
+        <aside
+          className={`h-full min-h-0 overflow-y-auto overflow-x-hidden p-3 bg-[var(--uav-header)] border-l border-[var(--uav-card-border)] flex flex-col gap-3 scrollbar-thin scrollbar-thumb-slate-800 ${
+            mobileView === 'operations' ? 'flex' : 'hidden lg:flex'
+          }`}
+        >
+          {/* A. Drone Camera Feed with Live QR Recognition */}
+          <CameraFeed telemetry={telemetry} className="w-full shrink-0" />
 
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowArmModal(false)}
-                className="px-4 py-2 rounded-lg border border-[var(--uav-card-border)] text-[var(--uav-muted)] hover:text-white hover:bg-[#21262D] text-[12px] font-semibold transition cursor-pointer"
-              >
-                CANCEL
-              </button>
-              <button
-                type="button"
-                onClick={confirmArmAndFly}
-                className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[12px] tracking-wider uppercase transition shadow-lg cursor-pointer"
-              >
-                CONFIRM ARM &amp; LAUNCH
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          {/* B. Mode-Specific Operations Card */}
+          {missionMode === 'MANUAL' ? (
+            <>
+              {/* MODE A: Manual Mission Planning & Controls */}
+              <ManualMissionControlCard
+                telemetry={telemetry}
+                onOpenPreflightModal={() => setShowPreflightModal(true)}
+                onUploadWaypoints={handleUploadWaypoints}
+                onEmergencyRTL={handleEmergencyRTL}
+                rtlConfirmPending={rtlConfirmPending}
+              />
+
+              {/* Waypoint Management Table */}
+              <WaypointManager
+                className="w-full shrink-0"
+                onClearAll={() => showNotification('Mission waypoints cleared')}
+                onSaveKml={() => showNotification('Mission KML downloaded')}
+                onLoadKml={() => showNotification('Mission KML loaded')}
+              />
+            </>
+          ) : (
+            <>
+              {/* MODE B: Autonomous Search Mission (4 Configurable Fields) */}
+              <AutonomousMissionControlCard
+                telemetry={telemetry}
+                onOpenPreflightModal={() => setShowPreflightModal(true)}
+                onUploadWaypoints={handleUploadWaypoints}
+                onEmergencyRTL={handleEmergencyRTL}
+                rtlConfirmPending={rtlConfirmPending}
+                activeMissionTime={activeMissionData || undefined}
+              />
+            </>
+          )}
+
+          {/* C. Flight Parameters */}
+          <FlightParams className="w-full shrink-0" />
+        </aside>
+
+      </div>
+
+      {/* 4. Preflight Readiness Verification Modal (Section 5) */}
+      <PreflightValidationModal
+        isOpen={showPreflightModal}
+        onClose={() => setShowPreflightModal(false)}
+        onConfirmLaunch={confirmArmAndLaunch}
+        telemetry={telemetry}
+        mode={missionMode}
+      />
 
       {/* 5. Safety Confirmation Modal: EMERGENCY RTL */}
       {showRtlModal && (

@@ -85,7 +85,13 @@ export class SearchEngine {
       this.config.desiredOverlapPercent
     );
 
-    this.initVisionAndDetectionHooks();
+    if (typeof setTimeout !== 'undefined') {
+      setTimeout(() => {
+        this.initVisionAndDetectionHooks();
+      }, 0);
+    } else {
+      this.initVisionAndDetectionHooks();
+    }
   }
 
   /**

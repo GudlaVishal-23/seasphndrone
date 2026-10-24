@@ -14,7 +14,8 @@ import {
   ShieldCheck,
   ShieldAlert,
   Loader2,
-  ChevronRight
+  ChevronRight,
+  Trash2
 } from 'lucide-react';
 import { Card } from '../../ui/Card';
 import {
@@ -149,6 +150,21 @@ export const AutonomousMissionControlCard: React.FC<AutonomousMissionControlCard
       setTimeout(() => setUploadNotice(null), 4000);
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleDeleteMission = async () => {
+    setIsUploading(true);
+    setUploadNotice('Deleting mission from GCS & Flight Controller...');
+    try {
+      const res = await groundStationMissionService.deleteMission();
+      setCurrentMission(null);
+      setUploadNotice(res.message);
+    } catch {
+      setUploadNotice('Mission wiped locally');
+    } finally {
+      setIsUploading(false);
+      setTimeout(() => setUploadNotice(null), 3500);
     }
   };
 
@@ -435,34 +451,50 @@ export const AutonomousMissionControlCard: React.FC<AutonomousMissionControlCard
       )}
 
       {/* Primary Action Buttons */}
-      <div className="grid grid-cols-2 gap-2">
-        {/* Upload Waypoints Button */}
-        <button
-          type="button"
-          onClick={handleUploadClick}
-          disabled={isUploading || !isFeasible}
-          className="py-2.5 px-3 rounded-lg bg-[#10B981] hover:bg-[#059669] text-emerald-950 font-sans font-bold text-[11px] tracking-wider uppercase flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md disabled:opacity-50"
-          title="Upload generated autonomous waypoints to Pixhawk flight controller"
-        >
-          <Send className={`w-3.5 h-3.5 ${isUploading ? 'animate-bounce' : ''}`} />
-          <span>{isUploading ? 'UPLOADING...' : 'UPLOAD TO FC'}</span>
-        </button>
+      <div className="flex flex-col gap-2">
+        <div className="grid grid-cols-2 gap-2">
+          {/* Upload Waypoints Button */}
+          <button
+            type="button"
+            onClick={handleUploadClick}
+            disabled={isUploading || !isFeasible}
+            className="py-2.5 px-3 rounded-lg bg-[#10B981] hover:bg-[#059669] text-emerald-950 font-sans font-bold text-[11px] tracking-wider uppercase flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md disabled:opacity-50"
+            title="Upload generated autonomous waypoints to Pixhawk flight controller"
+          >
+            <Send className={`w-3.5 h-3.5 ${isUploading ? 'animate-bounce' : ''}`} />
+            <span>{isUploading ? 'UPLOADING...' : 'UPLOAD TO FC'}</span>
+          </button>
 
-        {/* Start Mission Button (Opens Preflight Checklist Modal) */}
-        <button
-          type="button"
-          onClick={onOpenPreflightModal}
-          disabled={!isFeasible}
-          className={`py-2.5 px-3 rounded-lg font-sans font-black text-[11px] tracking-wider uppercase flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md ${
-            isFeasible
-              ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/50'
-              : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-          }`}
-          title="Perform preflight checks and initiate autonomous search"
-        >
-          <Play className="w-3.5 h-3.5 fill-current" />
-          <span>START MISSION</span>
-        </button>
+          {/* Start Mission Button (Opens Preflight Checklist Modal) */}
+          <button
+            type="button"
+            onClick={onOpenPreflightModal}
+            disabled={!isFeasible}
+            className={`py-2.5 px-3 rounded-lg font-sans font-black text-[11px] tracking-wider uppercase flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md ${
+              isFeasible
+                ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/50'
+                : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+            }`}
+            title="Perform preflight checks and initiate autonomous search"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>START MISSION</span>
+          </button>
+        </div>
+
+        {/* Delete Mission Button */}
+        {currentMission && (
+          <button
+            type="button"
+            onClick={handleDeleteMission}
+            disabled={isUploading}
+            className="w-full py-1.5 px-3 rounded-lg bg-red-950/30 hover:bg-red-900/50 border border-red-500/50 text-red-400 hover:text-white font-mono text-[10.5px] font-bold uppercase flex items-center justify-center gap-1.5 transition cursor-pointer"
+            title="Delete autonomous mission from GCS and wipe Pixhawk FC EEPROM (MISSION_CLEAR_ALL)"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>DELETE AUTONOMOUS MISSION</span>
+          </button>
+        )}
       </div>
 
       {/* Emergency RTL Control */}

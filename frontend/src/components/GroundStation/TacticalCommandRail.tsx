@@ -11,6 +11,8 @@ interface TacticalCommandRailProps {
   onClearDrawings?: () => void;
   onUploadMission?: () => void;
   onDownloadMission?: () => void;
+  onDeleteMission?: () => void;
+  onOpenGeofence?: () => void;
   onOpenSettings?: () => void;
   onTogglePlayMission?: () => void;
   className?: string;
@@ -27,6 +29,8 @@ export const TacticalCommandRail: React.FC<TacticalCommandRailProps> = ({
   onClearDrawings,
   onUploadMission,
   onDownloadMission,
+  onDeleteMission,
+  onOpenGeofence,
   onOpenSettings,
   onTogglePlayMission,
   className = ''
@@ -75,12 +79,13 @@ export const TacticalCommandRail: React.FC<TacticalCommandRailProps> = ({
         <span className="material-symbols-outlined text-[17px]">my_location</span>
       </button>
 
-      {/* 4. LAYERS / GEOFENCE TOGGLE */}
+      {/* 4. GEOFENCE AIRSPACE CONTROL */}
       <button
-        className="flex items-center justify-center h-8 w-full rounded-lg bg-[#1e1f24] hover:bg-[#282a30] text-slate-400 hover:text-white transition-all active:scale-95 cursor-pointer shadow-sm"
-        title="Toggle Map Airspace Layers"
+        onClick={onOpenGeofence}
+        className="flex items-center justify-center h-8 w-full rounded-lg bg-[#1e1f24] hover:bg-amber-950/60 text-amber-400 hover:text-amber-200 transition-all active:scale-95 cursor-pointer shadow-sm"
+        title="Autonomous Geofence & Boundary Settings (ADDC Rule 3.3)"
       >
-        <span className="material-symbols-outlined text-[17px]">layers</span>
+        <span className="material-symbols-outlined text-[17px]">shield</span>
       </button>
 
       {/* 5. UPLOAD MISSION / WAYPOINTS */}
@@ -99,6 +104,15 @@ export const TacticalCommandRail: React.FC<TacticalCommandRailProps> = ({
         title="Download Mission from Drone (FC)"
       >
         <span className="material-symbols-outlined text-[17px]">download</span>
+      </button>
+
+      {/* 7. DELETE / WIPE MISSION */}
+      <button
+        onClick={onDeleteMission}
+        className="flex items-center justify-center h-8 w-full rounded-lg bg-[#1e1f24] hover:bg-red-950/70 text-slate-400 hover:text-red-400 transition-all active:scale-95 cursor-pointer shadow-sm"
+        title="Delete Mission from GCS & Flight Controller (MISSION_CLEAR_ALL)"
+      >
+        <span className="material-symbols-outlined text-[17px]">delete_forever</span>
       </button>
 
       {/* 7. SLIDERS / PARAMETERS */}

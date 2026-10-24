@@ -60,8 +60,9 @@ export const WaypointManager: React.FC<WaypointManagerProps> = ({
   onLoadKml,
   onSaveKml,
 }) => {
-  const [activeTab, setActiveTab] = useState<'Waypoints' | 'Patterns' | 'Geo Fence'>('Waypoints');
+  const [activeTab, setActiveTab] = useState<'Waypoints' | 'Patterns'>('Waypoints');
   const [waypoints, setWaypoints] = useState<GroundStationWaypoint[]>([]);
+  const [deleteConfirm, setDeleteConfirm] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -71,9 +72,15 @@ export const WaypointManager: React.FC<WaypointManagerProps> = ({
     return () => unsub();
   }, []);
 
-  const handleClearAll = () => {
-    groundStationMissionService.clearMission();
-    audioService.playBeep(520, 60);
+  const handleDeleteMission = async () => {
+    if (!deleteConfirm) {
+      setDeleteConfirm(true);
+      audioService.playBeep(450, 60);
+      setTimeout(() => setDeleteConfirm(false), 4000);
+      return;
+    }
+    setDeleteConfirm(false);
+    await groundStationMissionService.deleteMission();
     onClearAll?.();
   };
 
@@ -179,11 +186,10 @@ export const WaypointManager: React.FC<WaypointManagerProps> = ({
           options={[
             { id: 'Waypoints', label: 'Waypoints' },
             { id: 'Patterns', label: 'Patterns' },
-            { id: 'Geo Fence', label: 'Geo Fence' },
           ]}
         />
         <span className="text-[11px] font-mono text-[var(--uav-muted)]">
-          Total Waypoints: {waypoints.length}
+          Total: {waypoints.length} WPs
         </span>
       </div>
 
@@ -259,42 +265,20 @@ export const WaypointManager: React.FC<WaypointManagerProps> = ({
         </div>
       )}
 
-      {activeTab === 'Geo Fence' && (
-        <div className="flex-1 flex flex-col justify-between my-1 p-2 rounded-[6px] border border-[var(--uav-card-border)] bg-[#11161D] text-[11px] font-sans">
-          <div className="space-y-1 text-[10px]">
-            <div className="flex items-center justify-between">
-              <span className="text-[var(--uav-muted)]">Arena Boundary:</span>
-              <span className="font-mono font-bold text-amber-400">50m × 50m (Rule 3.3)</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[var(--uav-muted)]">Ceiling Altitude:</span>
-              <span className="font-mono font-bold text-sky-400">25.0 m AGL</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[var(--uav-muted)]">Breach Action:</span>
-              <span className="font-mono font-bold text-rose-400">RTL &amp; LOITER</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[var(--uav-muted)]">No-Fly Zones:</span>
-              <span className="font-mono font-bold text-emerald-400">Enforced (Rule 3.8)</span>
-            </div>
-          </div>
-          <div className="flex items-center justify-between pt-1 border-t border-[var(--uav-card-border)]">
-            <span className="text-[10px] text-[var(--uav-muted)]">ADDC 2026 Compliant</span>
-            <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-[9px]">ACTIVE</span>
-          </div>
-        </div>
-      )}
-
       {/* Bottom Button Bar */}
-      <div className="flex items-center justify-between pt-0.5">
+      <div className="flex items-center justify-between pt-1 border-t border-[var(--uav-card-border)]">
         <button
           type="button"
-          onClick={handleClearAll}
-          disabled={waypoints.length === 0}
-          className="px-2.5 py-1 rounded-[6px] border border-red-500/50 text-red-400 hover:bg-red-500/20 disabled:opacity-40 disabled:pointer-events-none text-[11px] font-sans font-semibold transition cursor-pointer"
+          onClick={handleDeleteMission}
+          className={`flex items-center gap-1.5 px-3 py-1 rounded-[6px] border text-[11px] font-sans font-bold transition cursor-pointer shadow-sm active:scale-95 ${
+            deleteConfirm
+              ? 'bg-red-600 text-white border-white animate-pulse'
+              : 'border-red-500/70 bg-red-950/40 text-red-400 hover:bg-red-900/60 hover:text-white'
+          }`}
+          title="Delete mission from GCS and wipe Pixhawk FC EEPROM (MISSION_CLEAR_ALL)"
         >
-          Clear All
+          <Trash2 className="w-3.5 h-3.5" />
+          <span>{deleteConfirm ? 'CONFIRM DELETE?' : 'Delete Mission'}</span>
         </button>
 
         <div className="flex items-center gap-1.5">

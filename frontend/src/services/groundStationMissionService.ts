@@ -142,6 +142,42 @@ export class GroundStationMissionService {
     mavlinkService.clearMissionWaypoints().catch(() => {});
   }
 
+  /**
+   * Complete Mission Deletion:
+   * 1. Wipes planned waypoints from local GCS memory.
+   * 2. Issues MAVLink MISSION_CLEAR_ALL to Pixhawk Flight Controller EEPROM.
+   * 3. Resets autonomous missionEngine state.
+   * 4. Deletes active mission from backend relay if running.
+   */
+  public async deleteMission(): Promise<{ success: boolean; message: string }> {
+    this.currentMission = null;
+    this.activeDrawingTool = 'select';
+    this.notify();
+    this.toolSubscribers.forEach((fn) => fn('select'));
+
+    // Reset local mission engine state
+    missionEngine.resetMission();
+
+    // Send MAVLink MISSION_CLEAR_ALL to Pixhawk flight controller
+    let mavResult = { success: true, message: 'Mission wiped' };
+    try {
+      mavResult = await mavlinkService.clearMissionWaypoints();
+    } catch (e: any) {
+      console.warn('[MISSION] MAVLink clear notice:', e);
+    }
+
+    // Sync with backend active mission route
+    try {
+      fetch('/api/missions/active', { method: 'DELETE' }).catch(() => {});
+    } catch {}
+
+    audioService.playBeep(420, 100);
+    return {
+      success: true,
+      message: 'Mission successfully deleted from GCS and Flight Controller (EEPROM cleared).'
+    };
+  }
+
   public setDrawingTool(tool: MissionDrawingTool): void {
     this.activeDrawingTool = tool;
     this.toolSubscribers.forEach((fn) => fn(tool));

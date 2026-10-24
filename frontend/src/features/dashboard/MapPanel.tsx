@@ -38,6 +38,8 @@ import { LatLngPoint, HomePoint } from '../../types/mission';
 import { audioService } from '../../services/audioService';
 import { reconDetectionService } from '../../services/reconDetectionService';
 import { TargetLocation, QRDetectionRecord } from '../../types/recon';
+import { geofenceService } from '../../services/geofenceService';
+import { GeofenceControlModal } from '../../components/GroundStation/GeofenceControlModal';
 
 interface MapPanelProps {
   telemetry: DashboardTelemetryData;
@@ -98,7 +100,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   const [layer, setLayer] = useState<'Map' | 'Satellite' | 'Street' | 'Topo' | 'Dark'>('Satellite');
   const [isPinningWp, setIsPinningWp] = useState<boolean>(false);
   const [isMeasuring, setIsMeasuring] = useState<boolean>(false);
-  const [showGeofence, setShowGeofence] = useState<boolean>(true);
+  const [showGeofence, setShowGeofence] = useState<boolean>(() => geofenceService.getState().enabled);
+  const [isGeofenceModalOpen, setIsGeofenceModalOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [measureDistanceMeters, setMeasureDistanceMeters] = useState<number | null>(null);
 
@@ -451,41 +454,52 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     };
   }, []);
 
-  // Update Geofence around given anchor coordinates
+  // Update Geofence around given anchor coordinates using geofenceService
   const updateGeofence = (map: L.Map, anchorLat: number, anchorLon: number) => {
-    if (
-      lastGeofenceAnchorRef.current &&
-      Math.abs(lastGeofenceAnchorRef.current.lat - anchorLat) < 0.0001 &&
-      Math.abs(lastGeofenceAnchorRef.current.lon - anchorLon) < 0.0001 &&
-      geofencePolygonRef.current
-    ) {
-      return;
-    }
-
-    lastGeofenceAnchorRef.current = { lat: anchorLat, lon: anchorLon };
-
     if (geofencePolygonRef.current && map.hasLayer(geofencePolygonRef.current)) {
       map.removeLayer(geofencePolygonRef.current);
+      geofencePolygonRef.current = null;
     }
 
-    const gf1 = computeDestination(anchorLat, anchorLon, 35.35, 45);
-    const gf2 = computeDestination(anchorLat, anchorLon, 35.35, 135);
-    const gf3 = computeDestination(anchorLat, anchorLon, 35.35, 225);
-    const gf4 = computeDestination(anchorLat, anchorLon, 35.35, 315);
+    const state = geofenceService.getState();
+    if (!state.enabled || !showGeofence) return;
 
-    const geofence = L.polygon([[gf1.lat, gf1.lng], [gf2.lat, gf2.lng], [gf3.lat, gf3.lng], [gf4.lat, gf4.lng]], {
-      color: '#f59e0b',
-      weight: 2,
+    lastGeofenceAnchorRef.current = { lat: anchorLat, lon: anchorLon };
+    const vertices = geofenceService.getBoundaryVertices();
+    if (vertices.length < 3) return;
+
+    const latLngs: L.LatLngExpression[] = vertices.map((v) => [v.lat, v.lng]);
+    const isBreached = state.isBreached;
+
+    const geofence = L.polygon(latLngs, {
+      color: isBreached ? '#ef4444' : '#f59e0b',
+      weight: isBreached ? 3 : 2,
       dashArray: '6, 6',
-      fillColor: '#f59e0b',
-      fillOpacity: 0.07,
-    }).bindTooltip('ADDC ARENA GEOFENCE (50m × 50m) — Rule 3.3', { permanent: false, direction: 'center' });
+      fillColor: isBreached ? '#ef4444' : '#f59e0b',
+      fillOpacity: isBreached ? 0.22 : 0.08,
+    }).bindTooltip(
+      isBreached
+        ? `⚠️ GEOFENCE BREACH: ${state.breachReason || 'Perimeter Crossed'}`
+        : `ADDC GEOFENCE (${state.widthMeters}m × ${state.heightMeters}m, Ceil: ${state.maxAltitudeMeters}m)`,
+      { permanent: false, direction: 'center' }
+    );
 
-    if (showGeofence) {
-      geofence.addTo(map);
-    }
+    geofence.addTo(map);
     geofencePolygonRef.current = geofence;
   };
+
+  useEffect(() => {
+    const unsub = geofenceService.subscribe((st) => {
+      setShowGeofence(st.enabled);
+      if (mapRef.current) {
+        const anchor = geofenceService.getEffectiveAnchor();
+        if (anchor) {
+          updateGeofence(mapRef.current, anchor.lat, anchor.lng);
+        }
+      }
+    });
+    return () => unsub();
+  }, [showGeofence]);
 
   // 3. Track Ground Station / Mobile / Device GPS via navigator.geolocation
   useEffect(() => {
@@ -1546,14 +1560,18 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             <Ruler className="w-3.5 h-3.5" />
           </button>
 
-          {/* Geofence Toggle */}
+          {/* Geofence Modal Trigger */}
           <button
             type="button"
-            onClick={() => setShowGeofence((prev) => !prev)}
+            onClick={() => setIsGeofenceModalOpen(true)}
             className={`w-7 h-7 rounded-[6px] flex items-center justify-center transition cursor-pointer ${
-              showGeofence ? 'bg-amber-600/30 border border-amber-500/60 text-amber-300' : 'hover:bg-[#21262D] text-[var(--uav-muted)] hover:text-white'
+              showGeofence
+                ? geofenceService.getState().isBreached
+                  ? 'bg-rose-600 border border-rose-500 text-white animate-pulse'
+                  : 'bg-amber-600/30 border border-amber-500/60 text-amber-300'
+                : 'hover:bg-[#21262D] text-[var(--uav-muted)] hover:text-white'
             }`}
-            title="Toggle ADDC 50m Arena Geofence"
+            title="Open Autonomous Geofence & Boundary Settings (ADDC Rule 3.3)"
           >
             <Shield className="w-3.5 h-3.5" />
           </button>
@@ -1812,6 +1830,12 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           )}
         </div>
       </div>
+
+      {/* Standalone Geofence Modal */}
+      <GeofenceControlModal
+        isOpen={isGeofenceModalOpen}
+        onClose={() => setIsGeofenceModalOpen(false)}
+      />
     </div>
   );
 };

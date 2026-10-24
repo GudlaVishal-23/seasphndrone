@@ -20,6 +20,8 @@ import { LiveVideoFeed } from './LiveVideoFeed';
 import { AutonomousMissionConfigModal } from '../Mission/AutonomousMissionConfigModal';
 import { CircleTestMissionModal } from '../Mission/CircleTestMissionModal';
 import { LoiterTestMissionModal } from '../Mission/LoiterTestMissionModal';
+import { GeofenceControlModal } from './GeofenceControlModal';
+import { groundStationMissionService } from '../../services/groundStationMissionService';
 
 // Detailed Multi-Card View Components
 import { ConnectionStatusDeck } from '../common/ConnectionStatusDeck';
@@ -97,6 +99,7 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
   const [isConfigModalOpen, setIsConfigModalOpen] = useState<boolean>(false);
   const [isCircleTestOpen, setIsCircleTestOpen] = useState<boolean>(false);
   const [isLoiterTestOpen, setIsLoiterTestOpen] = useState<boolean>(false);
+  const [isGeofenceModalOpen, setIsGeofenceModalOpen] = useState<boolean>(false);
 
   // Arming & Pre-Arm State
   const [isArming, setIsArming] = useState<boolean>(false);
@@ -433,6 +436,8 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
               onEmergencyRTL={onEmergencyRTL}
               onOpenSettings={() => setIsConfigModalOpen(true)}
               onTogglePlayMission={handleStartMissionClick}
+              onOpenGeofence={() => setIsGeofenceModalOpen(true)}
+              onDeleteMission={() => groundStationMissionService.deleteMission()}
             />
 
             {/* Live Arm/Disarm Feedback Alert Banner */}
@@ -734,6 +739,11 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
         telemetry={telemetry}
         homePoint={homePoint}
         pixhawkState={pixhawkState}
+      />
+
+      <GeofenceControlModal
+        isOpen={isGeofenceModalOpen}
+        onClose={() => setIsGeofenceModalOpen(false)}
       />
     </div>
   );

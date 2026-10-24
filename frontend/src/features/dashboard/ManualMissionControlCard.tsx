@@ -224,10 +224,10 @@ export const ManualMissionControlCard: React.FC<ManualMissionControlCardProps> =
           onClick={handleDeleteMission}
           disabled={totalWps === 0 && !mission}
           className="py-2 px-3 rounded-lg bg-red-950/40 hover:bg-red-900/60 border border-red-500/60 text-red-400 hover:text-white font-sans font-bold text-[11px] uppercase flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-40"
-          title="Delete mission from GCS and wipe Pixhawk FC EEPROM (MISSION_CLEAR_ALL)"
+          title="Clear path / Delete mission from GCS and wipe Pixhawk FC EEPROM (MISSION_CLEAR_ALL)"
         >
           <Trash2 className="w-3.5 h-3.5" />
-          <span>DELETE MISSION</span>
+          <span>CLEAR PATH</span>
         </button>
 
         {/* Upload Mission Button */}

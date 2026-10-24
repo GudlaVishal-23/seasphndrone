@@ -43,7 +43,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 }) => {
   const telemetry = useDashboardTelemetry();
   // Section 3: Two Primary Mission Modes (MANUAL and AUTONOMOUS)
-  const [missionMode, setMissionMode] = useState<'MANUAL' | 'AUTONOMOUS'>('MANUAL');
+  const [missionMode, setMissionMode] = useState<'MANUAL' | 'AUTONOMOUS'>(
+    () => (localStorage.getItem('sae_gcs_mission_mode') as 'MANUAL' | 'AUTONOMOUS') || 'MANUAL'
+  );
   const [activeTab, setActiveTab] = useState<'Plan' | 'Fly' | 'Logs'>('Fly');
   const [activeNav, setActiveNav] = useState<string>('Dashboard');
   const [mobileView, setMobileView] = useState<'telemetry' | 'map' | 'operations'>('map');
@@ -62,6 +64,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   } | null>(null);
 
   const rtlTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const userSelectedModeRef = useRef<boolean>(false);
+  const initialSyncDoneRef = useRef<boolean>(false);
 
   useEffect(() => {
     return () => {
@@ -85,11 +89,17 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               deadline: data.mission.deadline,
               isExecuting: data.mission.status === 'EXECUTING',
             });
-            if (data.mission.mode === 'AUTONOMOUS' || data.mission.mode === 'MANUAL') {
-              setMissionMode(data.mission.mode);
+            // Only synchronize mission mode on initial mount if operator hasn't explicitly selected one
+            if (!initialSyncDoneRef.current && !userSelectedModeRef.current) {
+              initialSyncDoneRef.current = true;
+              if (data.mission.status === 'EXECUTING' && (data.mission.mode === 'AUTONOMOUS' || data.mission.mode === 'MANUAL')) {
+                setMissionMode(data.mission.mode);
+                localStorage.setItem('sae_gcs_mission_mode', data.mission.mode);
+              }
             }
           } else if (isMounted && !data.active) {
             setActiveMissionData(null);
+            initialSyncDoneRef.current = true;
           }
         }
       } catch (e) {
@@ -360,16 +370,37 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     }
   };
 
+  const handleModeChange = (mode: 'MANUAL' | 'AUTONOMOUS') => {
+    userSelectedModeRef.current = true;
+    setMissionMode(mode);
+    try {
+      localStorage.setItem('sae_gcs_mission_mode', mode);
+    } catch {}
+    audioService.playBeep(mode === 'MANUAL' ? 700 : 850, 60);
+
+    if (mode === 'MANUAL') {
+      missionEngine.switchToManualControl();
+    } else {
+      missionEngine.switchToAutonomousControl();
+    }
+
+    // Persist mode switch to backend if active mission is executing
+    fetch('/api/missions/active/mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode })
+    }).catch(() => {});
+
+    showNotification(`${mode} MISSION MODE ACTIVE`);
+  };
+
   return (
     <div className="h-[100dvh] w-full bg-[var(--uav-bg)] text-[var(--uav-text)] flex flex-col font-sans select-none overflow-hidden">
       {/* 1. Header (Fixed 68px) */}
       <Header
         telemetry={telemetry}
         missionMode={missionMode}
-        onModeChange={(mode) => {
-          setMissionMode(mode);
-          showNotification(`${mode} MISSION MODE ACTIVE`);
-        }}
+        onModeChange={handleModeChange}
         activeTab={activeTab}
         onTabChange={handleTabChange}
         onOpenSettings={() => setIsConfigModalOpen(true)}

@@ -102,7 +102,7 @@ const MAX_RECON_DETECTIONS = 50;
 let reconDetections = loadJsonSafe(DETECTIONS_FILE, []);
 
 function getActiveMission() {
-  return missions.find(m => m.status === 'EXECUTING' || m.status === 'ACTIVE' || m.status === 'DEADLINE_REACHED') || null;
+  return missions.find(m => (m.status === 'EXECUTING' || m.status === 'ACTIVE') && (!m.deadline || Date.now() < m.deadline)) || null;
 }
 
 // Create HTTP server for health checks, static frontend, and WebSocket upgrades
@@ -414,6 +414,55 @@ const server = http.createServer((req, res) => {
         mission: null
       }));
     }
+    return;
+  }
+
+  // AERORECON: Delete / Clear Active Mission
+  if (parsedUrl.pathname === '/api/missions/active' && req.method === 'DELETE') {
+    let clearedCount = 0;
+    missions.forEach(m => {
+      if (m.status === 'EXECUTING' || m.status === 'ACTIVE') {
+        m.status = 'ABORTED';
+        m.abortReason = 'Operator cleared active mission';
+        m.lastUpdated = Date.now();
+        clearedCount++;
+      }
+    });
+    if (clearedCount > 0) {
+      saveJsonAtomic(MISSIONS_FILE, missions);
+    }
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({ success: true, message: 'Active mission cleared', clearedCount }));
+    return;
+  }
+
+  // AERORECON: Update Active Mission Mode (MANUAL <-> AUTONOMOUS)
+  if ((parsedUrl.pathname === '/api/missions/active/mode' || parsedUrl.pathname === '/api/missions/mode') && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const nextMode = payload.mode === 'MANUAL' ? 'MANUAL' : 'AUTONOMOUS';
+        const active = getActiveMission();
+        if (active) {
+          active.mode = nextMode;
+          active.lastUpdated = Date.now();
+          saveJsonAtomic(MISSIONS_FILE, missions);
+        }
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({ success: true, mode: nextMode, updated: !!active }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ success: false, error: 'Invalid mode payload' }));
+      }
+    });
     return;
   }
 

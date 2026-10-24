@@ -11,6 +11,8 @@
  * 7. MAVLink Parser Fuzz & Robustness: noise injection, truncated frames, bad CRC, stream splits
  */
 
+declare const process: any;
+
 if (typeof globalThis.window === 'undefined') {
   const storage: Record<string, string> = {};
   const mockLocalStorage = {
@@ -230,6 +232,15 @@ class SimulatedPixhawk {
         if (cmd === 176) {
           const customMode = Math.round(view.getFloat32(4, true));
           this.sendHeartbeat(true, customMode);
+        } else if (cmd === 400) {
+          const param1 = view.getFloat32(0, true);
+          if (param1 === 0) {
+            // Disarm command
+            this.sendHeartbeat(false, 4);
+          } else if (param1 === 1) {
+            // Arm command
+            this.sendHeartbeat(true, 4);
+          }
         }
       }, 20);
       return;
@@ -383,6 +394,23 @@ async function runSimulationScenarios() {
     // 4. RTL
     const rtlOk = await mavlinkService.commandRTL();
     assert(rtlOk, 'commandRTL switched mode to RTL');
+
+    // 5. Land & Disarm sequence
+    const landOk = await mavlinkService.commandLand();
+    assert(landOk, 'commandLand switched mode to LAND');
+
+    // Disarm on ground
+    (mavlinkService.getTelemetry() as any).altitude = 0.2;
+    const disarmOk = await mavlinkService.disarmDrone(false);
+    assert(disarmOk, 'Disarm command dispatched cleanly and accepted');
+    sim.sendHeartbeat(false, 4);
+    assert(!mavlinkService.getTelemetry().isArmed, 'Telemetry confirms DISARMED state');
+    assert(mavlinkService.getTelemetry().vehicleState === 'DISARMED', 'VehicleState reflects DISARMED');
+
+    // Force Disarm bypass testing
+    const forceDisarmOk = await mavlinkService.disarmDrone(true);
+    assert(forceDisarmOk, 'Force disarm command (param2=21196) dispatched cleanly');
+    assert(!mavlinkService.getTelemetry().isArmed, 'Telemetry confirms disarmed state under force cutoff');
   }
 
   // --------------------------------------------------------------------------

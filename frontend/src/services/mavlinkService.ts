@@ -2100,18 +2100,37 @@ class MAVLinkService {
           if (command === 400) {
             this.connectionState.lastArmCommandAck = ackObj;
             this.connectionState.lastArmAckResult = resultName;
+            const isDisarmAck = this.connectionState.lastCommandName === 'DISARM' || this.connectionState.lastArmParam1 === 0.0;
+
             if (result === 0) {
-              this.logDiagnostic('MAVLINK', '[ARM ACK] ARM COMMAND ACCEPTED ✓ (Awaiting Heartbeat armed confirmation)', 'success');
-              this.addStatusMessage('INFO', 6, 'ARM COMMAND ACCEPTED (Waiting for vehicle armed state)');
+              if (isDisarmAck) {
+                this.telemetry.isArmed = false;
+                this.telemetry.vehicleState = 'DISARMED';
+                this.connectionState.vehicleState = 'DISARMED';
+                this.telemetry.flightMode = 'DISARMED';
+                this.logDiagnostic('MAVLINK', '[DISARM ACK] DISARM COMMAND ACCEPTED ✓ Vehicle motors safely disarmed.', 'success');
+                this.addStatusMessage('INFO', 6, 'Vehicle motors disarmed ✓');
+              } else {
+                this.logDiagnostic('MAVLINK', '[ARM ACK] ARM COMMAND ACCEPTED ✓ (Awaiting Heartbeat armed confirmation)', 'success');
+                this.addStatusMessage('INFO', 6, 'ARM COMMAND ACCEPTED (Waiting for vehicle armed state)');
+              }
             } else {
-              const baseReason = this.connectionState.preArmFailReason 
-                ? this.explainPreArmFailure(this.connectionState.preArmFailReason)
-                : `Pixhawk rejected Arm (${resultName}). Check safety switch pressed, GPS 3D fix, and compass calibration.`;
-              this.connectionState.preArmFailReason = baseReason;
-              this.connectionState.vehicleState = 'DISARMED';
-              this.telemetry.vehicleState = 'DISARMED';
-              this.logDiagnostic('MAVLINK', `[ARM ACK] ARM COMMAND REJECTED by Pixhawk (${resultName}): ${baseReason}`, 'warn');
-              this.addStatusMessage('WARNING', 4, `ARM COMMAND REJECTED: ${baseReason}`);
+              if (isDisarmAck) {
+                const reason = result === 4 
+                  ? 'Pixhawk rejected disarm: In-flight safety check active. Use Force Disarm / Cutoff.'
+                  : `Pixhawk rejected disarm (${resultName}). Ensure vehicle is landed or use Force Disarm.`;
+                this.logDiagnostic('MAVLINK', `[DISARM ACK] ${reason}`, 'warn');
+                this.addStatusMessage('WARNING', 4, reason);
+              } else {
+                const baseReason = this.connectionState.preArmFailReason 
+                  ? this.explainPreArmFailure(this.connectionState.preArmFailReason)
+                  : `Pixhawk rejected Arm (${resultName}). Check safety switch pressed, GPS 3D fix, and compass calibration.`;
+                this.connectionState.preArmFailReason = baseReason;
+                this.connectionState.vehicleState = 'DISARMED';
+                this.telemetry.vehicleState = 'DISARMED';
+                this.logDiagnostic('MAVLINK', `[ARM ACK] ARM COMMAND REJECTED by Pixhawk (${resultName}): ${baseReason}`, 'warn');
+                this.addStatusMessage('WARNING', 4, `ARM COMMAND REJECTED: ${baseReason}`);
+              }
             }
             this.notifyConnection();
             this.notifyTelemetry();
@@ -2209,10 +2228,11 @@ class MAVLinkService {
       return false;
     }
 
+    const isSimMode = Boolean(this.simInterval || this.connectionState.connectionType === 'SIMULATED' || !this.connectionState.isRealHardware);
     const isWsOpen = this.connectionState.isUsbConnected || this.connectionState.isConnected;
-    console.log(`[ARM] WS STATE = ${isWsOpen ? 'OPEN' : 'CLOSED'}`);
+    console.log(`[ARM] WS STATE = ${isWsOpen ? 'OPEN' : 'CLOSED'}, SIM = ${isSimMode}`);
 
-    if (!isWsOpen && !this.simInterval) {
+    if (!isWsOpen && !isSimMode) {
       console.error('[ARM] FAILED BEFORE PACKET CREATION: WebSocket disconnected');
       this.logDiagnostic('ERROR', '[ARM] Cannot send ARM: WebSocket disconnected', 'error');
       this.addStatusMessage('WARNING', 4, 'WebSocket disconnected');
@@ -2256,10 +2276,7 @@ class MAVLinkService {
     this.logDiagnostic('MAVLINK', `[ARM TX] Transmitting MAV_CMD_COMPONENT_ARM_DISARM (400) to SysID ${targetSys} CompID ${targetComp}`, 'info');
 
     try {
-      if (this.connectionState.isRealHardware || isWsOpen) {
-        const success = await this.sendMavlinkCommandLong(400 /* MAV_CMD_COMPONENT_ARM_DISARM */, 1.0 /* Arm */, param2, 0.0, 0.0, 0.0, 0.0, 0.0);
-        return success;
-      } else {
+      if (isSimMode) {
         this.telemetry.isArmed = true;
         this.telemetry.vehicleState = 'ARMED';
         this.connectionState.vehicleState = 'ARMED';
@@ -2269,6 +2286,9 @@ class MAVLinkService {
         this.notifyTelemetry();
         this.notifyConnection();
         return true;
+      } else {
+        const success = await this.sendMavlinkCommandLong(400 /* MAV_CMD_COMPONENT_ARM_DISARM */, 1.0 /* Arm */, param2, 0.0, 0.0, 0.0, 0.0, 0.0);
+        return success;
       }
     } finally {
       // Release in-flight lock after brief debounce period
@@ -2281,10 +2301,11 @@ class MAVLinkService {
   public async sendDisarmCommand(force: boolean = false): Promise<boolean> {
     console.log(`[DISARM] BUTTON CLICKED (force=${force})`);
 
-    const isWsOpen = this.connectionState.isUsbConnected || this.connectionState.isConnected;
-    console.log(`[DISARM] WS STATE = ${isWsOpen ? 'OPEN' : 'CLOSED'}`);
+    const isSimMode = Boolean(this.simInterval || this.connectionState.connectionType === 'SIMULATED' || !this.connectionState.isRealHardware);
+    const isWsOpen = Boolean(this.connectionState.isUsbConnected || this.connectionState.isConnected);
+    console.log(`[DISARM] WS STATE = ${isWsOpen ? 'OPEN' : 'CLOSED'}, SIM = ${isSimMode}`);
 
-    if (!isWsOpen && !this.simInterval) {
+    if (!isWsOpen && !isSimMode) {
       console.error('[DISARM] Cannot send DISARM: WebSocket disconnected');
       this.logDiagnostic('ERROR', 'Cannot send DISARM: WebSocket disconnected', 'error');
       this.addStatusMessage('WARNING', 4, 'WebSocket disconnected');
@@ -2293,19 +2314,22 @@ class MAVLinkService {
 
     const targetSys = this.connectionState.systemId || 1;
     const targetComp = this.connectionState.componentId || 1;
-    // param2 = 21196.0 forces disarm on ArduPilot even in mid-air (CRASH RISK)
-    // param2 = 0.0 safe standard disarm: ArduPilot safely checks if landed before shutting motors
-    const param2 = force ? 21196.0 : 0.0;
+    // param2 = 21196.0 forces disarm on ArduPilot even in mid-air (CRASH RISK) or on ground/bench
+    // Automatically force on ground/bench (altitude <= 1.0m) to bypass ArduPilot ap.land_complete requirement
+    const shouldForce = force || (this.telemetry.altitude <= 1.0);
+    const param2 = shouldForce ? 21196.0 : 0.0;
 
     console.log(`[DISARM] SYSID = ${targetSys}`);
     console.log(`[DISARM] COMPONENT = ${targetComp}`);
     console.log('[DISARM] COMMAND = 400');
     console.log('[DISARM] PARAM1 = 0');
-    console.log(`[DISARM] PARAM2 = ${param2}`);
+    console.log(`[DISARM] PARAM2 = ${param2} (shouldForce=${shouldForce})`);
 
     this.connectionState.vehicleState = 'DISARMING';
     this.telemetry.vehicleState = 'DISARMING';
     this.connectionState.lastCommandName = 'DISARM';
+    this.connectionState.lastArmParam1 = 0.0;
+    this.connectionState.lastArmParam2 = param2;
     this.connectionState.lastSentCommandId = 400;
     this.notifyConnection();
     this.notifyTelemetry();
@@ -2313,19 +2337,30 @@ class MAVLinkService {
     this.addStatusMessage('NOTICE', 5, `Sending MAVLink DISARM Command (MAV_CMD_COMPONENT_ARM_DISARM param1=0 param2=${param2})...`);
     this.logDiagnostic('MAVLINK', `[DISARM TX] Transmitting MAV_CMD_COMPONENT_ARM_DISARM (400) to SysID ${targetSys} CompID ${targetComp}`, 'info');
 
-    if (this.connectionState.isRealHardware || isWsOpen) {
-      const success = await this.sendMavlinkCommandLong(400 /* MAV_CMD_COMPONENT_ARM_DISARM */, 0.0 /* Disarm */, param2, 0.0, 0.0, 0.0, 0.0, 0.0);
-      return success;
-    } else {
+    if (isSimMode) {
       this.telemetry.isArmed = false;
       this.telemetry.vehicleState = 'DISARMED';
       this.connectionState.vehicleState = 'DISARMED';
       this.telemetry.flightMode = 'DISARMED';
       this.telemetry.altitude = 0;
+      this.telemetry.groundSpeed = 0;
+      this.telemetry.verticalSpeed = 0;
       this.addStatusMessage('INFO', 6, 'SIMULATOR: Drone Disarmed');
       this.notifyTelemetry();
       this.notifyConnection();
       return true;
+    } else {
+      const success = await this.sendMavlinkCommandLong(400 /* MAV_CMD_COMPONENT_ARM_DISARM */, 0.0 /* Disarm */, param2, 0.0, 0.0, 0.0, 0.0, 0.0);
+      if (success && (shouldForce || this.telemetry.altitude <= 1.0)) {
+        // Optimistic disarm confirmation when sent with force on ground/bench
+        this.telemetry.isArmed = false;
+        this.telemetry.vehicleState = 'DISARMED';
+        this.connectionState.vehicleState = 'DISARMED';
+        this.telemetry.flightMode = 'DISARMED';
+        this.notifyTelemetry();
+        this.notifyConnection();
+      }
+      return success;
     }
   }
 

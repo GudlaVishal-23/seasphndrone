@@ -694,10 +694,7 @@ server.on('upgrade', (request, socket, head) => {
 
   // Route: /ws or / (for frontend browser client)
   if (pathname === '/ws' || pathname === '/') {
-    // Permissive for browser clients: allow connection, log advisory if custom token provided
-    if (token && !allowedTokens.has(token.trim())) {
-      console.warn(`[AUTH NOTICE] Browser client connected with custom token from ${request.socket.remoteAddress}`);
-    }
+    if (!validateAuth('Browser/client')) return;
 
     wss.handleUpgrade(request, socket, head, (ws) => {
       if (ws._socket) {
@@ -890,6 +887,17 @@ function handleConnectorConnection(ws) {
           esp32LastError = msg.error || '';
           console.log(`[CONNECTOR REPORT] ESP32 status: ${msg.status} ${esp32LastError ? `(${esp32LastError})` : ''}`);
           broadcastStatusToBrowsers();
+        } else if (
+          msg.type === 'CAMERA_STREAM_SIGNAL' ||
+          msg.type === 'CAMERA_FRAME_DATA' ||
+          msg.type === 'CAMERA_STATUS_UPDATE' ||
+          msg.type === 'CAMERA_HEARTBEAT'
+        ) {
+          for (const client of browserSockets) {
+            if (client.readyState === WebSocket.OPEN) {
+              try { client.send(text, noop); } catch (e) {}
+            }
+          }
         }
       } catch (err) {
         // Non-JSON control packet ignored
@@ -988,6 +996,20 @@ function handleBrowserConnection(ws) {
           for (const client of browserSockets) {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
               try { client.send(broadcastMsg, noop); } catch (e) {}
+            }
+          }
+        }
+
+        // Direct Drone Core Camera Stream & Signaling Forwarding (WebRTC / Frames)
+        if (
+          msg.type === 'CAMERA_STREAM_SIGNAL' ||
+          msg.type === 'CAMERA_FRAME_DATA' ||
+          msg.type === 'CAMERA_STATUS_UPDATE' ||
+          msg.type === 'CAMERA_HEARTBEAT'
+        ) {
+          for (const client of browserSockets) {
+            if (client !== ws && client.readyState === WebSocket.OPEN) {
+              try { client.send(text, noop); } catch (e) {}
             }
           }
         }

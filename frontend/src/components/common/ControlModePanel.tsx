@@ -59,16 +59,15 @@ export const ControlModePanel: React.FC<ControlModePanelProps> = ({
     }
   };
 
-  const handleSafeDisarmTrigger = (forceCutoff: boolean = false) => {
+  const handleSafeDisarmTrigger = async (forceCutoff: boolean = false) => {
     // If airborne, prompt with critical warning popup stating exact altitude
     if (telemetry.isArmed && telemetry.altitude > 0.4) {
       setIsCutoffRequested(forceCutoff);
       setIsSafetyModalOpen(true);
       return;
     }
-    if (forceCutoff) {
-      mavlinkService.sendDisarmCommand(true);
-    }
+    const shouldForce = forceCutoff || telemetry.altitude <= 1.0;
+    await mavlinkService.sendDisarmCommand(shouldForce);
     onDisarmClick();
   };
 
@@ -519,11 +518,9 @@ export const ControlModePanel: React.FC<ControlModePanelProps> = ({
           verticalSpeed={telemetry.verticalSpeed}
           flightMode={telemetry.flightMode}
           isForceCutoff={isCutoffRequested}
-          onConfirmDisarm={() => {
+          onConfirmDisarm={async () => {
             setIsSafetyModalOpen(false);
-            if (isCutoffRequested) {
-              mavlinkService.sendDisarmCommand(true);
-            }
+            await mavlinkService.sendDisarmCommand(true);
             onDisarmClick();
           }}
           onCommandLand={() => {

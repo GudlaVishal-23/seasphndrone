@@ -9,6 +9,7 @@ import {
   QRDetectionRecord,
   DroneCoreQRStatus
 } from '../../types/recon';
+import { droneCameraStreamService } from '../../services/droneCameraStreamService';
 import {
   Camera,
   Target,
@@ -21,7 +22,8 @@ import {
   Settings,
   Maximize,
   Minimize,
-  X
+  X,
+  Power
 } from 'lucide-react';
 
 interface DroneDashboardProps {
@@ -101,9 +103,11 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
           if (success) {
             reconDetectionService.setDroneCoreStatus('SEARCHING FOR QR');
             setCameraErrorMessage(null);
+            droneCameraStreamService.startPublishing(visionService.getStream(), videoRef.current);
           } else {
             reconDetectionService.setDroneCoreStatus('CAMERA ERROR');
             setCameraErrorMessage('Camera unavailable or permission denied. Check camera access.');
+            droneCameraStreamService.stopPublishing();
           }
         }
       } catch (err: any) {
@@ -111,6 +115,7 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
           setIsCameraActive(false);
           reconDetectionService.setDroneCoreStatus('CAMERA ERROR');
           setCameraErrorMessage(err?.message || 'Failed to start camera');
+          droneCameraStreamService.stopPublishing();
         }
       }
     };
@@ -123,6 +128,9 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
         if (state.error) {
           setCameraErrorMessage(state.error);
           reconDetectionService.setDroneCoreStatus('CAMERA ERROR');
+          droneCameraStreamService.stopPublishing();
+        } else if (state.isActive) {
+          droneCameraStreamService.startPublishing(visionService.getStream(), videoRef.current);
         }
       }
     });
@@ -130,6 +138,7 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
     return () => {
       isMounted = false;
       unsubCamera();
+      droneCameraStreamService.stopPublishing();
     };
   }, []);
 
@@ -169,6 +178,30 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
     }
   }, [decodedQR, onQRDetected]);
 
+  // Toggle Drone Core Camera Power
+  const handleToggleCamera = async () => {
+    if (isCameraActive) {
+      visionService.stopCamera();
+      droneCameraStreamService.stopPublishing();
+      setIsCameraActive(false);
+      reconDetectionService.setDroneCoreStatus('CAMERA READY');
+    } else {
+      setCameraErrorMessage(null);
+      reconDetectionService.setDroneCoreStatus('SEARCHING FOR QR');
+      if (videoRef.current) {
+        const success = await visionService.startCamera(videoRef.current);
+        setIsCameraActive(success);
+        if (success) {
+          droneCameraStreamService.startPublishing(visionService.getStream(), videoRef.current);
+        } else {
+          reconDetectionService.setDroneCoreStatus('CAMERA ERROR');
+          setCameraErrorMessage('Camera unavailable or permission denied. Check camera access.');
+          droneCameraStreamService.stopPublishing();
+        }
+      }
+    }
+  };
+
   // Restart Camera Feed
   const handleRestartCamera = async () => {
     setCameraErrorMessage(null);
@@ -176,6 +209,11 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
     if (videoRef.current) {
       const success = await visionService.startCamera(videoRef.current);
       setIsCameraActive(success);
+      if (success) {
+        droneCameraStreamService.startPublishing(visionService.getStream(), videoRef.current);
+      } else {
+        droneCameraStreamService.stopPublishing();
+      }
     }
   };
 
@@ -307,7 +345,22 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
           </div>
           <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono shrink-0">
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isCameraActive ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
-            <span className="hidden md:inline">{isCameraActive ? 'LIVE • NATIVE RESOLUTION' : 'OFFLINE'}</span>
+            <span className="hidden md:inline">{isCameraActive ? 'LIVE • STREAMING TO GCS' : 'CAMERA OFF'}</span>
+
+            {/* Camera Power Toggle (Start/Stop capture & stream to GCS) */}
+            <button
+              type="button"
+              onClick={handleToggleCamera}
+              title={isCameraActive ? 'Turn Camera Off (Stop streaming to GCS)' : 'Turn Camera On (Start streaming to GCS)'}
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold uppercase tracking-wider flex items-center gap-1.5 transition cursor-pointer shadow-md active:scale-95 shrink-0 ${
+                isCameraActive
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-950/60 ring-1 ring-rose-400/50'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/60 ring-1 ring-emerald-400/50'
+              }`}
+            >
+              <Power className="w-3.5 h-3.5 shrink-0" />
+              <span>{isCameraActive ? 'CAMERA OFF' : 'CAMERA ON'}</span>
+            </button>
 
             {/* Camera Settings Button (Fully visible, unclipped, sufficient padding) */}
             <button

@@ -355,10 +355,10 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           type="button"
           onClick={onArmClick}
-          title={isArmed ? 'Click to Disarm or View Flight Safety' : 'Click to Arm Vehicle'}
+          title={isArmed ? 'EMERGENCY DISARM: Click to disarm vehicle motors immediately' : 'Click to Arm Vehicle'}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] text-[11px] font-semibold font-sans border transition active:scale-95 cursor-pointer ${
             isArmed
-              ? 'bg-[#3b1212] border-[#7f1d1d] text-rose-300 hover:bg-[#4a1717]'
+              ? 'bg-rose-950/90 border-rose-600 text-rose-200 hover:bg-rose-900 hover:text-white shadow-sm ring-1 ring-rose-500/50'
               : 'bg-[#0f291e] border-[#1b4d36] text-[#22C55E] hover:bg-[#143d2b]'
           }`}
         >
@@ -367,7 +367,7 @@ export const Header: React.FC<HeaderProps> = ({
               isArmed ? 'bg-rose-500 animate-pulse' : 'bg-[#22C55E]'
             }`}
           />
-          <span>{isArmed ? 'ARMED' : 'DISARMED'}</span>
+          <span>{isArmed ? 'ARMED (CLICK TO DISARM)' : 'DISARMED'}</span>
         </button>
 
         {/* RC Gamepad Link Toggle Button */}

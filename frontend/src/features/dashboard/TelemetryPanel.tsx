@@ -27,7 +27,7 @@ interface TelemetryPanelProps {
   telemetry: DashboardTelemetryData;
   className?: string;
   onArm?: (force?: boolean) => Promise<boolean | void>;
-  onDisarm?: () => Promise<boolean | void>;
+  onDisarm?: (force?: boolean) => Promise<boolean | void>;
   onNotification?: (msg: string) => void;
 }
 
@@ -88,8 +88,8 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
     }
   };
 
-  const handleDisarm = async () => {
-    if (!telemetry.isArmed || isBusy) return;
+  const handleDisarm = async (force: boolean = forceArm) => {
+    if (isBusy) return;
     setIsDisarming(true);
     setArmFeedback(null);
     audioService.playBeep(450, 120);
@@ -97,10 +97,10 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
     try {
       let success = false;
       if (onDisarm) {
-        const res = await onDisarm();
+        const res = await onDisarm(force);
         success = res !== false;
       } else {
-        success = await mavlinkService.sendDisarmCommand(false);
+        success = await mavlinkService.sendDisarmCommand(force);
       }
 
       if (success) {
@@ -108,8 +108,8 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
         setArmFeedback('Vehicle Disarmed ✓');
         onNotification?.('Vehicle Disarmed ✓');
       } else {
-        setArmFeedback('Disarm rejected by Pixhawk');
-        onNotification?.('Disarm rejected by Pixhawk (Confirm vehicle is landed)');
+        setArmFeedback('Disarm rejected by Pixhawk (Use Force Disarm if landed)');
+        onNotification?.('Disarm rejected by Pixhawk (Confirm vehicle is landed or use Force Disarm)');
       }
     } catch (err: any) {
       setArmFeedback(`Disarm failed: ${err?.message || 'Check connection'}`);
@@ -562,19 +562,23 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
           {/* DISARM BUTTON */}
           <button
             type="button"
-            onClick={handleDisarm}
-            disabled={!telemetry.isArmed || isBusy}
+            onClick={() => handleDisarm(forceArm)}
+            disabled={isBusy}
             title={
-              !telemetry.isArmed
-                ? 'Flight controller already disarmed'
+              isDisarming
+                ? 'Disarming vehicle motors...'
+                : forceArm
+                ? 'Send FORCE DISARM command (MAV_CMD_COMPONENT_ARM_DISARM param1=0 param2=21196)'
                 : 'Send MAVLink DISARM command (MAV_CMD_COMPONENT_ARM_DISARM param1=0)'
             }
             className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg font-bold text-[11px] font-sans tracking-wide uppercase transition shadow-md cursor-pointer ${
-              !telemetry.isArmed
-                ? 'bg-slate-800/60 text-slate-500 cursor-not-allowed border border-slate-700/60'
-                : isDisarming
+              isDisarming
                 ? 'bg-amber-600 text-white cursor-wait'
-                : 'bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white shadow-rose-950/50 border border-rose-400/50'
+                : forceArm
+                ? 'bg-rose-700 hover:bg-rose-600 active:bg-rose-800 text-white shadow-rose-950/60 border border-rose-400 ring-1 ring-rose-400'
+                : telemetry.isArmed
+                ? 'bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white shadow-rose-950/50 border border-rose-400/50'
+                : 'bg-rose-950/40 hover:bg-rose-900/60 active:bg-rose-800/80 text-rose-300 border border-rose-800/60'
             }`}
           >
             {isDisarming ? (
@@ -585,24 +589,24 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
             ) : (
               <>
                 <Power className="w-3.5 h-3.5" />
-                <span>DISARM</span>
+                <span>{forceArm ? 'FORCE DISARM' : 'DISARM'}</span>
               </>
             )}
           </button>
         </div>
 
-        {/* Bench / Field Force Arm Bypass Option */}
+        {/* Bench / Field Force Arm/Disarm Bypass Option */}
         <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
           <label className="flex items-center gap-1.5 text-[10px] font-mono text-slate-400 cursor-pointer select-none">
             <input
               type="checkbox"
               checked={forceArm}
               onChange={(e) => setForceArm(e.target.checked)}
-              disabled={telemetry.isArmed || isBusy}
+              disabled={isBusy}
               className="w-3 h-3 rounded bg-slate-900 border-slate-700 text-amber-500 focus:ring-0 cursor-pointer"
             />
             <span className={forceArm ? 'text-amber-300 font-bold' : ''}>
-              Force Arm (Bench / Bypass)
+              Force Bypass (Arm / Disarm)
             </span>
           </label>
 

@@ -178,14 +178,16 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
   };
 
   // Dedicated Disarm Handler
-  const handleDedicatedDisarmClick = async () => {
-    if (!pixhawkState.isConnected) {
+  const handleDedicatedDisarmClick = async (force: boolean = false) => {
+    const isConn = pixhawkState.isConnected || pixhawkState.isUsbConnected || pixhawkState.isRealHardware || pixhawkState.connectionType === 'SIMULATED';
+    if (!isConn) {
       setArmFeedback('Flight controller not connected. Connect first.');
       return;
     }
     setArmFeedback(null);
     setIsDisarming(true);
-    const sent = await mavlinkService.sendDisarmCommand();
+    const shouldForce = force || telemetry.altitude <= 1.0;
+    const sent = await mavlinkService.sendDisarmCommand(shouldForce);
     if (!sent) {
       setIsDisarming(false);
       setArmFeedback('Disarm command transmission failed.');
@@ -703,7 +705,7 @@ export const GroundStationDashboard: React.FC<GroundStationDashboardProps> = ({
                 telemetry={telemetry}
                 connectionState={pixhawkState}
                 onArmClick={handleDedicatedArmClick}
-                onDisarmClick={handleDedicatedDisarmClick}
+                onDisarmClick={() => handleDedicatedDisarmClick(telemetry.altitude <= 1.0)}
                 isArmingInProgress={isArming}
                 isDisarmingInProgress={isDisarming}
               />

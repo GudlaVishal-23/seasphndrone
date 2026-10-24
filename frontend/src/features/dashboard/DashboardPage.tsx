@@ -10,6 +10,7 @@ import {
   Crosshair,
   Send,
   Calendar,
+  Power
 } from 'lucide-react';
 import { useDashboardTelemetry } from '../../hooks/useDashboardTelemetry';
 import { mavlinkService } from '../../services/mavlinkService';
@@ -168,17 +169,17 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     );
   };
 
-  const handleToggleArm = async () => {
+  const handleToggleArm = async (force: boolean = false) => {
     if (telemetry.isArmed) {
       showNotification('Disarming vehicle motors...');
       audioService.playBeep(450, 120);
       try {
-        const success = await mavlinkService.sendDisarmCommand(false);
+        const success = await mavlinkService.sendDisarmCommand(force);
         if (success) {
           showNotification('Vehicle Disarmed ✓');
           audioService.playBeep(350, 150);
         } else {
-          showNotification('Disarm rejected by Pixhawk (Confirm vehicle is landed or disarm via RC)');
+          showNotification('Disarm rejected by Pixhawk (Confirm vehicle is landed or use Force Disarm)');
         }
       } catch (err: any) {
         showNotification(`Disarm failed: ${err?.message || 'Check connection'}`);
@@ -408,7 +409,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         currentRole={currentRole}
         onArmClick={() => {
           if (telemetry.isArmed) {
-            handleToggleArm();
+            handleToggleArm((telemetry.altitudeMeters || 0) <= 1.0);
           } else {
             setShowPreflightModal(true);
           }
@@ -514,10 +515,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               }
               return ok;
             }}
-            onDisarm={async () => {
-              const ok = await mavlinkService.sendDisarmCommand(false);
+            onDisarm={async (force) => {
+              const ok = await mavlinkService.sendDisarmCommand(Boolean(force));
               if (ok) {
-                showNotification('MOTOR DISARM Command Dispatched to Pixhawk ✓');
+                showNotification(force ? '⚠️ FORCE DISARM Command Dispatched to Pixhawk' : 'MOTOR DISARM Command Dispatched to Pixhawk ✓');
               } else {
                 showNotification('Disarm command failed — Check MAVLink link');
               }
@@ -714,9 +715,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             {/* Quick Command Buttons */}
             <div>
               <span className="text-[11px] font-bold text-[var(--uav-muted)] uppercase tracking-wider block mb-2">
-                Primary Flight Modes
+                Primary Flight Modes & Engine Cutoff
               </span>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                 <button
                   type="button"
                   onClick={async () => {
@@ -773,8 +774,32 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     }`}
                   />
                   <span>
-                    {rtlConfirmPending ? 'Confirm RTL (Click Again)' : 'Emergency RTL'}
+                    {rtlConfirmPending ? 'Confirm RTL' : 'Emergency RTL'}
                   </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const isLowAlt = (telemetry.altitudeMeters || 0) <= 1.0;
+                    showNotification('Disarming vehicle motors...');
+                    audioService.playBeep(450, 120);
+                    const ok = await mavlinkService.sendDisarmCommand(isLowAlt);
+                    if (ok) {
+                      showNotification('Vehicle Disarmed ✓');
+                      audioService.playBeep(350, 150);
+                    } else {
+                      showNotification('Disarm rejected by Pixhawk (Use Force Disarm on Telemetry Panel)');
+                    }
+                  }}
+                  className={`py-2.5 px-3 rounded-lg font-semibold text-[12px] flex items-center justify-center gap-2 transition cursor-pointer ${
+                    telemetry.isArmed
+                      ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-400 shadow-md shadow-rose-950/50 active:scale-95'
+                      : 'bg-zinc-800/80 hover:bg-zinc-700/80 border border-zinc-700 text-zinc-300 active:scale-95'
+                  }`}
+                  title="Cut motor power / Disarm UAV"
+                >
+                  <Power className="w-4 h-4 text-white" />
+                  <span>{telemetry.isArmed ? 'Disarm Motors' : 'Force Disarm'}</span>
                 </button>
               </div>
             </div>

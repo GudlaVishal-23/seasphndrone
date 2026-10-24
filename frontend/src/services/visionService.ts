@@ -145,6 +145,14 @@ class VisionService {
     };
   }
 
+  public getStream(): MediaStream | null {
+    return this.stream;
+  }
+
+  public isCameraRunning(): boolean {
+    return Boolean(this.stream && this.isScanning && this.stream.active && this.stream.getVideoTracks().some(t => t.readyState === 'live'));
+  }
+
   public setFilterMode(mode: VisionFilterMode) {
     this.activeFilter = mode;
   }
@@ -263,20 +271,15 @@ class VisionService {
       }
     } catch (err: any) {
       this.isRequestingStream = false;
-      this.cameraError = err.message || 'Camera permission not granted';
-      this.useSimulatedFeed = true;
+      this.cameraError = err.message || 'Camera permission not granted or device unavailable';
       this.notifyCameraState();
-      this.startContinuousStreamScanning();
-      this.startPeriodicCaptureLoop();
       return false;
     }
 
     this.isRequestingStream = false;
-    this.useSimulatedFeed = true;
+    this.cameraError = 'Camera device not supported in this environment';
     this.notifyCameraState();
-    this.startContinuousStreamScanning();
-    this.startPeriodicCaptureLoop();
-    return true;
+    return false;
   }
 
   public async switchCamera(): Promise<boolean> {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Video, WifiOff, RefreshCw, Radio, Settings, X, Power, AlertTriangle, ShieldAlert } from 'lucide-react';
 import { ipCameraService, IpCameraStatus } from '../../services/ipCameraService';
+import { droneCameraStreamService, DroneCameraStreamStatus } from '../../services/droneCameraStreamService';
 
 interface LiveVideoFeedProps {
   className?: string;
@@ -25,7 +26,13 @@ export const LiveVideoFeed: React.FC<LiveVideoFeedProps> = ({
   const [retryCount, setRetryCount] = useState(0);
   const [dismissMixedContentWarning, setDismissMixedContentWarning] = useState(false);
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const droneVideoRef = useRef<HTMLVideoElement | null>(null);
   const retryTimerRef = useRef<number | null>(null);
+
+  // Drone Core direct stream state
+  const [droneStream, setDroneStream] = useState<MediaStream | null>(() => droneCameraStreamService.getMediaStream());
+  const [droneFrame, setDroneFrame] = useState<string | null>(() => droneCameraStreamService.getLatestFrame());
+  const [droneStreamStatus, setDroneStreamStatus] = useState<DroneCameraStreamStatus>(() => droneCameraStreamService.getCurrentStatus());
 
   const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
   const isHttpStream = streamUrl.toLowerCase().startsWith('http://');
@@ -89,6 +96,34 @@ export const LiveVideoFeed: React.FC<LiveVideoFeedProps> = ({
     };
   }, []);
 
+  // Subscribe to Drone Core Camera Stream Service
+  useEffect(() => {
+    droneCameraStreamService.startSubscribing();
+    const unsubStream = droneCameraStreamService.subscribeStream((s) => setDroneStream(s));
+    const unsubFrame = droneCameraStreamService.subscribeFrame((f) => setDroneFrame(f));
+    const unsubStatus = droneCameraStreamService.subscribeStatus((st) => setDroneStreamStatus(st));
+
+    return () => {
+      unsubStream();
+      unsubFrame();
+      unsubStatus();
+    };
+  }, []);
+
+  // Synchronize Drone Core MediaStream to video element
+  useEffect(() => {
+    if (droneVideoRef.current) {
+      if (droneStream) {
+        if (droneVideoRef.current.srcObject !== droneStream) {
+          droneVideoRef.current.srcObject = droneStream;
+          droneVideoRef.current.play().catch(() => {});
+        }
+      } else {
+        droneVideoRef.current.srcObject = null;
+      }
+    }
+  }, [droneStream]);
+
   // Only request image if camera is explicitly turned ON
   const imgSrc = isCameraEnabled && streamUrl
     ? `${streamUrl}${streamUrl.includes('?') ? '&' : '?'}_t=${retryCount}`
@@ -132,8 +167,12 @@ export const LiveVideoFeed: React.FC<LiveVideoFeedProps> = ({
     setEditingUrl(false);
   };
 
+  const isDroneLive = droneStreamStatus === 'LIVE_FEED_CONNECTED' && Boolean(droneStream || droneFrame);
+
   const stateColor =
-    !isCameraEnabled || videoState === 'OFF'
+    isDroneLive
+      ? 'text-emerald-400 border-emerald-500/60 bg-emerald-950/80 shadow-emerald-950/60'
+      : !isCameraEnabled || videoState === 'OFF'
       ? 'text-slate-400 border-slate-700 bg-slate-900/90'
       : videoState === 'LIVE'
       ? 'text-emerald-400 border-emerald-500/60 bg-emerald-950/80'
@@ -142,7 +181,9 @@ export const LiveVideoFeed: React.FC<LiveVideoFeedProps> = ({
       : 'text-rose-400 border-rose-500/60 bg-rose-950/80';
 
   const stateLabel =
-    !isCameraEnabled || videoState === 'OFF'
+    isDroneLive
+      ? 'DRONE CORE: LIVE STREAM'
+      : !isCameraEnabled || videoState === 'OFF'
       ? 'CAMERA: STANDBY (OFF)'
       : videoState === 'LIVE'
       ? 'CAMERA: LIVE'
@@ -286,8 +327,30 @@ export const LiveVideoFeed: React.FC<LiveVideoFeedProps> = ({
       )}
 
       {/* Video frame or Standby / Error Container */}
-      <div className="relative flex-1 flex items-center justify-center min-h-[180px] bg-slate-950">
-        {imgSrc && isCameraEnabled && (
+      <div className="relative flex-1 flex items-center justify-center min-h-[180px] bg-slate-950 overflow-hidden">
+        {/* Direct Drone Core Stream Display */}
+        {isDroneLive && (
+          <div className="w-full h-full relative flex items-center justify-center bg-black overflow-hidden">
+            <video
+              ref={droneVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`w-full h-full object-contain select-none ${
+                droneStream ? 'block' : 'hidden'
+              }`}
+            />
+            {!droneStream && droneFrame && (
+              <img
+                src={droneFrame}
+                alt="Drone Core Camera Live Stream"
+                className="w-full h-full object-contain select-none"
+              />
+            )}
+          </div>
+        )}
+
+        {!isDroneLive && imgSrc && isCameraEnabled && (
           <img
             ref={imgRef}
             src={imgSrc}
@@ -301,7 +364,7 @@ export const LiveVideoFeed: React.FC<LiveVideoFeedProps> = ({
         )}
 
         {/* 1. Camera OFF / Standby State */}
-        {(!isCameraEnabled || videoState === 'OFF') && (
+        {!isDroneLive && (!isCameraEnabled || videoState === 'OFF') && (
           <div className="flex flex-col items-center justify-center space-y-2 p-4 text-center z-10">
             <div className="w-12 h-12 rounded-full border border-slate-800 bg-slate-900/80 flex items-center justify-center text-slate-500">
               <Video className="w-6 h-6" />
@@ -326,7 +389,7 @@ export const LiveVideoFeed: React.FC<LiveVideoFeedProps> = ({
         )}
 
         {/* 2. Connecting State */}
-        {isCameraEnabled && videoState === 'CONNECTING' && (
+        {!isDroneLive && isCameraEnabled && videoState === 'CONNECTING' && (
           <div className="flex flex-col items-center justify-center space-y-2 p-4 text-center z-10">
             <div className="w-10 h-10 rounded-full border border-amber-500/40 bg-amber-950/40 flex items-center justify-center">
               <RefreshCw className="w-5 h-5 text-amber-400 animate-spin" />
@@ -346,7 +409,7 @@ export const LiveVideoFeed: React.FC<LiveVideoFeedProps> = ({
         )}
 
         {/* 3. Disconnected State (Auto-retries exhausted or connection failed) */}
-        {isCameraEnabled && videoState === 'DISCONNECTED' && (
+        {!isDroneLive && isCameraEnabled && videoState === 'DISCONNECTED' && (
           <div className="flex flex-col items-center justify-center space-y-2 p-4 text-center z-10 max-w-xs">
             <div className="w-10 h-10 rounded-full border border-rose-500/40 bg-rose-950/40 flex items-center justify-center">
               <WifiOff className="w-5 h-5 text-rose-400" />

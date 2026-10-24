@@ -70,11 +70,13 @@ export const ManualControlDashboard: React.FC<ManualControlDashboardProps> = ({
     }, 200);
   };
 
-  const handleDisarm = async () => {
-    if (!pixhawkState.isConnected) { setArmFeedback('Not connected.'); return; }
+  const handleDisarm = async (force: boolean = false) => {
+    const isConn = pixhawkState.isConnected || pixhawkState.isUsbConnected || pixhawkState.isRealHardware || pixhawkState.connectionType === 'SIMULATED';
+    if (!isConn) { setArmFeedback('Not connected.'); return; }
     setArmFeedback(null);
     setIsDisarming(true);
-    const sent = await mavlinkService.sendDisarmCommand();
+    const shouldForce = force || telemetry.altitude <= 1.0;
+    const sent = await mavlinkService.sendDisarmCommand(shouldForce);
     if (!sent) { setIsDisarming(false); setArmFeedback('DISARM FAILED.'); return; }
     const t0 = Date.now();
     const wd = setInterval(() => {
@@ -300,16 +302,19 @@ export const ManualControlDashboard: React.FC<ManualControlDashboardProps> = ({
               </button>
 
               <button
-                onClick={handleDisarm}
-                disabled={!isArmed || isDisarming || !pixhawkState.isConnected}
+                onClick={() => handleDisarm(telemetry.altitude <= 1.0)}
+                disabled={isDisarming || (!pixhawkState.isConnected && !pixhawkState.isUsbConnected && pixhawkState.connectionType !== 'SIMULATED')}
                 className={`py-4 rounded-xl font-black text-sm uppercase tracking-wide flex items-center justify-center space-x-2 transition ${
-                  isArmed && !isDisarming && pixhawkState.isConnected
-                    ? 'bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white shadow-lg shadow-rose-600/30 cursor-pointer'
+                  (pixhawkState.isConnected || pixhawkState.isUsbConnected || pixhawkState.connectionType === 'SIMULATED') && !isDisarming
+                    ? isArmed
+                      ? 'bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white shadow-lg shadow-rose-600/30 cursor-pointer'
+                      : 'bg-rose-950/70 hover:bg-rose-900 border border-rose-800 text-rose-300 cursor-pointer'
                     : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
                 }`}
+                title="Send MAVLink DISARM command"
               >
                 {isDisarming ? <Loader2 className="w-5 h-5 animate-spin" /> : <PowerOff className="w-5 h-5" />}
-                <span>{isDisarming ? 'DISARMING...' : 'DISARM'}</span>
+                <span>{isDisarming ? 'DISARMING...' : isArmed ? 'DISARM' : 'FORCE DISARM'}</span>
               </button>
             </div>
 
@@ -320,7 +325,7 @@ export const ManualControlDashboard: React.FC<ManualControlDashboardProps> = ({
               </div>
             )}
 
-            {!pixhawkState.isConnected && (
+            {!pixhawkState.isConnected && !pixhawkState.isUsbConnected && pixhawkState.connectionType !== 'SIMULATED' && (
               <div className="p-2 bg-slate-950/70 border border-slate-700 rounded-lg text-slate-400 text-[11px] flex items-center space-x-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span>Connect to flight controller first via ESP32 or USB</span>
@@ -333,7 +338,7 @@ export const ManualControlDashboard: React.FC<ManualControlDashboardProps> = ({
             telemetry={telemetry}
             connectionState={pixhawkState}
             onArmClick={handleArm}
-            onDisarmClick={handleDisarm}
+            onDisarmClick={() => handleDisarm(telemetry.altitude <= 1.0)}
             isArmingInProgress={isArming}
             isDisarmingInProgress={isDisarming}
           />

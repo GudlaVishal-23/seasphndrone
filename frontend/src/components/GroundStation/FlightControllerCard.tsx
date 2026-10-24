@@ -50,7 +50,7 @@ export const FlightControllerCard: React.FC<FlightControllerCardProps> = ({
   const [targetAltitude, setTargetAltitude] = useState<number>(15);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
-  const isConnected = pixhawkState.isConnected || pixhawkState.isUsbConnected || pixhawkState.isRealHardware;
+  const isConnected = pixhawkState.isConnected || pixhawkState.isUsbConnected || pixhawkState.isRealHardware || pixhawkState.connectionType === 'SIMULATED';
   const isArmed = telemetry.isArmed;
   const activeMode = (telemetry.flightMode || 'STABILIZE').toUpperCase();
 
@@ -110,11 +110,15 @@ export const FlightControllerCard: React.FC<FlightControllerCardProps> = ({
     if (!isConnected) return;
     setFeedbackMsg(null);
     setIsDisarming(true);
-    const sent = await mavlinkService.sendDisarmCommand();
+    const shouldForce = forceBypassChecks || (telemetry.altitude <= 1.0);
+    const sent = await mavlinkService.sendDisarmCommand(shouldForce);
     setTimeout(() => {
       setIsDisarming(false);
       if (!mavlinkService.getTelemetry().isArmed) {
-        setFeedbackMsg('Vehicle Disarmed');
+        setFeedbackMsg('Vehicle Disarmed ✓');
+        setTimeout(() => setFeedbackMsg(null), 2000);
+      } else {
+        setFeedbackMsg(sent ? 'Disarm command transmitted' : 'Disarm command failed');
         setTimeout(() => setFeedbackMsg(null), 2000);
       }
     }, 1500);
@@ -246,16 +250,17 @@ export const FlightControllerCard: React.FC<FlightControllerCardProps> = ({
 
           <button
             type="button"
-            disabled={!isConnected || !isArmed || isDisarming}
+            disabled={!isConnected || isDisarming}
             onClick={handleDisarm}
             className={`flex-1 py-2.5 px-3 rounded-lg text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-1.5 transition ${
               !isArmed
-                ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                ? 'bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/60 cursor-pointer'
                 : 'bg-rose-700 hover:bg-rose-600 active:bg-rose-800 text-white shadow-md shadow-rose-700/30 cursor-pointer'
             } ${!isConnected || isDisarming ? 'opacity-50 cursor-not-allowed' : ''}`}
+            title="Send MAVLink DISARM command"
           >
             <Power className="w-3.5 h-3.5" />
-            <span>{isDisarming ? 'DISARMING...' : 'DISARM'}</span>
+            <span>{isDisarming ? 'DISARMING...' : isArmed ? 'DISARM' : 'FORCE DISARM'}</span>
           </button>
         </div>
 

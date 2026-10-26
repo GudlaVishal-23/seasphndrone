@@ -164,18 +164,20 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
   }
 
   const now = Date.now();
-  const hasLiveHeartbeat = connState.lastHeartbeat > 0 && (now - connState.lastHeartbeat < 10000);
+  const isSimulated = connState.connectionType === 'SIMULATED';
+  const hasLiveHeartbeat = (connState.lastHeartbeat > 0 && (now - connState.lastHeartbeat < 10000)) || isSimulated;
   const isConnected = Boolean(
-    (connState.isConnected || connState.isReceivingTelemetry || telemetry.pixhawkConnected) &&
+    (connState.isConnected || connState.isReceivingTelemetry || telemetry.pixhawkConnected || isSimulated) &&
     hasLiveHeartbeat &&
     !isLinkLost
   );
   const isConnecting = Boolean(
-    (connState.isUsbConnected && !hasLiveHeartbeat) ||
+    !isSimulated &&
+    ((connState.isUsbConnected && !hasLiveHeartbeat) ||
     connState.phase === 'WAITING_FOR_MAVLINK' ||
     connState.phase === 'SERIAL_OPENING' ||
     connState.phase === 'WAITING_FOR_HEARTBEAT' ||
-    connState.phase === 'SERIAL_OPEN'
+    connState.phase === 'SERIAL_OPEN')
   );
 
   const lat = telemetry.latitude || telemetry.gps?.latitude || 0;
@@ -192,19 +194,23 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
   const sats = telemetry.gps?.satellites || telemetry.satellitesVisible || 0;
   const lastGpsUpdate = telemetry.gps?.lastUpdated || 0;
   const gpsAgeMs = lastGpsUpdate > 0 ? (now - lastGpsUpdate) : (connState.lastHeartbeat > 0 ? now - connState.lastHeartbeat : 999999);
-  const isGpsFresh = isConnected && !isLinkLost && (lastGpsUpdate === 0 || gpsAgeMs < 10000);
-  const isGpsLocked = Boolean(isGpsFresh && (telemetry.gps?.isLocked || hasValidGpsCoords));
+  const isGpsLocked = Boolean(
+    telemetry.gps?.isLocked ||
+    hasValidGpsCoords ||
+    (telemetry.gps?.fixType && telemetry.gps.fixType.includes('3D')) ||
+    (sats >= 4 && !isLinkLost)
+  );
   const isGpsValid = Boolean(isGpsLocked && hasValidGpsCoords);
   const gpsFixType = telemetry.gps?.fixType || (isGpsValid ? '3D_FIX' : 'NO_GPS');
   const gpsAltitudeMeters = telemetry.gps?.altitude || 0.0;
 
   let gpsStatusMessage = 'Pixhawk GPS Signal Unavailable';
-  if (!isConnected) {
+  if (isGpsValid) {
+    gpsStatusMessage = `${gpsFixType} (${sats} Sats)`;
+  } else if (!isConnected) {
     gpsStatusMessage = 'Pixhawk Disconnected';
   } else if (isLinkLost || isStale) {
     gpsStatusMessage = 'MAVLink Telemetry Stale / Paused';
-  } else if (isGpsValid) {
-    gpsStatusMessage = `${gpsFixType} (${sats} Sats)`;
   } else if (sats > 0) {
     gpsStatusMessage = `Acquiring Fix (${sats} Sats Visible)`;
   }
@@ -216,7 +222,7 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
     isArmed: isConnected ? Boolean(telemetry.isArmed) : false,
     flightMode: isConnected ? (telemetry.flightMode || 'DISARMED') : 'DISCONNECTED',
     satellites: sats,
-    hdop: telemetry.gps?.hdop ?? 99.0,
+    hdop: telemetry.gps?.hdop ?? (isGpsValid ? 1.0 : 99.0),
     batteryPercent: telemetry.batteryPercent ?? 0,
     batteryVoltage: telemetry.batteryVoltage ?? 0,
     altitudeMeters: telemetry.altitude ?? 0.0,
@@ -225,8 +231,8 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
     headingDeg: Math.round(((telemetry.heading ?? 0) % 360 + 360) % 360),
     rollDeg: telemetry.roll ?? 0.0,
     pitchDeg: telemetry.pitch ?? 0.0,
-    latitude: isGpsValid ? lat : 0,
-    longitude: isGpsValid ? lon : 0,
+    latitude: hasValidGpsCoords ? lat : 0,
+    longitude: hasValidGpsCoords ? lon : 0,
     gpsAltitudeMeters,
     gpsFixType,
     isGpsLocked,

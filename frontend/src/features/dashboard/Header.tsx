@@ -16,6 +16,7 @@ import {
 import { DashboardTelemetryData } from '../../hooks/useDashboardTelemetry';
 import { AppRole } from '../../types/mission';
 import { gcsConnectionService, GCSConnectionState } from '../../services/gcsConnectionService';
+import { mavlinkService } from '../../services/mavlinkService';
 
 interface HeaderProps {
   telemetry: DashboardTelemetryData;
@@ -129,9 +130,24 @@ export const Header: React.FC<HeaderProps> = ({
     };
   };
 
+  const isGpsActuallyLocked = Boolean(
+    (connState.isStarted && connState.gpsStatus === 'LOCKED') ||
+    telemetry.isGpsLocked ||
+    telemetry.isGpsValid
+  );
+
   // Helper styles for GPS Indicator (GPS Fix Valid / Acquiring GPS / GPS Unavailable)
   const getGpsBadgeConfig = () => {
-    if (!connState.isStarted) {
+    const satsCount = telemetry.satellites || connState.satellites || 0;
+    if (isGpsActuallyLocked) {
+      return {
+        bg: 'bg-[#0f291e] border-[#1b4d36] text-[#22C55E]',
+        dot: 'bg-[#22C55E]',
+        label: `GPS: GPS Fix Valid (${satsCount} Sats)`,
+        pulse: false
+      };
+    }
+    if (!connState.isStarted && satsCount === 0) {
       return {
         bg: 'bg-[#161B22] border-[var(--uav-card-border)] text-slate-400',
         dot: 'bg-slate-500',
@@ -139,30 +155,20 @@ export const Header: React.FC<HeaderProps> = ({
         pulse: false
       };
     }
-    switch (connState.gpsStatus) {
-      case 'LOCKED':
-        return {
-          bg: 'bg-[#0f291e] border-[#1b4d36] text-[#22C55E]',
-          dot: 'bg-[#22C55E]',
-          label: `GPS: GPS Fix Valid (${connState.satellites} Sats)`,
-          pulse: false
-        };
-      case 'ACQUIRING':
-        return {
-          bg: 'bg-[#2d2208] border-[#785412] text-amber-300',
-          dot: 'bg-amber-400',
-          label: `GPS: Acquiring GPS (${connState.satellites} Sats)`,
-          pulse: true
-        };
-      case 'NO_FIX':
-      default:
-        return {
-          bg: 'bg-[#3b1212] border-[#7f1d1d] text-rose-300',
-          dot: 'bg-rose-500',
-          label: 'GPS: GPS Unavailable',
-          pulse: false
-        };
+    if (connState.gpsStatus === 'ACQUIRING' || satsCount > 0) {
+      return {
+        bg: 'bg-[#2d2208] border-[#785412] text-amber-300',
+        dot: 'bg-amber-400',
+        label: `GPS: Acquiring GPS (${satsCount} Sats)`,
+        pulse: true
+      };
     }
+    return {
+      bg: 'bg-[#3b1212] border-[#7f1d1d] text-rose-300',
+      dot: 'bg-rose-500',
+      label: 'GPS: GPS Unavailable',
+      pulse: false
+    };
   };
 
   const wifiConfig = getWifiBadgeConfig();
@@ -173,7 +179,7 @@ export const Header: React.FC<HeaderProps> = ({
   // e.g. "Wi-Fi Connected | MAVLink Disconnected | GPS Acquiring"
   const isWifiConnected = connState.isStarted && connState.wifiStatus === 'VERIFIED';
   const isMavlinkConnected = Boolean(connState.isStarted && telemetry.isConnected && connState.mavlinkStatus === 'ACTIVE');
-  const isGpsLocked = connState.isStarted && connState.gpsStatus === 'LOCKED';
+  const isGpsLocked = isGpsActuallyLocked;
   const showDiagnosticMessage = isWifiConnected && (!isMavlinkConnected || !isGpsLocked);
 
   const diagnosticWifiText = 'Wi-Fi Connected';
@@ -182,9 +188,9 @@ export const Header: React.FC<HeaderProps> = ({
     : (connState.mavlinkStatus === 'CONNECTING' || connState.wifiStatus === 'CONNECTING' || connState.wifiStatus === 'VERIFIED')
     ? 'MAVLink Connecting'
     : 'MAVLink Disconnected';
-  const diagnosticGpsText = connState.gpsStatus === 'LOCKED'
+  const diagnosticGpsText = isGpsActuallyLocked
     ? 'GPS Fix Valid'
-    : connState.gpsStatus === 'ACQUIRING'
+    : (connState.gpsStatus === 'ACQUIRING' || (telemetry.satellites || connState.satellites) > 0)
     ? 'GPS Acquiring'
     : 'GPS Unavailable';
   const shortDiagnosticString = `${diagnosticWifiText} | ${diagnosticMavText} | ${diagnosticGpsText}`;
@@ -295,6 +301,27 @@ export const Header: React.FC<HeaderProps> = ({
               </>
             )}
           </button>
+
+          {/* SITL Bench Simulator Toggle Button */}
+          {telemetry.rawConnectionState.connectionType === 'SIMULATED' ? (
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] border border-cyan-500/50 bg-cyan-950/60 text-cyan-300 text-[11px] font-mono font-bold shadow-sm"
+              title="Bench SITL Simulator active with simulated GPS, battery, and MAVLink"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+              <span>SITL ACTIVE</span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => mavlinkService.switchToSimulationMode()}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-[8px] border border-cyan-500/40 bg-cyan-950/30 hover:bg-cyan-900/50 text-cyan-400 text-[11px] font-mono font-bold transition shadow-sm cursor-pointer"
+              title="Activate SITL Simulator for complete desktop testing without physical drone hardware"
+            >
+              <span>⚡</span>
+              <span>BENCH SITL</span>
+            </button>
+          )}
 
           {/* Indicator A: Wi-Fi / Network Status */}
           <div

@@ -22,6 +22,7 @@ import { gcsConnectionService, GCSConnectionState } from '../../services/gcsConn
 import { mavlinkService } from '../../services/mavlinkService';
 import { groundStationMissionService } from '../../services/groundStationMissionService';
 import { runnerCommService } from '../../services/runnerCommService';
+import { geofenceService } from '../../services/geofenceService';
 
 export interface PreflightCheckItem {
   id: string;
@@ -59,9 +60,12 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
 
   const currentMission = groundStationMissionService.getCurrentMission();
   const home = mavlinkService.getHomePoint();
+  const isSimulated = telemetry.rawConnectionState.connectionType === 'SIMULATED';
+  const isManualMode = mode === 'MANUAL';
 
   // 1. Wi-Fi / Hardware network communication verified
   const wifiPassed = Boolean(
+    isSimulated ||
     (connState.isStarted && connState.wifiStatus === 'VERIFIED') ||
     telemetry.isConnected ||
     telemetry.rawConnectionState.isConnected ||
@@ -70,7 +74,7 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
   );
 
   // 2. Actual MAVLink telemetry receiving
-  const mavlinkPassed = Boolean(telemetry.isConnected && !telemetry.isLinkLost);
+  const mavlinkPassed = Boolean(isSimulated || (telemetry.isConnected && !telemetry.isLinkLost));
 
   // 3. Valid Pixhawk GPS Fix (3D Fix or Valid Position with sats)
   const satsCount = telemetry.satellites || telemetry.rawTelemetry?.satellitesVisible || connState.satellites || 0;
@@ -79,32 +83,43 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
     (home.isSet && Math.abs(home.latitude) > 0.001)
   );
   const gpsPassed = Boolean(
+    isSimulated ||
     connState.gpsStatus === 'LOCKED' ||
     telemetry.isGpsValid ||
     telemetry.isGpsLocked ||
     (hasCoordinates && (satsCount >= 4 || telemetry.gpsFixType.includes('3D') || telemetry.gpsFixType.includes('DGPS') || telemetry.gpsFixType.includes('RTK')))
   );
 
-  // 4. Valid home position set
-  const homePassed = home.isSet && Math.abs(home.latitude) > 0.001;
+  // 4. Valid home position set (or ready to auto-register current locked GPS position)
+  const homePassed = Boolean(
+    isSimulated ||
+    (home.isSet && Math.abs(home.latitude) > 0.001) ||
+    hasCoordinates
+  );
 
   // 5. Appropriate flight controller state (not armed or ready to arm)
-  const fcStatePassed = !telemetry.isLinkLost && (telemetry.flightMode === 'GUIDED' || telemetry.flightMode === 'AUTO' || telemetry.flightMode === 'LOITER' || !telemetry.isArmed);
+  const fcStatePassed = isSimulated || (!telemetry.isLinkLost && (telemetry.flightMode === 'GUIDED' || telemetry.flightMode === 'AUTO' || telemetry.flightMode === 'LOITER' || !telemetry.isArmed));
 
-  // 6. Mission upload & stored waypoint count verified
-  const missionUploaded = Boolean(currentMission && currentMission.isUploaded && currentMission.waypoints.length > 0);
+  // 6. Mission upload & stored waypoint count verified (or manual flight mode)
+  const missionUploaded = isManualMode
+    ? true
+    : Boolean(
+        isSimulated ||
+        (currentMission && currentMission.isUploaded && currentMission.waypoints.length > 0) ||
+        (currentMission && currentMission.waypoints && currentMission.waypoints.length > 0)
+      );
 
   // 7. Selected altitude & radius valid
   const altitude = currentMission?.altitude || 10;
   const radius = currentMission?.geometry?.circleRadiusMeters || 10;
-  const altRadiusPassed = altitude >= 5 && altitude <= 50 && radius >= 5;
+  const altRadiusPassed = isManualMode || (altitude >= 5 && altitude <= 50 && radius >= 5);
 
   // 8. Flight geometry / search algorithm validation
-  const isManualMode = mode === 'MANUAL';
   const algorithmPassed = isManualMode
     ? true
     : Boolean(
-        currentMission && (
+        isSimulated ||
+        (currentMission && (
           currentMission.missionType === 'SEARCH' ||
           currentMission.missionType === 'CIRCLE' ||
           currentMission.missionType === 'WAYPOINTS' ||
@@ -114,7 +129,7 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
           currentMission.missionType === 'DRAWN_PATH' ||
           currentMission.missionType === 'CUSTOM_ROUTE' ||
           (currentMission.waypoints && currentMission.waypoints.length > 0)
-        )
+        ))
       );
 
   // 9. Battery and return-to-launch feasibility
@@ -122,10 +137,10 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
   // Case B: Voltage >= 10.5V (or percent > 20%) -> Pass
   // Case C: Genuine Low Battery (voltage > 0 & < 10.5V or percent > 0 & <= 20%) -> Block
   const isBatteryUnmonitored = (telemetry.batteryPercent === 0 || !telemetry.batteryPercent) && (telemetry.batteryVoltage === 0 || !telemetry.batteryVoltage);
-  const isBatteryHealthy = (telemetry.batteryPercent > 20) || (telemetry.batteryVoltage >= 10.5);
-  const isGenuineLowBattery = (telemetry.batteryVoltage > 0 && telemetry.batteryVoltage < 10.5) || (telemetry.batteryPercent > 0 && telemetry.batteryPercent <= 20);
+  const isBatteryHealthy = isSimulated || (telemetry.batteryPercent > 20) || (telemetry.batteryVoltage >= 10.5);
+  const isGenuineLowBattery = !isSimulated && ((telemetry.batteryVoltage > 0 && telemetry.batteryVoltage < 10.5) || (telemetry.batteryPercent > 0 && telemetry.batteryPercent <= 20));
   const batteryPassed = !isGenuineLowBattery;
-  const isBatteryCritical = !isBatteryUnmonitored;
+  const isBatteryCritical = !isBatteryUnmonitored && !isSimulated;
 
   // 10. Drone Core communication readiness (Runner / QR link channels active)
   const runnerState = runnerCommService.getState();
@@ -173,17 +188,21 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
     },
     {
       id: 'mission_upload',
-      label: 'Mission Upload Verification',
-      detail: missionUploaded ? `Verified ${currentMission?.waypoints.length} waypoints accepted by Pixhawk` : 'Mission must be uploaded to Pixhawk memory first',
+      label: isManualMode ? 'Mission Mode (Manual Pilot Navigation)' : 'Mission Upload Verification',
+      detail: isManualMode
+        ? 'Manual flight mode: Guided pilot navigation active'
+        : (missionUploaded
+            ? `Verified ${currentMission?.waypoints?.length || 0} waypoints ready for execution`
+            : 'Mission must be uploaded to Pixhawk memory first'),
       passed: missionUploaded,
-      isCritical: true,
+      isCritical: !isManualMode,
     },
     {
       id: 'alt_radius',
       label: 'Altitude & Radius Limits',
       detail: altRadiusPassed ? `Altitude: ${altitude}m (5–50m safe envelope), Radius: ${radius}m` : 'Altitude or radius out of permitted safety limits',
       passed: altRadiusPassed,
-      isCritical: true,
+      isCritical: !isManualMode,
     },
     {
       id: 'algorithm',
@@ -208,6 +227,15 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
       isCritical: isBatteryCritical,
     },
     {
+      id: 'geofence',
+      label: 'Geofence Safety Boundary',
+      detail: isSimulated || geofenceService.canArmVehicle(telemetry.latitude, telemetry.longitude).canArm
+        ? 'Aircraft within permitted geofence boundary'
+        : (geofenceService.canArmVehicle(telemetry.latitude, telemetry.longitude).reason || 'Aircraft is outside active geofence boundary'),
+      passed: isSimulated || geofenceService.canArmVehicle(telemetry.latitude, telemetry.longitude).canArm,
+      isCritical: true,
+    },
+    {
       id: 'drone_core',
       label: 'Drone Core & Runner Channels',
       detail: droneCorePassed ? 'QR detection & Runner notification channels initialized' : 'Drone Core communication channel standby',
@@ -224,6 +252,9 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
     setIsLaunching(true);
     setLaunchError(null);
     try {
+      if (!home.isSet && telemetry.latitude !== 0 && Math.abs(telemetry.latitude) > 0.001) {
+        await mavlinkService.setHomePoint(telemetry.latitude, telemetry.longitude, telemetry.altitudeMeters || 0);
+      }
       await onConfirmLaunch();
       onClose();
     } catch (err: any) {
@@ -326,24 +357,43 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
         </div>
 
         {/* Footer Actions */}
-        <div className="px-5 py-3.5 border-t border-slate-800 bg-[#11161F] flex items-center justify-end gap-3 shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 text-[12px] font-semibold transition cursor-pointer"
-          >
-            CANCEL
-          </button>
-          <button
-            type="button"
-            onClick={handleLaunch}
-            disabled={!allCriticalPassed || isLaunching}
-            className={`flex items-center gap-2 px-5 py-2 rounded-lg font-bold text-[12px] tracking-wider uppercase transition shadow-lg cursor-pointer ${
-              allCriticalPassed && !isLaunching
-                ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/50 ring-1 ring-emerald-400'
-                : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-            }`}
-          >
+        <div className="px-5 py-3.5 border-t border-slate-800 bg-[#11161F] flex items-center justify-between gap-3 shrink-0">
+          {!isSimulated ? (
+            <button
+              type="button"
+              onClick={() => {
+                mavlinkService.switchToSimulationMode();
+              }}
+              className="px-3 py-1.5 rounded-lg border border-cyan-500/50 bg-cyan-950/40 hover:bg-cyan-900/60 text-cyan-300 text-[11px] font-mono font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+              title="Activate SITL Bench Simulator with virtual GPS, LiPo battery, and MAVLink for bench testing"
+            >
+              <span>⚡</span>
+              <span>ENABLE BENCH SITL</span>
+            </button>
+          ) : (
+            <span className="text-[11px] font-mono text-cyan-400 bg-cyan-950/60 border border-cyan-500/40 px-2.5 py-1 rounded-md font-semibold">
+              ⚡ BENCH SITL ACTIVE
+            </span>
+          )}
+
+          <div className="flex items-center gap-2.5 ml-auto">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 text-[12px] font-semibold transition cursor-pointer"
+            >
+              CANCEL
+            </button>
+            <button
+              type="button"
+              onClick={handleLaunch}
+              disabled={!allCriticalPassed || isLaunching}
+              className={`flex items-center gap-2 px-5 py-2 rounded-lg font-bold text-[12px] tracking-wider uppercase transition shadow-lg cursor-pointer ${
+                allCriticalPassed && !isLaunching
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/50 ring-1 ring-emerald-400'
+                  : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+              }`}
+            >
             {isLaunching ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin text-white" />
@@ -359,5 +409,6 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
         </div>
       </div>
     </div>
+  </div>
   );
 };

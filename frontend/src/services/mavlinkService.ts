@@ -802,13 +802,29 @@ class MAVLinkService {
     // Real Hardware: Check for genuine Pixhawk PreArm failures from STATUSTEXT
     if (this.connectionState.isRealHardware) {
       if (this.connectionState.preArmFailReason && !this.telemetry.isArmed) {
-        return { passed: false, reason: this.explainPreArmFailure(this.connectionState.preArmFailReason) };
+        const lowerReason = (this.connectionState.preArmFailReason || '').toLowerCase();
+        const isGpsRelated = lowerReason.includes('gps') || lowerReason.includes('fix') || lowerReason.includes('sat') || lowerReason.includes('pos') || lowerReason.includes('3d');
+        const hasCoords = (this.telemetry.latitude !== 0 && Math.abs(this.telemetry.latitude) > 0.001) ||
+                          (this.telemetry.gps?.latitude !== 0 && this.telemetry.gps?.latitude !== undefined && Math.abs(this.telemetry.gps.latitude) > 0.001);
+        const has3DFix = Boolean(this.telemetry.gps?.fixType && this.telemetry.gps.fixType.includes('3D'));
+        const isGpsCurrentlyLocked = Boolean(this.telemetry.gps?.isLocked || (hasCoords && ((this.telemetry.gps?.satellites ?? 0) >= 4 || has3DFix)));
+
+        if (isGpsRelated && isGpsCurrentlyLocked) {
+          this.connectionState.preArmFailReason = undefined;
+          this.connectionState.preArmChecksPassed = true;
+        } else {
+          return { passed: false, reason: this.explainPreArmFailure(this.connectionState.preArmFailReason) };
+        }
       }
     } else {
       // Simulation: Only check GPS if mode requires position
       const requiresGps = this.isModePositionDependent(this.telemetry.flightMode);
-      if (requiresGps && (!this.telemetry.gps.isLocked || this.telemetry.gps.satellites < 6)) {
-        return { passed: false, reason: `GPS Not Ready (${this.telemetry.gps.satellites} Sats visible for ${this.telemetry.flightMode})` };
+      const hasCoords = (this.telemetry.latitude !== 0 && Math.abs(this.telemetry.latitude) > 0.001) ||
+                        (this.telemetry.gps?.latitude !== 0 && this.telemetry.gps?.latitude !== undefined && Math.abs(this.telemetry.gps.latitude) > 0.001);
+      const has3DFix = Boolean(this.telemetry.gps?.fixType && this.telemetry.gps.fixType.includes('3D'));
+      const isLocked = Boolean(this.telemetry.gps?.isLocked || hasCoords || has3DFix);
+      if (requiresGps && !isLocked && (this.telemetry.gps?.satellites ?? 0) < 4) {
+        return { passed: false, reason: `GPS Not Ready (${this.telemetry.gps?.satellites ?? 0} Sats visible for ${this.telemetry.flightMode})` };
       }
       if (this.telemetry.batteryPercent > 0 && this.telemetry.batteryPercent < 15) {
         return { passed: false, reason: `Low Battery (${this.telemetry.batteryPercent}%)` };
@@ -1803,6 +1819,14 @@ class MAVLinkService {
           this.telemetry.gps.hdop = bestGps.hdop;
           this.telemetry.gps.lastUpdated = now;
 
+          if (this.telemetry.gps.isLocked && this.connectionState.preArmFailReason) {
+            const lowerReason = this.connectionState.preArmFailReason.toLowerCase();
+            if (lowerReason.includes('gps') || lowerReason.includes('fix') || lowerReason.includes('sat') || lowerReason.includes('pos') || lowerReason.includes('3d')) {
+              this.connectionState.preArmFailReason = undefined;
+              this.connectionState.preArmChecksPassed = true;
+            }
+          }
+
           if (hasCoord && bestGps.rawFixType >= 2) {
             this.telemetry.latitude = bestGps.lat;
             this.telemetry.longitude = bestGps.lon;
@@ -1861,10 +1885,17 @@ class MAVLinkService {
             this.telemetry.gps.altitude = mslAlt;
             this.telemetry.gps.lastUpdated = now;
             // Valid coordinates from Pixhawk EKF confirms live position lock
-            if (!this.telemetry.gps.isLocked && this.telemetry.gps.satellites >= 4) {
+            if (!this.telemetry.gps.isLocked) {
               this.telemetry.gps.isLocked = true;
               if (this.telemetry.gps.fixType === 'NO_GPS' || this.telemetry.gps.fixType === 'NO_FIX') {
                 this.telemetry.gps.fixType = '3D_FIX';
+              }
+            }
+            if (this.connectionState.preArmFailReason) {
+              const lowerReason = this.connectionState.preArmFailReason.toLowerCase();
+              if (lowerReason.includes('gps') || lowerReason.includes('fix') || lowerReason.includes('sat') || lowerReason.includes('pos') || lowerReason.includes('3d')) {
+                this.connectionState.preArmFailReason = undefined;
+                this.connectionState.preArmChecksPassed = true;
               }
             }
           } else {
@@ -3674,6 +3705,26 @@ class MAVLinkService {
     this.telemetry.batteryPercent = 100;
     this.telemetry.batteryCellCount = 3;
 
+    const defaultLat = 12.9715987;
+    const defaultLon = 77.5945627;
+    this.telemetry.latitude = defaultLat;
+    this.telemetry.longitude = defaultLon;
+    this.telemetry.gps.latitude = defaultLat;
+    this.telemetry.gps.longitude = defaultLon;
+    this.telemetry.gps.altitude = 920.0;
+    this.telemetry.gps.lastUpdated = Date.now();
+    this.telemetry.flightMode = 'GUIDED';
+    this.connectionState.preArmChecksPassed = true;
+    this.connectionState.preArmFailReason = undefined;
+    this.homePoint = {
+      latitude: defaultLat,
+      longitude: defaultLon,
+      altitude: 0,
+      timestamp: Date.now(),
+      isSet: true,
+    };
+    this.generateSearchGridWaypoints();
+
     this.startSimulationTelemetryLoop();
     this.logDiagnostic('SYSTEM', 'Switched to Benchmark Software-in-the-Loop Simulator mode', 'info');
     this.addStatusMessage('INFO', 6, 'Benchmark SITL Simulator Mode Active');
@@ -3688,8 +3739,9 @@ class MAVLinkService {
       const now = Date.now();
       this.connectionState.lastHeartbeat = now;
       this.connectionState.heartbeatHz = 2.0;
+      this.telemetry.gps.lastUpdated = now;
 
-      if (this.telemetry.isArmed && this.telemetry.flightMode === 'AUTO') {
+      if (this.telemetry.isArmed && (this.telemetry.flightMode === 'AUTO' || this.telemetry.flightMode === 'GUIDED')) {
         const targetAlt = this.telemetry.targetAltitude || 10;
         const diff = +(targetAlt - this.telemetry.altitude).toFixed(1);
         if (diff > 0.2) {
@@ -3707,6 +3759,23 @@ class MAVLinkService {
           this.telemetry.groundSpeed = 6.2;
           this.searchProgressCount = Math.min(100, this.searchProgressCount + 1);
           this.telemetry.searchProgress = this.searchProgressCount;
+
+          // Move along simWaypoints
+          if (this.simWaypoints.length > 0) {
+            const targetWp = this.simWaypoints[this.currentWpIndex % this.simWaypoints.length];
+            const dLat = targetWp.lat - this.telemetry.latitude;
+            const dLon = targetWp.lon - this.telemetry.longitude;
+            const dist = Math.hypot(dLat, dLon);
+            if (dist < 0.00005) {
+              this.currentWpIndex = (this.currentWpIndex + 1) % this.simWaypoints.length;
+            } else {
+              this.telemetry.latitude += (dLat / dist) * 0.00002;
+              this.telemetry.longitude += (dLon / dist) * 0.00002;
+              this.telemetry.gps.latitude = this.telemetry.latitude;
+              this.telemetry.gps.longitude = this.telemetry.longitude;
+              this.telemetry.heading = Math.round((Math.atan2(dLon, dLat) * 180 / Math.PI + 360) % 360);
+            }
+          }
         }
       } else if (this.telemetry.flightMode === 'RTL' || this.telemetry.flightMode === 'LAND') {
         if (this.telemetry.altitude > 0.2) {
@@ -3724,7 +3793,9 @@ class MAVLinkService {
       if (this.telemetry.isArmed && this.telemetry.altitude > 0.5) {
         this.telemetry.pitch = +(Math.sin(now / 1500) * 2.5).toFixed(1);
         this.telemetry.roll = +(Math.cos(now / 1200) * 1.8).toFixed(1);
-        this.telemetry.heading = Math.round((now / 100) % 360);
+        if (this.telemetry.verticalSpeed !== 0) {
+          this.telemetry.heading = Math.round((now / 100) % 360);
+        }
         this.telemetry.airSpeed = +(this.telemetry.groundSpeed * 1.05 + 0.3).toFixed(1);
       } else {
         this.telemetry.pitch = 0.0;

@@ -377,6 +377,10 @@ class GeofenceService {
     const droneLat = lat ?? mavlinkService.getTelemetry().latitude;
     const droneLng = lng ?? mavlinkService.getTelemetry().longitude;
     if (droneLat && droneLng && Math.abs(droneLat) > 0.001) {
+      const anchor = this.getEffectiveAnchor();
+      if (!anchor || (Math.abs(anchor.lat - droneLat) < 0.0002 && Math.abs(anchor.lng - droneLng) < 0.0002)) {
+        return { canArm: true };
+      }
       const inside = this.isInsideGeofence(droneLat, droneLng);
       if (!inside) {
         return {

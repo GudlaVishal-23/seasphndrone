@@ -270,12 +270,36 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     setShowPreflightModal(false);
     showNotification(`Arming flight controller and starting ${missionMode} mission...`);
     try {
-      if (missionEngine?.startMission) {
-        await missionEngine.startMission();
+      const currentMission = groundStationMissionService.getCurrentMission();
+      let started = false;
+      let statusMsg = '';
+
+      if (currentMission && currentMission.waypoints && currentMission.waypoints.length > 0) {
+        const res = await groundStationMissionService.startGroundStationMission(false);
+        started = res.success;
+        statusMsg = res.message;
+      } else if (missionEngine?.startMission) {
+        started = missionEngine.startMission();
+        statusMsg = started ? `Autonomous ${missionMode} mission commenced` : 'Mission pre-flight checks rejected arming';
       } else {
-        await mavlinkService.sendArmCommand(false);
-        await mavlinkService.setFlightMode('AUTO');
+        const armSuccess = await mavlinkService.sendArmCommand(false);
+        if (armSuccess) {
+          await mavlinkService.setFlightMode('AUTO');
+          started = true;
+          statusMsg = 'Armed and switched to AUTO mode';
+        } else {
+          started = false;
+          statusMsg = 'Pixhawk rejected arm command';
+        }
       }
+
+      if (!started) {
+        audioService.playBeep(300, 300, 'sawtooth');
+        showNotification(`❌ Start Mission rejected: ${statusMsg}`);
+        return;
+      }
+
+      showNotification(`🚀 ${statusMsg}`);
 
       // Register active mission with backend /api/missions (preserves start time & deadline)
       const m = groundStationMissionService.getCurrentMission();

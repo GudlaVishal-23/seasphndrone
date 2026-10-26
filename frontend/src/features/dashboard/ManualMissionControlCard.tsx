@@ -247,16 +247,11 @@ export const ManualMissionControlCard: React.FC<ManualMissionControlCardProps> =
       <button
         type="button"
         onClick={onOpenPreflightModal}
-        disabled={totalWps === 0}
-        className={`w-full py-2.5 px-3 rounded-lg font-sans font-black text-[11px] tracking-wider uppercase flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer shadow-md ${
-          totalWps > 0
-            ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/50'
-            : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-        }`}
+        className="w-full py-2.5 px-3 rounded-lg font-sans font-black text-[11px] tracking-wider uppercase flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer shadow-md bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/50"
         title="Verify flight readiness and confirm mission launch"
       >
         <Play className="w-3.5 h-3.5 fill-current" />
-        <span>START MISSION</span>
+        <span>{totalWps > 0 ? 'START MISSION' : 'PREFLIGHT & LAUNCH'}</span>
       </button>
 
       {/* Emergency RTL Button */}

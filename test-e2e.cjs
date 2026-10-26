@@ -3,6 +3,30 @@ const { spawn } = require('child_process');
 
 console.log('--- STARTING END-TO-END PIPELINE VERIFICATION ---');
 
+// 0. Spin up Mock ESP32 WebSocket server on port 8089
+const mockEsp32Server = new WebSocket.Server({ port: 8089 });
+let mockHbInterval = null;
+mockEsp32Server.on('connection', (ws) => {
+  console.log('[MOCK ESP32] Local connector connected to simulated ESP32 bridge.');
+  mockHbInterval = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      const hb = Buffer.from([0xFE, 0x09, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x03, 0x00, 0x00, 0x00, 0xD0, 0x8A]);
+      ws.send(hb);
+    }
+  }, 200);
+
+  ws.on('message', (data) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      const ack = Buffer.from([0xFE, 0x03, 0x02, 0x01, 0x01, 0x4D, 0x90, 0x01, 0x00, 0x12, 0x34]);
+      ws.send(ack);
+    }
+  });
+
+  ws.on('close', () => {
+    if (mockHbInterval) clearInterval(mockHbInterval);
+  });
+});
+
 // 1. Launch Cloud Relay on port 8765
 const relay = spawn('node', ['backend/server.js'], {
   env: { ...process.env, PORT: '8765', RELAY_TOKEN: 'e2e-secret-key-456' }
@@ -24,12 +48,12 @@ setTimeout(() => {
     console.log('[BROWSER] WebSocket connected to relay endpoint successfully.');
 
     // 3. Now start the Local Connector
-    console.log('\n[TEST] Launching Local Connector pointing to ESP32 (192.168.31.194:8080/ws) & Relay...');
+    console.log('\n[TEST] Launching Local Connector pointing to Mock ESP32 (127.0.0.1:8089/ws) & Relay...');
     const connector = spawn('node', ['local-connector/connector.js'], {
       env: {
         ...process.env,
-        ESP32_HOST: '192.168.31.194',
-        ESP32_PORT: '8080',
+        ESP32_HOST: '127.0.0.1',
+        ESP32_PORT: '8089',
         ESP32_PATH: '/ws',
         RELAY_URL: 'ws://localhost:8765/connector',
         RELAY_TOKEN: 'e2e-secret-key-456'
@@ -56,6 +80,7 @@ setTimeout(() => {
       browserWs.close();
       connector.kill();
       relay.kill();
+      mockEsp32Server.close();
       process.exit(passed ? 0 : 1);
     }, 4500);
   });

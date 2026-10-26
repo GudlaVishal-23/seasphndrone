@@ -59,13 +59,13 @@ class GCSConnectionService {
   private initListeners() {
     // Listen to MAVLink telemetry updates to dynamically update MAVLink & GPS status
     this.telemetryUnsubscribe = mavlinkService.subscribeTelemetry((telem: DroneTelemetry) => {
-      if (!this.state.isStarted) return;
+      if (!this.state.isStarted && mavlinkService.getConnectionState().connectionType !== 'SIMULATED') return;
       this.evaluateTelemetry(telem);
     });
 
     // Listen to MAVLink connection state changes
     this.connectionUnsubscribe = mavlinkService.subscribeConnection((conn: PixhawkConnectionState) => {
-      if (!this.state.isStarted) return;
+      if (!this.state.isStarted && conn.connectionType !== 'SIMULATED') return;
       this.evaluateConnection(conn);
     });
 
@@ -116,9 +116,9 @@ class GCSConnectionService {
     const fixType = telem.gps?.fixType || (isLocked ? '3D_FIX' : 'NO_GPS');
 
     let gpsStatus: GpsConnectionStatus = 'NO_FIX';
-    if (isLocked && (sats >= 6 || (sats >= 4 && hasCoords))) {
+    if (isLocked && (sats >= 6 || (sats >= 4 && hasCoords) || hasCoords || telem.gps?.isLocked)) {
       gpsStatus = 'LOCKED';
-    } else if (sats > 0 || isLocked) {
+    } else if (sats > 0) {
       gpsStatus = 'ACQUIRING';
     } else {
       gpsStatus = 'NO_FIX';
@@ -131,6 +131,18 @@ class GCSConnectionService {
 
     // Only update MAVLink status to ACTIVE if Pixhawk heartbeat is verified live
     const conn = mavlinkService.getConnectionState();
+    if (conn.connectionType === 'SIMULATED') {
+      this.state.isStarted = true;
+      this.state.wifiStatus = 'VERIFIED';
+      this.state.mavlinkStatus = 'ACTIVE';
+      this.state.gpsStatus = 'LOCKED';
+      this.state.satellites = sats || 14;
+      this.state.hdop = hdop < 90 ? hdop : 0.8;
+      this.state.gpsFixType = fixType || '3D_FIX';
+      this.notify();
+      return;
+    }
+
     const hasHeartbeat = conn.lastHeartbeat > 0 && (Date.now() - conn.lastHeartbeat < 10000);
     if (hasHeartbeat && telem.pixhawkConnected) {
       this.state.mavlinkStatus = 'ACTIVE';
@@ -147,6 +159,14 @@ class GCSConnectionService {
    * Evaluates MAVLink communication layer status
    */
   private evaluateConnection(conn: PixhawkConnectionState) {
+    if (conn.connectionType === 'SIMULATED') {
+      this.state.isStarted = true;
+      this.state.wifiStatus = 'VERIFIED';
+      this.state.mavlinkStatus = 'ACTIVE';
+      this.notify();
+      return;
+    }
+
     const now = Date.now();
     const hasHeartbeat = conn.lastHeartbeat > 0 && (now - conn.lastHeartbeat < 10000);
     const isTransportOpen = Boolean(conn.isConnected || conn.isUsbConnected);

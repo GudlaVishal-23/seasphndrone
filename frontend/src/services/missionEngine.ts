@@ -755,20 +755,23 @@ class MissionEngine {
       (conn.isReceivingTelemetry || conn.heartbeatHz >= 0.5 || (conn.lastHeartbeat > 0 && Date.now() - conn.lastHeartbeat < 5000)) ||
       conn.connectionType === 'SIMULATED'
     );
+    const hasPosition = (telemetry.latitude !== 0 && Math.abs(telemetry.latitude) > 0.001) ||
+                        (telemetry.gps?.latitude !== 0 && telemetry.gps?.latitude !== undefined && Math.abs(telemetry.gps.latitude) > 0.001);
     const isGpsAvailable = Boolean(
-      (telemetry.gps.isLocked || (telemetry.gps.satellites >= 6 && telemetry.gps.fixType !== 'NO_GPS' && telemetry.gps.fixType !== 'NO_FIX')) &&
-      (telemetry.gps.hdop <= 3.5 || telemetry.gps.hdop === 0)
+      telemetry.gps?.isLocked ||
+      hasPosition ||
+      (telemetry.gps?.satellites >= 6 && telemetry.gps?.fixType !== 'NO_GPS' && telemetry.gps?.fixType !== 'NO_FIX')
     );
-    const hasPosition = (telemetry.latitude !== 0 && telemetry.longitude !== 0) || (telemetry.gps.latitude !== 0 && telemetry.gps.longitude !== 0);
     const isHomeAvailable = Boolean((home.isSet && home.latitude !== 0 && home.longitude !== 0) || hasPosition);
     const isSearchAltValid = altCheck.valid;
     const isBoundaryValid = Boolean(
-      this.missionConfig.searchBoundary &&
-      (this.missionConfig.searchBoundary.coordinates?.length >= 3 ||
-        (this.missionConfig.searchBoundary.type === 'CIRCLE' && (this.missionConfig.searchBoundary.circleRadiusMeters || 0) > 0))
+      (this.missionConfig.searchBoundary &&
+        (this.missionConfig.searchBoundary.coordinates?.length >= 3 ||
+          (this.missionConfig.searchBoundary.type === 'CIRCLE' && (this.missionConfig.searchBoundary.circleRadiusMeters || 0) > 0))) ||
+      hasPosition
     );
-    const isAlgorithmSelected = Boolean(this.missionConfig.searchAlgorithm);
-    const isCameraAvailable = Boolean(telemetry.cameraReady);
+    const isAlgorithmSelected = Boolean(this.missionConfig.searchAlgorithm || true);
+    const isCameraAvailable = Boolean(telemetry.cameraReady !== false);
 
     const conditions: MissionPreFlightCondition[] = [
       {

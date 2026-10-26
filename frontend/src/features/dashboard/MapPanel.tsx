@@ -1251,7 +1251,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   };
 
   const droneHasValidCoords = Boolean(
-    telemetry.isGpsValid &&
+    (telemetry.isGpsValid || telemetry.isGpsLocked) &&
     telemetry.latitude &&
     Math.abs(telemetry.latitude) > 0.001 &&
     Math.abs(telemetry.latitude) <= 90 &&
@@ -1401,7 +1401,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         </div>
 
         {/* Clear GPS Signal Warning / Status Pill */}
-        {!telemetry.isGpsValid ? (
+        {!(telemetry.isGpsValid || droneHasValidCoords) ? (
           <div className="pointer-events-auto px-3 py-1 rounded-full bg-rose-950/90 border border-rose-500/80 text-rose-200 text-[11px] font-sans font-semibold shadow-xl backdrop-blur-md flex items-center gap-2 animate-pulse">
             <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
             <span>⚠️ Pixhawk GPS Signal Unavailable</span>

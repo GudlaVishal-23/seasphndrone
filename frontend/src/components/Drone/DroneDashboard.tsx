@@ -331,7 +331,14 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
 
   const statusConfig = getStatusBadgeConfig(coreStatus);
   const StatusIcon = statusConfig.icon;
-  const isGpsValid = Boolean(telemetry.gps.isLocked || (telemetry.latitude !== 0 && Math.abs(telemetry.latitude) > 0.001));
+  const isGpsValid = Boolean(
+    telemetry.gps.isLocked ||
+    (telemetry.latitude !== 0 && Math.abs(telemetry.latitude) > 0.001) ||
+    telemetry.gps.fixType === '3D_FIX' ||
+    telemetry.gps.fixType === '3D_DGPS' ||
+    telemetry.gps.fixType === 'RTK_FLOAT' ||
+    telemetry.gps.fixType === 'RTK_FIXED'
+  );
   const isRtlExecuting = (telemetry.flightMode || '').toUpperCase() === 'RTL' || coreStatus === 'RETURNING TO LAUNCH';
 
   return (

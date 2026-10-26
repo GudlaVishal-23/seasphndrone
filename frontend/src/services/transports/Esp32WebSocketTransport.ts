@@ -31,8 +31,11 @@ export interface Esp32WebSocketOptions {
 }
 
 // Environment defaults
-const ENV_ESP32_WS_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ESP32_WS_URL) || 'wss://seasphndrone-backend.onrender.com/ws';
-const ENV_SECURE_RELAY_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || 'wss://seasphndrone-backend.onrender.com/ws';
+const isLocalhostOrigin = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const defaultLocalWs = isLocalhostOrigin ? `ws://${window.location.hostname}:8443/ws` : 'wss://seasphndrone-backend.onrender.com/ws';
+
+const ENV_ESP32_WS_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ESP32_WS_URL) || defaultLocalWs;
+const ENV_SECURE_RELAY_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SECURE_RELAY_URL) || defaultLocalWs;
 const ENV_RELAY_TOKEN = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_RELAY_TOKEN) || 'saeindia_sec_99348a7b1c0e';
 const ENV_WIFI_SSID = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_WIFI_SSID) || 'drone123';
 
@@ -41,12 +44,12 @@ function parseWsEndpoint(urlStr: string) {
     const clean = urlStr.trim().replace(/^ws(s)?:\/\//i, 'http$1://');
     const parsed = new URL(clean);
     return {
-      host: parsed.hostname || 'seasphndrone-backend.onrender.com',
-      port: parsed.port ? parseInt(parsed.port, 10) : (clean.startsWith('https://') ? 443 : 8080),
+      host: parsed.hostname || (isLocalhostOrigin ? 'localhost' : 'seasphndrone-backend.onrender.com'),
+      port: parsed.port ? parseInt(parsed.port, 10) : (clean.startsWith('https://') ? 443 : (isLocalhostOrigin ? 8443 : 8080)),
       path: parsed.pathname || '/ws'
     };
   } catch (e) {
-    return { host: 'seasphndrone-backend.onrender.com', port: 443, path: '/ws' };
+    return { host: isLocalhostOrigin ? 'localhost' : 'seasphndrone-backend.onrender.com', port: isLocalhostOrigin ? 8443 : 443, path: '/ws' };
   }
 }
 
@@ -327,6 +330,11 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
     if (this.protocolMode === 'WS') return 'ws';
     if (this.protocolMode === 'WSS') return 'wss';
 
+    const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    if (isLocalhost) {
+      return 'ws';
+    }
+
     // AUTO MODE: If secure endpoint is configured, prefer WSS to connect to active cloud relay
     if (this.secureEndpoint || ENV_SECURE_RELAY_URL) {
       return 'wss';
@@ -371,7 +379,16 @@ export class Esp32WebSocketTransport implements MavlinkTransport {
 
       return url;
     } else {
-      // Direct WS to ESP32: Do NOT convert ws:// to wss://
+      // Direct WS to ESP32 or Localhost Relay: Do NOT convert ws:// to wss://
+      if (this.secureEndpoint && this.secureEndpoint.startsWith('ws://')) {
+        let url = this.secureEndpoint;
+        const tokenToUse = (this.relayToken || ENV_RELAY_TOKEN).trim();
+        if (tokenToUse && !url.includes('token=')) {
+          const sep = url.includes('?') ? '&' : '?';
+          url = `${url}${sep}token=${encodeURIComponent(tokenToUse)}`;
+        }
+        return url;
+      }
       return `ws://${this.localHost}:${this.localPort}${formattedPath}`;
     }
   }

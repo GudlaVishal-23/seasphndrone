@@ -19,7 +19,7 @@ export type DroneCameraStreamStatus =
   | 'CONNECTION_LOST';     // "Connection Lost"
 
 export interface CameraStreamPayload {
-  type: 'CAMERA_STREAM_SIGNAL' | 'CAMERA_FRAME_DATA' | 'CAMERA_STATUS_UPDATE' | 'CAMERA_HEARTBEAT';
+  type: 'CAMERA_STREAM_SIGNAL' | 'CAMERA_FRAME_DATA' | 'CAMERA_STATUS_UPDATE' | 'CAMERA_HEARTBEAT' | 'CAMERA_STATUS_REQUEST';
   senderRole?: 'DRONE' | 'GROUND_STATION';
   isCameraActive?: boolean;
   status?: string;
@@ -36,6 +36,7 @@ type StatusListener = (status: DroneCameraStreamStatus, message: string) => void
 
 const BROADCAST_CHANNEL_NAME = 'DRONE_CORE_CAMERA_STREAM_CHANNEL';
 const RELAY_TOKEN_DEFAULT = 'saeindia_sec_99348a7b1c0e';
+const DEFAULT_SECURE_RELAY_URL = 'wss://seasphndrone-backend.onrender.com/ws';
 
 class DroneCameraStreamService {
   private channel: BroadcastChannel | null = null;
@@ -107,11 +108,16 @@ class DroneCameraStreamService {
     }
 
     const loc = window.location;
-    const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
-    // If running in development (e.g. port 5173), default backend is on port 3099
-    const port = loc.port === '5173' ? '3099' : (loc.port ? loc.port : (loc.protocol === 'https:' ? '443' : '80'));
+    // On HTTPS (e.g. Netlify deployment), browsers require WSS and Netlify cannot host WebSockets directly.
+    // Connect to the deployed Render Cloud Relay:
+    if (loc.protocol === 'https:' || loc.hostname.includes('netlify.app')) {
+      const sep = DEFAULT_SECURE_RELAY_URL.includes('?') ? '&' : '?';
+      return `${DEFAULT_SECURE_RELAY_URL}${sep}token=${encodeURIComponent(token)}`;
+    }
+
+    // Local Development: connect to backend server on port 8443 (or Render relay as fallback)
     const host = loc.hostname || '127.0.0.1';
-    return `${proto}//${host}:${port}/ws?token=${encodeURIComponent(token)}`;
+    return `ws://${host}:8443/ws?token=${encodeURIComponent(token)}`;
   }
 
   private initWebSocket() {
@@ -362,6 +368,30 @@ class DroneCameraStreamService {
     }, 66);
   }
 
+  public captureAndSendSingleFrame() {
+    if (!this.isPublishing || !this.activeVideoElement || !this.offscreenCanvas || !this.offscreenCtx) return;
+    const video = this.activeVideoElement;
+    if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) return;
+    const targetWidth = 640;
+    const targetHeight = Math.round((video.videoHeight / video.videoWidth) * targetWidth) || 360;
+    if (this.offscreenCanvas.width !== targetWidth || this.offscreenCanvas.height !== targetHeight) {
+      this.offscreenCanvas.width = targetWidth;
+      this.offscreenCanvas.height = targetHeight;
+    }
+    try {
+      this.offscreenCtx.drawImage(video, 0, 0, targetWidth, targetHeight);
+      const dataUrl = this.offscreenCanvas.toDataURL('image/jpeg', 0.60);
+      this.sendPayload({
+        type: 'CAMERA_FRAME_DATA',
+        senderRole: 'DRONE',
+        frame: dataUrl,
+        width: targetWidth,
+        height: targetHeight,
+        timestamp: Date.now()
+      });
+    } catch (err) {}
+  }
+
   // ==========================================================================
   // SUBSCRIBER: GROUND STATION RECEIVER LOGIC
   // ==========================================================================
@@ -369,6 +399,13 @@ class DroneCameraStreamService {
   public startSubscribing() {
     this.isSubscribing = true;
     console.log('[CAMERA STREAM] Ground Station subscribed to Drone Core camera feed.');
+
+    // Query active publisher for instant feed synchronization
+    this.sendPayload({
+      type: 'CAMERA_STATUS_REQUEST',
+      senderRole: 'GROUND_STATION',
+      timestamp: Date.now()
+    });
 
     // Start watchdog for connection liveness
     if (this.watchdogTimer) clearInterval(this.watchdogTimer);
@@ -393,6 +430,21 @@ class DroneCameraStreamService {
 
   private handleIncomingPayload(msg: any) {
     if (!msg || typeof msg !== 'object' || !msg.type) return;
+
+    // 0. Query from Ground Station asking for immediate status & frame
+    if (msg.type === 'CAMERA_STATUS_REQUEST') {
+      if (this.isPublishing && this.activeStream) {
+        this.sendPayload({
+          type: 'CAMERA_STATUS_UPDATE',
+          senderRole: 'DRONE',
+          isCameraActive: true,
+          status: 'LIVE',
+          timestamp: Date.now()
+        });
+        this.captureAndSendSingleFrame();
+      }
+      return;
+    }
 
     // 1. Frame Data Arrival
     if (msg.type === 'CAMERA_FRAME_DATA' && msg.frame) {

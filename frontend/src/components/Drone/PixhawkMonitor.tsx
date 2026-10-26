@@ -40,13 +40,22 @@ export const PixhawkMonitor: React.FC<PixhawkMonitorProps> = ({
             >
               <Sliders className="w-3.5 h-3.5" />
             </button>
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-              connectionState.isConnected 
-                ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-400' 
-                : 'bg-rose-950/60 border-rose-500/40 text-rose-400'
-            }`}>
-              {connectionState.isConnected ? 'MAVLink: CONNECTED ✓' : 'DISCONNECTED'}
-            </span>
+            {(() => {
+              const hasHeartbeat = (connectionState.lastHeartbeat || 0) > 0 && (Date.now() - (connectionState.lastHeartbeat || 0) < 10000);
+              const isConnected = connectionState.isConnected && hasHeartbeat;
+              const isConnecting = connectionState.isUsbConnected && !hasHeartbeat;
+              return (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                  isConnected 
+                    ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-400' 
+                    : isConnecting
+                    ? 'bg-amber-950/60 border-amber-500/40 text-amber-400'
+                    : 'bg-rose-950/60 border-rose-500/40 text-rose-400'
+                }`}>
+                  {isConnected ? 'MAVLink: CONNECTED ✓' : isConnecting ? 'MAVLink: CONNECTING' : 'DISCONNECTED'}
+                </span>
+              );
+            })()}
           </div>
         </div>
 

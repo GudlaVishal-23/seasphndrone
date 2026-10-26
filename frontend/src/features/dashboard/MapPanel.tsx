@@ -109,6 +109,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   const [isDrawingFreehand, setIsDrawingFreehand] = useState<boolean>(false);
   const [isPlacingCircle, setIsPlacingCircle] = useState<boolean>(false);
   const [isPlacingConcentric, setIsPlacingConcentric] = useState<boolean>(false);
+  const [isPlacingGeofence, setIsPlacingGeofence] = useState<boolean>(false);
   const [circleRadius, setCircleRadius] = useState<number>(() =>
     groundStationMissionService.getCircleRadius()
   );
@@ -141,6 +142,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   const waypointsGroupRef = useRef<L.LayerGroup | null>(null);
   const missionPolylineRef = useRef<L.Polyline | null>(null);
   const geofencePolygonRef = useRef<L.Polygon | null>(null);
+  const geofenceCenterMarkerRef = useRef<L.Marker | null>(null);
   const measurePointsRef = useRef<L.LatLng[]>([]);
   const measureLineRef = useRef<L.Polyline | null>(null);
 
@@ -163,6 +165,9 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
   const isPlacingConcentricRef = useRef<boolean>(isPlacingConcentric);
   isPlacingConcentricRef.current = isPlacingConcentric;
+
+  const isPlacingGeofenceRef = useRef<boolean>(isPlacingGeofence);
+  isPlacingGeofenceRef.current = isPlacingGeofence;
 
   const hasAutoCenteredRef = useRef<boolean>(false);
   const lastGeofenceAnchorRef = useRef<{ lat: number; lon: number } | null>(null);
@@ -349,9 +354,19 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     map.on('mouseup', handleMouseUpFinish);
     window.addEventListener('mouseup', handleMouseUpFinish);
 
-    // Handle map clicks for adding waypoints, circles, concentric circles, or measuring distance
+    // Handle map clicks for adding waypoints, circles, concentric circles, geofence, or measuring distance
     map.on('click', (e: L.LeafletMouseEvent) => {
       const { lat, lng } = e.latlng;
+
+      // 0. Geofence Placement Tool: Click map to place custom geofence center (e.g. Cricket Ground)
+      if (isPlacingGeofenceRef.current) {
+        geofenceService.setCustomAnchor(lat, lng);
+        updateGeofence(map, lat, lng);
+        audioService.playBeep(1100, 100);
+        showTemporaryNotice(`🎯 Geofence placed at (${lat.toFixed(5)}, ${lng.toFixed(5)}) ✓ Drag center marker to adjust.`);
+        setIsPlacingGeofence(false);
+        return;
+      }
 
       // 1. Measuring Tool
       if (isMeasuringRef.current) {
@@ -460,6 +475,10 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       map.removeLayer(geofencePolygonRef.current);
       geofencePolygonRef.current = null;
     }
+    if (geofenceCenterMarkerRef.current && map.hasLayer(geofenceCenterMarkerRef.current)) {
+      map.removeLayer(geofenceCenterMarkerRef.current);
+      geofenceCenterMarkerRef.current = null;
+    }
 
     const state = geofenceService.getState();
     if (!state.enabled || !showGeofence) return;
@@ -480,12 +499,44 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     }).bindTooltip(
       isBreached
         ? `⚠️ GEOFENCE BREACH: ${state.breachReason || 'Perimeter Crossed'}`
-        : `ADDC GEOFENCE (${state.widthMeters}m × ${state.heightMeters}m, Ceil: ${state.maxAltitudeMeters}m)`,
+        : `ADDC GEOFENCE (${state.widthMeters}m × ${state.heightMeters}m, Ceil: ${state.maxAltitudeMeters}m) [Drag 🎯 icon to relocate]`,
       { permanent: false, direction: 'center' }
     );
 
     geofence.addTo(map);
     geofencePolygonRef.current = geofence;
+
+    // Draggable Geofence Center Anchor Marker
+    const centerIcon = L.divIcon({
+      className: 'geofence-center-marker',
+      html: `
+        <div style="position: relative; width: 34px; height: 34px; margin-left: -17px; margin-top: -17px; display: flex; align-items: center; justify-content: center; cursor: grab;">
+          <div style="position: absolute; inset: 0; border-radius: 50%; border: 2px dashed #f59e0b; background: rgba(245, 158, 11, 0.25); animation: pulse 2.5s infinite;"></div>
+          <div style="width: 24px; height: 24px; border-radius: 50%; background: #d97706; border: 2px solid #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; font-size: 12px; color: #ffffff;">
+            🎯
+          </div>
+        </div>
+      `,
+      iconSize: [34, 34],
+      iconAnchor: [17, 17],
+    });
+
+    const centerMarker = L.marker([anchorLat, anchorLon], {
+      icon: centerIcon,
+      draggable: true,
+      zIndexOffset: 860,
+    }).bindTooltip('🎯 Geofence Center (Drag anywhere to relocate boundary)', { direction: 'top', offset: [0, -14] });
+
+    centerMarker.on('dragend', (e: L.DragEndEvent) => {
+      const newPos = (e.target as L.Marker).getLatLng();
+      geofenceService.setCustomAnchor(newPos.lat, newPos.lng);
+      updateGeofence(map, newPos.lat, newPos.lng);
+      audioService.playBeep(1000, 80);
+      showTemporaryNotice(`🎯 Geofence moved to (${newPos.lat.toFixed(5)}, ${newPos.lng.toFixed(5)}) ✓`);
+    });
+
+    centerMarker.addTo(map);
+    geofenceCenterMarkerRef.current = centerMarker;
   };
 
   useEffect(() => {
@@ -784,20 +835,28 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         );
       }
 
-      // Ensure Geofence is anchored at Home Point
-      updateGeofence(map, currentHome.latitude, currentHome.longitude);
+      // Ensure Geofence is anchored at Effective Point (Custom / Home)
+      const effectiveAnchor = geofenceService.getEffectiveAnchor();
+      if (effectiveAnchor) {
+        updateGeofence(map, effectiveAnchor.lat, effectiveAnchor.lng);
+      } else {
+        updateGeofence(map, currentHome.latitude, currentHome.longitude);
+      }
     }
   }, [telemetry.latitude, telemetry.longitude]);
 
   // 6. Toggle Geofence Layer Visibility
   useEffect(() => {
     const gf = geofencePolygonRef.current;
+    const gfc = geofenceCenterMarkerRef.current;
     const map = mapRef.current;
-    if (!gf || !map) return;
+    if (!map) return;
     if (showGeofence) {
-      if (!map.hasLayer(gf)) map.addLayer(gf);
+      if (gf && !map.hasLayer(gf)) map.addLayer(gf);
+      if (gfc && !map.hasLayer(gfc)) map.addLayer(gfc);
     } else {
-      if (map.hasLayer(gf)) map.removeLayer(gf);
+      if (gf && map.hasLayer(gf)) map.removeLayer(gf);
+      if (gfc && map.hasLayer(gfc)) map.removeLayer(gfc);
     }
   }, [showGeofence]);
 
@@ -1202,7 +1261,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     ? calculateHaversineDistance(deviceLocation.lat, deviceLocation.lon, telemetry.latitude, telemetry.longitude)
     : null;
 
-  const isAnyToolActive = isDrawingFreehand || isPlacingCircle || isPlacingConcentric || isPinningWp;
+  const isAnyToolActive = isDrawingFreehand || isPlacingCircle || isPlacingConcentric || isPinningWp || isPlacingGeofence;
 
   return (
     <div
@@ -1299,6 +1358,12 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               <span>Click on map to drop sequential flight waypoints</span>
             </>
           )}
+          {isPlacingGeofence && (
+            <>
+              <Shield className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+              <span>Click anywhere on map (e.g. Cricket Ground) to set Geofence center</span>
+            </>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -1306,6 +1371,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               setIsPlacingCircle(false);
               setIsPlacingConcentric(false);
               setIsPinningWp(false);
+              setIsPlacingGeofence(false);
               groundStationMissionService.setDrawingTool('select');
               audioService.playBeep(520, 50);
             }}
@@ -1367,7 +1433,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         style={{
           cursor: isDrawingFreehand
             ? 'crosshair'
-            : isPlacingCircle || isPlacingConcentric
+            : isPlacingCircle || isPlacingConcentric || isPlacingGeofence
             ? 'crosshair'
             : isPinningWp
             ? 'crosshair'
@@ -1558,6 +1624,27 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             title="Ruler Measure Distance (Click 2 points)"
           >
             <Ruler className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Geofence Quick Reposition Tool */}
+          <button
+            type="button"
+            onClick={() => {
+              const next = !isPlacingGeofence;
+              setIsPlacingGeofence(next);
+              if (next) {
+                showTemporaryNotice('🎯 Click anywhere on map (e.g. Cricket Ground) to position Geofence center');
+                audioService.playBeep(920, 80);
+              }
+            }}
+            className={`w-7 h-7 rounded-[6px] flex items-center justify-center transition cursor-pointer ${
+              isPlacingGeofence
+                ? 'bg-amber-500 text-black font-bold shadow-lg animate-pulse'
+                : 'hover:bg-[#21262D] text-[var(--uav-muted)] hover:text-amber-300'
+            }`}
+            title="Place Geofence on Map: Click to set center (e.g. Cricket Ground)"
+          >
+            <MapPin className="w-3.5 h-3.5 text-amber-400" />
           </button>
 
           {/* Geofence Modal Trigger */}
@@ -1835,6 +1922,11 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       <GeofenceControlModal
         isOpen={isGeofenceModalOpen}
         onClose={() => setIsGeofenceModalOpen(false)}
+        onSelectOnMap={() => {
+          setIsGeofenceModalOpen(false);
+          setIsPlacingGeofence(true);
+          showTemporaryNotice('📍 Click anywhere on map (e.g. Cricket Ground) to set Geofence center');
+        }}
       />
     </div>
   );

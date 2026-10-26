@@ -53,13 +53,13 @@ export const PreArmDropdownCard: React.FC<PreArmDropdownCardProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
 
-  // 1. Pixhawk Connection
-  const isPixhawkConnected = connectionState.isConnected || connectionState.isUsbConnected || connectionState.isRealHardware;
-  const pixhawkStatus: CheckState = isPixhawkConnected ? 'PASS' : 'FAIL';
+  // 1. Pixhawk Connection (Requires active live heartbeat)
+  const hasHeartbeat = (connectionState.lastHeartbeat || 0) > 0 && (Date.now() - (connectionState.lastHeartbeat || 0) < 10000);
+  const isPixhawkConnected = Boolean(connectionState.isConnected && hasHeartbeat);
+  const pixhawkStatus: CheckState = isPixhawkConnected ? 'PASS' : (connectionState.isUsbConnected ? 'WAITING' : 'FAIL');
 
   // 2. MAVLink Heartbeat
-  const hasHeartbeat = connectionState.isConnected || (connectionState.heartbeatHz || 0) > 0;
-  const heartbeatStatus: CheckState = hasHeartbeat ? 'PASS' : isPixhawkConnected ? 'WAITING' : 'FAIL';
+  const heartbeatStatus: CheckState = hasHeartbeat ? 'PASS' : (connectionState.isUsbConnected ? 'WAITING' : 'FAIL');
 
   // 3. GPS Fix
   const rawFix = telemetry.gps?.fixType || '';

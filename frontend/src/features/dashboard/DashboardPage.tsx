@@ -18,6 +18,7 @@ import { missionEngine } from '../../services/missionEngine';
 import { groundStationMissionService, computeDestination } from '../../services/groundStationMissionService';
 import { runnerCommService } from '../../services/runnerCommService';
 import { audioService } from '../../services/audioService';
+import { geofenceService } from '../../services/geofenceService';
 import { Header } from './Header';
 import { TelemetryPanel } from './TelemetryPanel';
 import { FlightOperationsCard } from './FlightOperationsCard';
@@ -185,6 +186,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         showNotification(`Disarm failed: ${err?.message || 'Check connection'}`);
       }
     } else {
+      const geofenceCheck = geofenceService.canArmVehicle(telemetry.latitude, telemetry.longitude);
+      if (!geofenceCheck.canArm && !force) {
+        audioService.playBeep(350, 200);
+        showNotification(`❌ ${geofenceCheck.reason}`);
+        return;
+      }
       showNotification('Sending ARM command to flight controller...');
       audioService.playBeep(850, 100);
       try {
@@ -254,6 +261,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   };
 
   const confirmArmAndLaunch = async () => {
+    const geofenceCheck = geofenceService.canArmVehicle(telemetry.latitude, telemetry.longitude);
+    if (!geofenceCheck.canArm) {
+      audioService.playBeep(350, 200);
+      showNotification(`❌ ${geofenceCheck.reason}`);
+      return;
+    }
     setShowPreflightModal(false);
     showNotification(`Arming flight controller and starting ${missionMode} mission...`);
     try {
@@ -507,6 +520,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           <TelemetryPanel
             telemetry={telemetry}
             onArm={async (force) => {
+              const geofenceCheck = geofenceService.canArmVehicle(telemetry.latitude, telemetry.longitude);
+              if (!geofenceCheck.canArm && !force) {
+                audioService.playBeep(350, 200);
+                showNotification(`❌ ${geofenceCheck.reason}`);
+                return false;
+              }
               const ok = await mavlinkService.sendArmCommand(force);
               if (ok) {
                 showNotification(force ? '⚠️ FORCE ARM Command Dispatched to Pixhawk' : 'MOTOR ARM Command Dispatched to Pixhawk ✓');

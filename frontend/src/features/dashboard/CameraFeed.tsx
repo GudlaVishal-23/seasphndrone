@@ -314,7 +314,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ className = '', telemetr
   const streamStatusConfig = getStreamStatusConfig(streamStatus);
   const StreamStatusIcon = streamStatusConfig.icon;
 
-  const isFeedActive = streamStatus === 'LIVE_FEED_CONNECTED' && (hasWebRtcVideo || Boolean(liveFrame));
+  const isFeedActive = (hasWebRtcVideo || Boolean(liveFrame)) || streamStatus === 'LIVE_FEED_CONNECTED';
 
   const handleFullscreen = () => {
     if (!containerRef.current) return;

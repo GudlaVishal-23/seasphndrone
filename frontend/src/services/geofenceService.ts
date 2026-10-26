@@ -337,6 +337,57 @@ class GeofenceService {
     this.notify();
   }
 
+  /**
+   * Sets a custom anchor point anywhere (e.g. cricket ground selected on map)
+   */
+  public setCustomAnchor(lat: number, lng: number) {
+    this.config.anchorType = 'CUSTOM';
+    this.config.customAnchor = { lat, lng };
+    this.state.anchorType = 'CUSTOM';
+    this.state.customAnchor = { lat, lng };
+    this.state.effectiveAnchor = { lat, lng };
+    this.persistConfig();
+    audioService.playBeep(880, 80);
+    this.notify();
+  }
+
+  /**
+   * Checks whether given coordinate is strictly inside the active geofence
+   */
+  public isInsideGeofence(lat: number, lng: number): boolean {
+    if (!this.config.enabled) return true;
+    const anchor = this.getEffectiveAnchor();
+    if (!anchor || Math.abs(lat) <= 0.001) return true;
+
+    if (this.config.shape === 'CIRCLE') {
+      const dist = computeHaversine(anchor.lat, anchor.lng, lat, lng);
+      return dist <= (this.config.radiusMeters || 50);
+    } else {
+      const vertices = this.getBoundaryVertices();
+      if (vertices.length < 3) return true;
+      return isPointInPolygon({ lat, lng }, vertices);
+    }
+  }
+
+  /**
+   * Checks whether the vehicle is permitted to arm under geofence rules
+   */
+  public canArmVehicle(lat?: number, lng?: number): { canArm: boolean; reason?: string } {
+    if (!this.config.enabled) return { canArm: true };
+    const droneLat = lat ?? mavlinkService.getTelemetry().latitude;
+    const droneLng = lng ?? mavlinkService.getTelemetry().longitude;
+    if (droneLat && droneLng && Math.abs(droneLat) > 0.001) {
+      const inside = this.isInsideGeofence(droneLat, droneLng);
+      if (!inside) {
+        return {
+          canArm: false,
+          reason: 'Aircraft is OUTSIDE the active Geofence boundary. Move aircraft inside or position geofence over current area to arm.'
+        };
+      }
+    }
+    return { canArm: true };
+  }
+
   public getState(): GeofenceState {
     return { ...this.state };
   }

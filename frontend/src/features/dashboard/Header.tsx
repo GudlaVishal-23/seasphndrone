@@ -96,6 +96,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   // Helper styles for MAVLink Indicator (Connected / Connecting / Disconnected)
   const getMavlinkBadgeConfig = () => {
+    const isActuallyConnected = Boolean(connState.isStarted && telemetry.isConnected && connState.mavlinkStatus === 'ACTIVE');
     if (!connState.isStarted) {
       return {
         bg: 'bg-[#161B22] border-[var(--uav-card-border)] text-slate-400',
@@ -104,30 +105,28 @@ export const Header: React.FC<HeaderProps> = ({
         pulse: false
       };
     }
-    switch (connState.mavlinkStatus) {
-      case 'ACTIVE':
-        return {
-          bg: 'bg-[#0f291e] border-[#1b4d36] text-[#22C55E]',
-          dot: 'bg-[#22C55E]',
-          label: 'MAVLink: Connected',
-          pulse: true
-        };
-      case 'CONNECTING':
-        return {
-          bg: 'bg-[#2d2208] border-[#785412] text-amber-300',
-          dot: 'bg-amber-400',
-          label: 'MAVLink: Connecting',
-          pulse: true
-        };
-      case 'DISCONNECTED':
-      default:
-        return {
-          bg: 'bg-[#3b1212] border-[#7f1d1d] text-rose-300',
-          dot: 'bg-rose-500',
-          label: 'MAVLink: Disconnected',
-          pulse: false
-        };
+    if (isActuallyConnected) {
+      return {
+        bg: 'bg-[#0f291e] border-[#1b4d36] text-[#22C55E]',
+        dot: 'bg-[#22C55E]',
+        label: 'MAVLink: Connected',
+        pulse: true
+      };
     }
+    if (connState.mavlinkStatus === 'CONNECTING' || connState.wifiStatus === 'CONNECTING' || connState.wifiStatus === 'VERIFIED') {
+      return {
+        bg: 'bg-[#2d2208] border-[#785412] text-amber-300',
+        dot: 'bg-amber-400',
+        label: 'MAVLink: Connecting',
+        pulse: true
+      };
+    }
+    return {
+      bg: 'bg-[#3b1212] border-[#7f1d1d] text-rose-300',
+      dot: 'bg-rose-500',
+      label: 'MAVLink: Disconnected',
+      pulse: false
+    };
   };
 
   // Helper styles for GPS Indicator (GPS Fix Valid / Acquiring GPS / GPS Unavailable)
@@ -173,14 +172,14 @@ export const Header: React.FC<HeaderProps> = ({
   // Short status diagnostic string if Wi-Fi is connected but telemetry or GPS is not ready:
   // e.g. "Wi-Fi Connected | MAVLink Disconnected | GPS Acquiring"
   const isWifiConnected = connState.isStarted && connState.wifiStatus === 'VERIFIED';
-  const isMavlinkConnected = connState.isStarted && connState.mavlinkStatus === 'ACTIVE';
+  const isMavlinkConnected = Boolean(connState.isStarted && telemetry.isConnected && connState.mavlinkStatus === 'ACTIVE');
   const isGpsLocked = connState.isStarted && connState.gpsStatus === 'LOCKED';
   const showDiagnosticMessage = isWifiConnected && (!isMavlinkConnected || !isGpsLocked);
 
   const diagnosticWifiText = 'Wi-Fi Connected';
-  const diagnosticMavText = connState.mavlinkStatus === 'ACTIVE'
+  const diagnosticMavText = isMavlinkConnected
     ? 'MAVLink Connected'
-    : connState.mavlinkStatus === 'CONNECTING'
+    : (connState.mavlinkStatus === 'CONNECTING' || connState.wifiStatus === 'CONNECTING' || connState.wifiStatus === 'VERIFIED')
     ? 'MAVLink Connecting'
     : 'MAVLink Disconnected';
   const diagnosticGpsText = connState.gpsStatus === 'LOCKED'

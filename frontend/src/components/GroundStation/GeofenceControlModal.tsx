@@ -25,9 +25,14 @@ import { audioService } from '../../services/audioService';
 interface GeofenceControlModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSelectOnMap?: () => void;
 }
 
-export const GeofenceControlModal: React.FC<GeofenceControlModalProps> = ({ isOpen, onClose }) => {
+export const GeofenceControlModal: React.FC<GeofenceControlModalProps> = ({
+  isOpen,
+  onClose,
+  onSelectOnMap,
+}) => {
   const [geofenceState, setGeofenceState] = useState(() => geofenceService.getState());
   const [enabled, setEnabled] = useState(geofenceState.enabled);
   const [shape, setShape] = useState<GeofenceShape>(geofenceState.shape);
@@ -397,7 +402,8 @@ export const GeofenceControlModal: React.FC<GeofenceControlModalProps> = ({ isOp
               <label className="font-bold text-slate-300 block mb-1">4. GEOFENCE ANCHOR ORIGIN:</label>
               {[
                 { type: 'HOME' as GeofenceAnchor, label: 'Home Point (Takeoff Lock)', desc: 'Standard GCS Reference' },
-                { type: 'DRONE' as GeofenceAnchor, label: 'Current Drone Position', desc: 'Centered on live Pixhawk GPS' }
+                { type: 'DRONE' as GeofenceAnchor, label: 'Current Drone Position', desc: 'Centered on live Pixhawk GPS' },
+                { type: 'CUSTOM' as GeofenceAnchor, label: 'Custom Location (Cricket Ground)', desc: geofenceState.customAnchor ? `Set at (${geofenceState.customAnchor.lat.toFixed(5)}, ${geofenceState.customAnchor.lng.toFixed(5)})` : 'Click on map or drag pin to place' }
               ].map((anch) => (
                 <label
                   key={anch.type}
@@ -420,6 +426,19 @@ export const GeofenceControlModal: React.FC<GeofenceControlModalProps> = ({ isOp
                   <span className="text-[10px] text-slate-500 ml-5">{anch.desc}</span>
                 </label>
               ))}
+
+              {/* Quick Map Placement Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectOnMap?.();
+                  onClose();
+                }}
+                className="w-full mt-2 py-2 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer"
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                <span>📍 Place on Map (Click Cricket Ground)</span>
+              </button>
             </div>
           </div>
         </div>

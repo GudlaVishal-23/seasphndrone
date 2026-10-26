@@ -748,12 +748,11 @@ class MissionEngine {
     const conn = mavlinkService.getConnectionState();
     const altCheck = this.validateAltitude(this.missionConfig.searchAltitude);
 
-    const isFcConnected = Boolean(telemetry.pixhawkConnected || conn.isConnected || conn.isUsbConnected);
-    const isMavlinkConnected = Boolean(conn.isConnected && (conn.bytesReceived > 0 || conn.isUsbConnected || conn.connectionType === 'SIMULATED'));
+    const hasHeartbeat = (conn.lastHeartbeat > 0 && Date.now() - conn.lastHeartbeat < 10000) || conn.connectionType === 'SIMULATED';
+    const isFcConnected = Boolean((telemetry.pixhawkConnected || conn.isConnected) && hasHeartbeat);
+    const isMavlinkConnected = Boolean(conn.isConnected && hasHeartbeat);
     const isHeartbeatHealthy = Boolean(
-      conn.isReceivingTelemetry ||
-      conn.heartbeatHz >= 0.5 ||
-      (conn.lastHeartbeat > 0 && Date.now() - conn.lastHeartbeat < 4000) ||
+      (conn.isReceivingTelemetry || conn.heartbeatHz >= 0.5 || (conn.lastHeartbeat > 0 && Date.now() - conn.lastHeartbeat < 5000)) ||
       conn.connectionType === 'SIMULATED'
     );
     const isGpsAvailable = Boolean(

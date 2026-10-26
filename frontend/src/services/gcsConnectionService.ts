@@ -129,9 +129,15 @@ class GCSConnectionService {
     this.state.hdop = hdop;
     this.state.gpsFixType = fixType;
 
-    // Receiving live telemetry proves MAVLink stream is actively flowing
-    if (this.state.mavlinkStatus !== 'ACTIVE') {
+    // Only update MAVLink status to ACTIVE if Pixhawk heartbeat is verified live
+    const conn = mavlinkService.getConnectionState();
+    const hasHeartbeat = conn.lastHeartbeat > 0 && (Date.now() - conn.lastHeartbeat < 10000);
+    if (hasHeartbeat && telem.pixhawkConnected) {
       this.state.mavlinkStatus = 'ACTIVE';
+    } else if (conn.isConnected || conn.isUsbConnected || this.state.isStarted) {
+      this.state.mavlinkStatus = 'CONNECTING';
+    } else {
+      this.state.mavlinkStatus = 'DISCONNECTED';
     }
 
     this.notify();
@@ -141,15 +147,14 @@ class GCSConnectionService {
    * Evaluates MAVLink communication layer status
    */
   private evaluateConnection(conn: PixhawkConnectionState) {
-    const isRecentHeartbeat = conn.lastHeartbeat === 0 || (Date.now() - conn.lastHeartbeat < 12000);
-    const isMavlinkActive = Boolean(
-      (conn.isConnected || conn.isUsbConnected || conn.isReceivingTelemetry || conn.bytesReceived > 0) &&
-      isRecentHeartbeat
-    );
+    const now = Date.now();
+    const hasHeartbeat = conn.lastHeartbeat > 0 && (now - conn.lastHeartbeat < 10000);
+    const isTransportOpen = Boolean(conn.isConnected || conn.isUsbConnected);
 
-    if (isMavlinkActive) {
+    if (hasHeartbeat && conn.isConnected && conn.isReceivingTelemetry) {
       this.state.mavlinkStatus = 'ACTIVE';
-    } else if (conn.phase === 'WAITING_FOR_HEARTBEAT' || conn.phase === 'SERIAL_OPENING' || conn.phase === 'WAITING_FOR_MAVLINK') {
+    } else if (isTransportOpen || conn.phase === 'WAITING_FOR_HEARTBEAT' || conn.phase === 'SERIAL_OPENING' || conn.phase === 'WAITING_FOR_MAVLINK' || conn.phase === 'SERIAL_OPEN') {
+      // Transport (WS/USB) is open, but awaiting Pixhawk heartbeat
       this.state.mavlinkStatus = 'CONNECTING';
     } else {
       this.state.mavlinkStatus = 'DISCONNECTED';

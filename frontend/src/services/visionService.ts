@@ -236,16 +236,55 @@ class VisionService {
 
     try {
       if (typeof navigator !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const constraints: MediaStreamConstraints = {
-          video: {
+        // Multi-tier progressive constraints: Prevents OverconstrainedError on phones, tablets, or webcams
+        const constraintCandidates: MediaTrackConstraints[] = [
+          // Preferred: High definition wide angle (ideal 1080p, without strict min)
+          {
             facingMode: { ideal: facing },
-            width: { ideal: 1920, min: 1280 },
-            height: { ideal: 1080, min: 720 }
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
           },
-          audio: false
-        };
+          // Flexible: Standard 720p
+          {
+            facingMode: { ideal: facing },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          // Facing mode only
+          {
+            facingMode: { ideal: facing }
+          },
+          // Facing mode string
+          {
+            facingMode: facing
+          },
+          // Any available video hardware on device
+          {}
+        ];
 
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        let stream: MediaStream | null = null;
+        let lastErr: any = null;
+
+        for (const videoCandidate of constraintCandidates) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: videoCandidate,
+              audio: false
+            });
+            if (stream && stream.getVideoTracks().length > 0) {
+              console.log('[VISION] Camera stream acquired with candidate constraints:', videoCandidate);
+              break;
+            }
+          } catch (e: any) {
+            lastErr = e;
+            console.warn('[VISION] Camera candidate rejected, trying fallback:', e?.name || e?.message);
+          }
+        }
+
+        if (!stream) {
+          throw lastErr || new Error('No compatible video stream found on this device');
+        }
+
         this.stream = stream;
         this.permissionGranted = true;
         this.isRequestingStream = false;
@@ -255,7 +294,17 @@ class VisionService {
         }
 
         this.videoElement.srcObject = stream;
-        await this.videoElement.play();
+        this.videoElement.muted = true;
+        this.videoElement.playsInline = true;
+        this.videoElement.setAttribute('playsinline', 'true');
+        this.videoElement.setAttribute('muted', 'true');
+        this.videoElement.setAttribute('autoplay', 'true');
+
+        try {
+          await this.videoElement.play();
+        } catch (playErr) {
+          console.warn('[VISION] Video play notice:', playErr);
+        }
 
         const track = stream.getVideoTracks()[0];
         if (track) {

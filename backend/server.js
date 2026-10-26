@@ -891,7 +891,8 @@ function handleConnectorConnection(ws) {
           msg.type === 'CAMERA_STREAM_SIGNAL' ||
           msg.type === 'CAMERA_FRAME_DATA' ||
           msg.type === 'CAMERA_STATUS_UPDATE' ||
-          msg.type === 'CAMERA_HEARTBEAT'
+          msg.type === 'CAMERA_HEARTBEAT' ||
+          msg.type === 'CAMERA_STATUS_REQUEST'
         ) {
           for (const client of browserSockets) {
             if (client.readyState === WebSocket.OPEN) {
@@ -1005,7 +1006,8 @@ function handleBrowserConnection(ws) {
           msg.type === 'CAMERA_STREAM_SIGNAL' ||
           msg.type === 'CAMERA_FRAME_DATA' ||
           msg.type === 'CAMERA_STATUS_UPDATE' ||
-          msg.type === 'CAMERA_HEARTBEAT'
+          msg.type === 'CAMERA_HEARTBEAT' ||
+          msg.type === 'CAMERA_STATUS_REQUEST'
         ) {
           for (const client of browserSockets) {
             if (client !== ws && client.readyState === WebSocket.OPEN) {

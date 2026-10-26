@@ -94,8 +94,13 @@ export const DroneDashboard: React.FC<DroneDashboardProps> = ({
   useEffect(() => {
     let isMounted = true;
 
-    const startCamera = async () => {
-      if (!videoRef.current) return;
+    const startCamera = async (retries = 4) => {
+      if (!videoRef.current) {
+        if (retries > 0 && isMounted) {
+          setTimeout(() => startCamera(retries - 1), 150);
+        }
+        return;
+      }
       try {
         const success = await visionService.startCamera(videoRef.current);
         if (isMounted) {

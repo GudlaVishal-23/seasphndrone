@@ -164,13 +164,19 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
   }
 
   const now = Date.now();
+  const hasLiveHeartbeat = connState.lastHeartbeat > 0 && (now - connState.lastHeartbeat < 10000);
   const isConnected = Boolean(
-    connState.isConnected ||
-    connState.isUsbConnected ||
-    connState.isReceivingTelemetry ||
-    (telemetry.pixhawkConnected && !isLinkLost)
+    (connState.isConnected || connState.isReceivingTelemetry || telemetry.pixhawkConnected) &&
+    hasLiveHeartbeat &&
+    !isLinkLost
   );
-  const isConnecting = connState.phase === 'WAITING_FOR_MAVLINK' || connState.phase === 'SERIAL_OPENING' || connState.phase === 'WAITING_FOR_HEARTBEAT';
+  const isConnecting = Boolean(
+    (connState.isUsbConnected && !hasLiveHeartbeat) ||
+    connState.phase === 'WAITING_FOR_MAVLINK' ||
+    connState.phase === 'SERIAL_OPENING' ||
+    connState.phase === 'WAITING_FOR_HEARTBEAT' ||
+    connState.phase === 'SERIAL_OPEN'
+  );
 
   const lat = telemetry.latitude || telemetry.gps?.latitude || 0;
   const lon = telemetry.longitude || telemetry.gps?.longitude || 0;
@@ -207,8 +213,8 @@ export const useDashboardTelemetry = (): DashboardTelemetryData => {
     isFixture: false,
     isConnected,
     isConnecting,
-    isArmed: telemetry.isArmed,
-    flightMode: telemetry.flightMode || 'DISARMED',
+    isArmed: isConnected ? Boolean(telemetry.isArmed) : false,
+    flightMode: isConnected ? (telemetry.flightMode || 'DISARMED') : 'DISCONNECTED',
     satellites: sats,
     hdop: telemetry.gps?.hdop ?? 99.0,
     batteryPercent: telemetry.batteryPercent ?? 0,

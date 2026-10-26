@@ -70,15 +70,7 @@ export const PreflightValidationModal: React.FC<PreflightValidationModalProps> =
   );
 
   // 2. Actual MAVLink telemetry receiving
-  const mavlinkPassed = Boolean(
-    (connState.mavlinkStatus === 'ACTIVE' ||
-     telemetry.isConnected ||
-     telemetry.rawTelemetry?.pixhawkConnected ||
-     telemetry.rawConnectionState.isConnected ||
-     telemetry.rawConnectionState.isReceivingTelemetry ||
-     (telemetry.rawConnectionState.bytesReceived > 0 && !telemetry.isLinkLost)) &&
-    !telemetry.isLinkLost
-  );
+  const mavlinkPassed = Boolean(telemetry.isConnected && !telemetry.isLinkLost);
 
   // 3. Valid Pixhawk GPS Fix (3D Fix or Valid Position with sats)
   const satsCount = telemetry.satellites || telemetry.rawTelemetry?.satellitesVisible || connState.satellites || 0;

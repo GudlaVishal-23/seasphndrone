@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { mavlinkService } from '../../services/mavlinkService';
 import { audioService } from '../../services/audioService';
+import { geofenceService } from '../../services/geofenceService';
 
 interface TelemetryPanelProps {
   telemetry: DashboardTelemetryData;
@@ -59,6 +60,16 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
 
   const handleArm = async () => {
     if (telemetry.isArmed || isBusy) return;
+
+    // Enforce Geofence Safety: Prevent arming if drone is outside configured geofence
+    const geofenceCheck = geofenceService.canArmVehicle(telemetry.latitude, telemetry.longitude);
+    if (!geofenceCheck.canArm && !forceArm) {
+      audioService.playBeep(350, 200);
+      setArmFeedback('ARM BLOCKED: Drone is outside Geofence!');
+      onNotification?.(`❌ ${geofenceCheck.reason}`);
+      return;
+    }
+
     setIsArming(true);
     setArmFeedback(null);
     audioService.playBeep(850, 100);
